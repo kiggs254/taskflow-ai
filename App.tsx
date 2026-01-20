@@ -1515,7 +1515,7 @@ export default function App() {
     }, 30000);
     
     return () => clearInterval(interval);
-  }, [token, previousDraftCount]);
+  }, [token]);
 
   // Poll for new tasks when on dashboard (every 30 seconds)
   useEffect(() => {
