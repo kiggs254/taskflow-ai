@@ -392,33 +392,32 @@ const setupBotHandlers = () => {
       // Use AI to parse task
       const aiResult = await parseTask(taskText, 'openai');
       
-      // Create task directly (or as draft based on preference)
-      const taskData = {
-        id: crypto.randomUUID(),
+      // Create draft task (user can approve/edit in app)
+      const draftTask = await createDraftTask(userId, {
+        source: 'telegram',
+        sourceId: msg.message_id.toString(),
         title: aiResult?.title || taskText,
+        description: taskText,
         workspace: aiResult?.workspaceSuggestions || 'personal',
         energy: aiResult?.energy || 'medium',
-        status: 'todo',
         estimatedTime: aiResult?.estimatedTime || 15,
         tags: aiResult?.tags || [],
-        dependencies: [],
-        createdAt: Date.now(),
-      };
-
-      await syncTask(userId, taskData);
+        aiConfidence: 0.8,
+      });
       
       try {
         await bot.sendMessage(
           chatId,
-          `✅ Task added!\n\n` +
-          `📝 ${taskData.title}\n` +
-          `⚡ Energy: ${taskData.energy}\n` +
-          `🏢 Workspace: ${taskData.workspace}\n` +
-          `⏱️ Estimated: ${taskData.estimatedTime} min`
+          `📝 Draft task created!\n\n` +
+          `📋 ${draftTask.title}\n` +
+          `⚡ Energy: ${draftTask.energy || 'medium'}\n` +
+          `🏢 Workspace: ${draftTask.workspace || 'personal'}\n` +
+          `⏱️ Estimated: ${draftTask.estimatedTime || 15} min\n\n` +
+          `Go to your TaskFlow app to approve or edit it.`
         );
       } catch (sendError) {
         // #region agent log
-        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:392',message:'/add sendMessage ERROR (success)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:410',message:'/add sendMessage ERROR (success)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
         // #endregion
         console.error('Error sending /add success message:', sendError.message || sendError);
       }
