@@ -18,6 +18,12 @@ export const initializeBot = () => {
     return null;
   }
 
+  // Prevent multiple initializations
+  if (bot) {
+    console.warn('Telegram bot already initialized, skipping re-initialization');
+    return bot;
+  }
+
   try {
     // Use polling for development, webhook for production
     const useWebhook = process.env.TELEGRAM_USE_WEBHOOK === 'true';
