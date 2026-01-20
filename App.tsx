@@ -1410,6 +1410,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<{id: string, message: string}[]>([]);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
+  const [previousDraftCount, setPreviousDraftCount] = useState<number>(0);
+  const [previousTasksCount, setPreviousTasksCount] = useState<number>(0);
   
   // Power User Features
   const [searchQuery, setSearchQuery] = useState('');
@@ -1483,7 +1485,18 @@ export default function App() {
     if (!token) return;
     try {
       const drafts = await api.draftTasks.getAll(token, 'pending');
-      setDraftTasksCount(drafts.length);
+      const newCount = drafts.length;
+      
+      // Play sound if new drafts arrived
+      if (newCount > previousDraftCount && previousDraftCount > 0) {
+        const newDraftsCount = newCount - previousDraftCount;
+        playSound('complete'); // Use existing sound
+        // Show notification
+        addNotification(`📧 ${newDraftsCount} new draft task${newDraftsCount > 1 ? 's' : ''} arrived!`);
+      }
+      
+      setDraftTasksCount(newCount);
+      setPreviousDraftCount(newCount);
     } catch (error) {
       console.error('Failed to fetch draft tasks count:', error);
     }
@@ -1493,7 +1506,7 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
     
-    // Fetch immediately
+    // Fetch immediately (but don't play sound on initial load)
     fetchDraftTasksCount();
     
     // Then poll every 30 seconds
@@ -1502,7 +1515,7 @@ export default function App() {
     }, 30000);
     
     return () => clearInterval(interval);
-  }, [token]);
+  }, [token, previousDraftCount]);
 
   // Poll for new tasks when on dashboard (every 30 seconds)
   useEffect(() => {
@@ -1513,7 +1526,7 @@ export default function App() {
     }, 30000); // Poll every 30 seconds
     
     return () => clearInterval(interval);
-  }, [token, view]);
+  }, [token, view, previousTasksCount]);
 
   // Fetch Data on Auth
   useEffect(() => {
