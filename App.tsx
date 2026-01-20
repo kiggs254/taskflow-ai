@@ -1698,6 +1698,8 @@ export default function App() {
     // Sync to Backend
     try {
       await api.syncTask(token, newTask);
+      // Refresh draft count in case this was from a draft
+      fetchDraftTasksCount();
     } catch (e) {
       console.error("Failed to sync task", e);
       // Revert if failed
