@@ -17,7 +17,7 @@ const router = express.Router();
 // These routes handle ?action= parameter
 
 // Auth routes
-router.post('/', asyncHandler(async (req, res) => {
+router.post('/', asyncHandler(async (req, res, next) => {
   const action = req.query.action;
   
   if (action === 'register') {
@@ -59,7 +59,7 @@ router.post('/', asyncHandler(async (req, res) => {
 }));
 
 // Task routes (require authentication)
-router.get('/', authenticate, asyncHandler(async (req, res) => {
+router.get('/', authenticate, asyncHandler(async (req, res, next) => {
   if (req.query.action === 'get_tasks') {
     const tasks = await getUserTasks(req.user.id);
     return res.json(tasks);
@@ -68,7 +68,7 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
   return next();
 }));
 
-router.post('/', authenticate, asyncHandler(async (req, res) => {
+router.post('/', authenticate, asyncHandler(async (req, res, next) => {
   const action = req.query.action;
   
   if (action === 'sync_tasks') {
