@@ -442,14 +442,24 @@ const setupBotHandlers = () => {
     try {
       const userId = await getUserIdFromTelegram(msg.from.id);
       if (!userId) {
-        return await bot.sendMessage(chatId, '❌ Please link your account first using /link <code>');
+        try {
+          await bot.sendMessage(chatId, '❌ Please link your account first using /link <code>');
+        } catch (sendError) {
+          console.error('Error sending /list not-linked message:', sendError.message || sendError);
+        }
+        return;
       }
 
       const tasks = await getUserTasks(userId);
       const pendingTasks = tasks.filter(t => t.status !== 'done');
       
       if (pendingTasks.length === 0) {
-        return await bot.sendMessage(chatId, '🎉 No pending tasks! You\'re all caught up.');
+        try {
+          await bot.sendMessage(chatId, '🎉 No pending tasks! You\'re all caught up.');
+        } catch (sendError) {
+          console.error('Error sending /list empty message:', sendError.message || sendError);
+        }
+        return;
       }
 
       let message = `📋 *Your Pending Tasks* (${pendingTasks.length})\n\n`;
@@ -502,7 +512,12 @@ const setupBotHandlers = () => {
     try {
       const userId = await getUserIdFromTelegram(msg.from.id);
       if (!userId) {
-        return await bot.sendMessage(chatId, '❌ Please link your account first using /link <code>');
+        try {
+          await bot.sendMessage(chatId, '❌ Please link your account first using /link <code>');
+        } catch (sendError) {
+          console.error('Error sending /today not-linked message:', sendError.message || sendError);
+        }
+        return;
       }
 
       const tasks = await getUserTasks(userId);
@@ -519,7 +534,12 @@ const setupBotHandlers = () => {
       });
 
       if (todayTasks.length === 0) {
-        return await bot.sendMessage(chatId, '✨ No tasks due today!');
+        try {
+          await bot.sendMessage(chatId, '✨ No tasks due today!');
+        } catch (sendError) {
+          console.error('Error sending /today empty message:', sendError.message || sendError);
+        }
+        return;
       }
 
       let message = `📅 *Tasks Due Today* (${todayTasks.length})\n\n`;
