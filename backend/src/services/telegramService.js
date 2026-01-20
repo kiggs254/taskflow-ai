@@ -8,6 +8,7 @@ import crypto from 'crypto';
 let bot = null;
 let botInitialized = false;
 let botInitializationAttempts = 0;
+let handlersSetup = false;
 const MAX_INIT_ATTEMPTS = 3;
 // Global tracking to prevent spam across handler setups
 const globalProcessedMessages = new Set();
@@ -80,10 +81,19 @@ export const initializeBot = () => {
       console.error('❌ Failed to verify Telegram bot:', error);
     });
 
-    setupBotHandlers();
-    console.log('✅ Telegram bot handlers set up');
+    // Setup handlers before marking as initialized
+    try {
+      setupBotHandlers();
+      console.log('✅ Telegram bot handlers set up');
+    } catch (handlerError) {
+      console.error('❌ Failed to setup bot handlers:', handlerError.message || handlerError);
+      // Don't mark as initialized if handlers failed
+      bot = null;
+      botInitialized = false;
+      return null;
+    }
     
-    // Mark as successfully initialized
+    // Mark as successfully initialized only if everything worked
     botInitialized = true;
     botInitializationAttempts = 0; // Reset on success
     
@@ -98,6 +108,7 @@ export const initializeBot = () => {
     console.error('Error details:', error.stack);
     bot = null;
     botInitialized = false;
+    handlersSetup = false; // Reset handler flag on error
     // Don't throw - let server continue
     return null;
   }
