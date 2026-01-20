@@ -11,6 +11,9 @@ import {
 import { 
   Task, WorkspaceType, UserStats, AppView, User as UserType, EnergyLevel, RecurrenceRule
 } from './types';
+import { DraftTasksView } from './components/DraftTasksView';
+import { GmailSettings } from './components/GmailSettings';
+import { TelegramSettings } from './components/TelegramSettings';
 import { 
   parseTaskWithGemini, 
   getDailyMotivation, 
@@ -1111,7 +1114,7 @@ const AnalyticsScreen = ({ tasks, onBack }: { tasks: Task[], onBack: () => void 
   );
 };
 
-const SettingsScreen = ({ user, onLogout, onBack }: { user: UserType, onLogout: () => void, onBack: () => void }) => {
+const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onLogout: () => void, onBack: () => void, token: string }) => {
   const [notifications, setNotifications] = useState(() => {
     return localStorage.getItem('tf_notifications') === 'true';
   });
@@ -1199,6 +1202,15 @@ const SettingsScreen = ({ user, onLogout, onBack }: { user: UserType, onLogout: 
                    </div>
                    <div className="text-xs text-slate-500">Always On</div>
                 </div>
+              </div>
+           </div>
+
+           {/* Integrations */}
+           <div>
+              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Integrations</h4>
+              <div className="space-y-4">
+                 <GmailSettings token={token} />
+                 <TelegramSettings token={token} />
               </div>
            </div>
 
@@ -2049,6 +2061,12 @@ export default function App() {
                   <BarChart2 className="w-4 h-4" /> Analytics
                 </button>
                 <button 
+                  onClick={() => setView(AppView.DRAFT_TASKS)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.DRAFT_TASKS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                >
+                  <Mail className="w-4 h-4" /> Draft Tasks
+                </button>
+                <button 
                   onClick={() => setView(AppView.SETTINGS)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.SETTINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
@@ -2318,8 +2336,11 @@ export default function App() {
           {/* Completed Tasks View */}
           {view === AppView.COMPLETED_TASKS && <CompletedTasksScreen tasks={completedTasksAll} onBack={() => setView(AppView.DASHBOARD)} onExport={handleExport} onUncomplete={uncompleteTask} />}
 
+          {/* Draft Tasks View */}
+          {view === AppView.DRAFT_TASKS && token && <DraftTasksView token={token} />}
+
           {/* Settings View */}
-          {view === AppView.SETTINGS && user && <SettingsScreen user={user} onLogout={handleLogout} onBack={() => setView(AppView.DASHBOARD)} />}
+          {view === AppView.SETTINGS && user && <SettingsScreen user={user} onLogout={handleLogout} onBack={() => setView(AppView.DASHBOARD)} token={token!} />}
 
         </div>
       </div>

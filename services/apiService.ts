@@ -1,5 +1,5 @@
 
-import { Task, User, UserStats } from '../types';
+import { Task, User, UserStats, DraftTask } from '../types';
 
 // TODO: Update this to your Coolify backend URL
 // Example: https://api.yourdomain.com or https://your-app-name.coolify.app
@@ -92,5 +92,167 @@ export const api = {
   // Misc
   dailyReset: async (token: string) => {
     return request('daily_reset', 'POST', {}, token);
-  }
+  },
+
+  // Gmail Integration
+  gmail: {
+    connect: async (token: string) => {
+      const res = await fetch(`${API_BASE}/gmail/connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error('Failed to get Gmail auth URL');
+      return res.json();
+    },
+    status: async (token: string) => {
+      const res = await fetch(`${API_BASE}/gmail/status`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to get Gmail status');
+      return res.json();
+    },
+    scanNow: async (token: string, maxEmails = 50) => {
+      const res = await fetch(`${API_BASE}/gmail/scan-now`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ maxEmails }),
+      });
+      if (!res.ok) throw new Error('Failed to scan emails');
+      return res.json();
+    },
+    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean }) => {
+      const res = await fetch(`${API_BASE}/gmail/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) throw new Error('Failed to update Gmail settings');
+      return res.json();
+    },
+    disconnect: async (token: string) => {
+      const res = await fetch(`${API_BASE}/gmail/disconnect`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to disconnect Gmail');
+      return res.json();
+    },
+  },
+
+  // Telegram Integration
+  telegram: {
+    getLinkCode: async (token: string) => {
+      const res = await fetch(`${API_BASE}/telegram/link-code`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to get link code');
+      return res.json();
+    },
+    status: async (token: string) => {
+      const res = await fetch(`${API_BASE}/telegram/status`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to get Telegram status');
+      return res.json();
+    },
+    updateSettings: async (token: string, settings: { notificationsEnabled?: boolean; dailySummaryTime?: string }) => {
+      const res = await fetch(`${API_BASE}/telegram/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) throw new Error('Failed to update Telegram settings');
+      return res.json();
+    },
+    unlink: async (token: string) => {
+      const res = await fetch(`${API_BASE}/telegram/unlink`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to unlink Telegram');
+      return res.json();
+    },
+  },
+
+  // Draft Tasks
+  draftTasks: {
+    getAll: async (token: string, status = 'pending'): Promise<DraftTask[]> => {
+      const res = await fetch(`${API_BASE}/draft-tasks?status=${status}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to get draft tasks');
+      return res.json();
+    },
+    getOne: async (token: string, id: number): Promise<DraftTask> => {
+      const res = await fetch(`${API_BASE}/draft-tasks/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to get draft task');
+      return res.json();
+    },
+    approve: async (token: string, id: number, edits?: Partial<DraftTask>) => {
+      const res = await fetch(`${API_BASE}/draft-tasks/${id}/approve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(edits || {}),
+      });
+      if (!res.ok) throw new Error('Failed to approve draft task');
+      return res.json();
+    },
+    reject: async (token: string, id: number) => {
+      const res = await fetch(`${API_BASE}/draft-tasks/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to reject draft task');
+      return res.json();
+    },
+    edit: async (token: string, id: number, edits: Partial<DraftTask>): Promise<DraftTask> => {
+      const res = await fetch(`${API_BASE}/draft-tasks/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(edits),
+      });
+      if (!res.ok) throw new Error('Failed to edit draft task');
+      return res.json();
+    },
+    delete: async (token: string, id: number) => {
+      const res = await fetch(`${API_BASE}/draft-tasks/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to delete draft task');
+      return res.json();
+    },
+    bulkApprove: async (token: string, draftIds: number[]) => {
+      const res = await fetch(`${API_BASE}/draft-tasks/bulk-approve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ draftIds }),
+      });
+      if (!res.ok) throw new Error('Failed to bulk approve draft tasks');
+      return res.json();
+    },
+  },
 };

@@ -51,6 +51,7 @@ export enum AppView {
   ANALYTICS = 'ANALYTICS',
   SETTINGS = 'SETTINGS',
   COMPLETED_TASKS = 'COMPLETED_TASKS',
+  DRAFT_TASKS = 'DRAFT_TASKS',
 }
 
 export interface AIParsedTask {
@@ -59,4 +60,21 @@ export interface AIParsedTask {
   estimatedTime: number;
   tags: string[];
   workspaceSuggestions?: WorkspaceType;
+}
+
+export interface DraftTask {
+  id: number;
+  userId: number;
+  source: 'gmail' | 'telegram';
+  sourceId?: string;
+  title: string;
+  description?: string;
+  workspace?: WorkspaceType;
+  energy?: EnergyLevel;
+  estimatedTime?: number;
+  tags: string[];
+  dueDate?: number;
+  status: 'pending' | 'approved' | 'rejected';
+  aiConfidence?: number;
+  createdAt: string;
 }
