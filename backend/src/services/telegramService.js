@@ -711,9 +711,6 @@ const setupBotHandlers = () => {
   
   // Error handler for bot (prevent crashes) - only register once
   bot.on('error', (error) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:540',message:'bot.on error FIRED',data:{error:error?.message||String(error),code:error?.code,stack:error?.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     console.error('Telegram bot error:', error.message || error);
     // Don't throw - just log the error
   });
