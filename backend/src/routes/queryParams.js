@@ -53,8 +53,9 @@ router.post('/', asyncHandler(async (req, res) => {
     }
   }
   
-  // If action doesn't match, continue to next middleware
-  return res.status(404).json({ error: 'Invalid action' });
+  // If action doesn't match, continue to next middleware (don't return 404 here)
+  // This allows direct routes to handle the request
+  return next();
 }));
 
 // Task routes (require authentication)
@@ -63,7 +64,8 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
     const tasks = await getUserTasks(req.user.id);
     return res.json(tasks);
   }
-  return res.status(404).json({ error: 'Invalid action' });
+  // If action doesn't match, continue to next middleware
+  return next();
 }));
 
 router.post('/', authenticate, asyncHandler(async (req, res) => {
@@ -102,7 +104,8 @@ router.post('/', authenticate, asyncHandler(async (req, res) => {
     return res.json(result);
   }
   
-  return res.status(404).json({ error: 'Invalid action' });
+  // If action doesn't match, continue to next middleware
+  return next();
 }));
 
 export default router;

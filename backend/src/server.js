@@ -20,7 +20,8 @@ app.get('/', (req, res) => {
 });
 
 // Handle query parameter routing first (for backward compatibility with PHP backend)
-// This must come before the direct routes
+// This must come before the direct routes to catch ?action= requests
+// The queryParamRoutes will check for action parameter and call next() if not found
 app.use('/api', queryParamRoutes);
 
 // Mount routes for direct access (without query parameters)
@@ -32,6 +33,11 @@ app.use('/api', taskRoutes);
 
 // AI routes (require authentication - already has authenticate in router)
 app.use('/api/ai', aiRoutes);
+
+// 404 handler for unmatched routes
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Route not found', path: req.path, method: req.method });
+});
 
 // Error handler (must be last)
 app.use(errorHandler);
