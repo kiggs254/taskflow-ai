@@ -23,13 +23,30 @@ export const initializeBot = () => {
     const useWebhook = process.env.TELEGRAM_USE_WEBHOOK === 'true';
     
     if (useWebhook) {
+      console.log('Initializing Telegram bot with webhook mode');
       bot = new TelegramBot(token);
     } else {
-      bot = new TelegramBot(token, { polling: true });
+      console.log('Initializing Telegram bot with polling mode');
+      bot = new TelegramBot(token, { 
+        polling: {
+          interval: 300,
+          autoStart: true,
+          params: {
+            timeout: 10
+          }
+        }
+      });
     }
 
+    // Verify bot is working
+    bot.getMe().then((botInfo) => {
+      console.log(`✅ Telegram bot started: ${botInfo.first_name} (@${botInfo.username})`);
+    }).catch((error) => {
+      console.error('❌ Failed to verify Telegram bot:', error);
+    });
+
     setupBotHandlers();
-    console.log('Telegram bot initialized');
+    console.log('Telegram bot handlers set up');
     return bot;
   } catch (error) {
     console.error('Failed to initialize Telegram bot:', error);
@@ -65,10 +82,14 @@ const setupBotHandlers = () => {
     const chatId = msg.chat.id;
     const code = match[1];
     
+    console.log(`Telegram /link command received from user ${msg.from.id}, code: ${code}`);
+    
     try {
       const result = await linkTelegramAccount(msg.from, chatId, code);
-      await bot.sendMessage(chatId, `✅ Successfully linked! You can now manage your tasks via Telegram.`);
+      console.log(`Telegram account linked successfully for user ${result.userId}`);
+      await bot.sendMessage(chatId, `✅ Successfully linked! You can now manage your tasks via Telegram.\n\nTry /help to see available commands.`);
     } catch (error) {
+      console.error(`Telegram link error for user ${msg.from.id}:`, error);
       await bot.sendMessage(chatId, `❌ ${error.message}\n\nUse /help for instructions.`);
     }
   });
@@ -288,12 +309,16 @@ const setupBotHandlers = () => {
 
     const chatId = msg.chat.id;
     
+    console.log(`Telegram message received from user ${msg.from.id}: ${msg.text?.substring(0, 50)}`);
+    
     try {
       const userId = await getUserIdFromTelegram(msg.from.id);
       if (!userId) {
+        console.log(`User ${msg.from.id} not linked, ignoring message`);
         return; // User not linked, ignore
       }
 
+      console.log(`Creating draft task for user ${userId}`);
       // Create draft task from message
       const aiResult = await parseTask(msg.text, 'openai');
       
@@ -316,9 +341,19 @@ const setupBotHandlers = () => {
         `Go to your TaskFlow app to approve or edit it.`
       );
     } catch (error) {
-      // Silently fail for unlinked users or errors
+      // Log error but don't spam user
       console.error('Message handling error:', error);
     }
+  });
+  
+  // Error handler for bot
+  bot.on('error', (error) => {
+    console.error('Telegram bot error:', error);
+  });
+  
+  // Polling error handler
+  bot.on('polling_error', (error) => {
+    console.error('Telegram bot polling error:', error);
   });
 };
 
@@ -330,17 +365,23 @@ export const linkTelegramAccount = async (telegramUser, chatId, code) => {
   // For now, we'll use a simple approach: code is the user's TaskFlow user ID
   // In production, use a more secure verification system
   
+  console.log(`Linking Telegram account: telegramUserId=${telegramUser.id}, code=${code}`);
+  
   const userId = parseInt(code, 10);
   
-  if (isNaN(userId)) {
-    throw new Error('Invalid linking code');
+  if (isNaN(userId) || userId <= 0) {
+    console.error(`Invalid linking code format: ${code}`);
+    throw new Error('Invalid linking code. Please check the code from your TaskFlow app settings.');
   }
 
   // Verify user exists
   const userResult = await query('SELECT id, email FROM users WHERE id = $1', [userId]);
   if (userResult.rows.length === 0) {
-    throw new Error('Invalid linking code');
+    console.error(`User not found for ID: ${userId}`);
+    throw new Error('Invalid linking code. User not found.');
   }
+  
+  console.log(`User found: ${userResult.rows[0].email}`);
 
   // Store or update Telegram integration
   await query(
