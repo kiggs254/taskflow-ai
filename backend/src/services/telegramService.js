@@ -233,23 +233,55 @@ const setupBotHandlers = () => {
         }
         
         // User is linked - send brief message only once
-        await bot.sendMessage(
-          chatId,
-          `✅ Already linked! Use /help for commands.`,
-          { reply_to_message_id: messageId } // Reply to the command
-        );
+        try {
+          await bot.sendMessage(
+            chatId,
+            `✅ Already linked! Use /help for commands.`,
+            { reply_to_message_id: messageId } // Reply to the command
+          );
+        } catch (sendError) {
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:181',message:'/start sendMessage ERROR (linked)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+          // #endregion
+          // If reply fails (message deleted), send without reply
+          try {
+            await bot.sendMessage(chatId, `✅ Already linked! Use /help for commands.`);
+          } catch (fallbackError) {
+            console.error('Error sending /start response (fallback):', fallbackError.message || fallbackError);
+          }
+        }
       } else {
         // User not linked - send welcome
-        await bot.sendMessage(
-          chatId,
-          `👋 Welcome to TaskFlow.AI!\n\n` +
-          `To link your account:\n` +
-          `1. Go to TaskFlow app settings\n` +
-          `2. Get your linking code\n` +
-          `3. Use /link <code> here\n\n` +
-          `Use /help for commands.`,
-          { reply_to_message_id: messageId }
-        );
+        try {
+          await bot.sendMessage(
+            chatId,
+            `👋 Welcome to TaskFlow.AI!\n\n` +
+            `To link your account:\n` +
+            `1. Go to TaskFlow app settings\n` +
+            `2. Get your linking code\n` +
+            `3. Use /link <code> here\n\n` +
+            `Use /help for commands.`,
+            { reply_to_message_id: messageId }
+          );
+        } catch (sendError) {
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:197',message:'/start sendMessage ERROR (welcome)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+          // #endregion
+          // If reply fails (message deleted), send without reply
+          try {
+            await bot.sendMessage(
+              chatId,
+              `👋 Welcome to TaskFlow.AI!\n\n` +
+              `To link your account:\n` +
+              `1. Go to TaskFlow app settings\n` +
+              `2. Get your linking code\n` +
+              `3. Use /link <code> here\n\n` +
+              `Use /help for commands.`
+            );
+          } catch (fallbackError) {
+            console.error('Error sending /start welcome (fallback):', fallbackError.message || fallbackError);
+          }
+        }
       }
       
       // Clean up old processed messages (keep last 2000)
@@ -314,12 +346,22 @@ const setupBotHandlers = () => {
     try {
       const result = await linkTelegramAccount(msg.from, chatId, code);
       console.log(`Telegram account linked successfully for user ${result.userId}`);
-      await bot.sendMessage(chatId, `✅ Successfully linked! You can now manage your tasks via Telegram.\n\nTry /help to see available commands.`);
+      try {
+        await bot.sendMessage(chatId, `✅ Successfully linked! You can now manage your tasks via Telegram.\n\nTry /help to see available commands.`);
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:349',message:'/link sendMessage ERROR',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /link success message:', sendError.message || sendError);
+      }
     } catch (error) {
       console.error(`Telegram link error for user ${userId}:`, error);
       try {
         await bot.sendMessage(chatId, `❌ ${error.message}\n\nUse /help for instructions.`);
       } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:353',message:'/link sendMessage ERROR (error msg)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         console.error('Error sending error message:', sendError);
       }
     } finally {
@@ -336,7 +378,15 @@ const setupBotHandlers = () => {
     try {
       const userId = await getUserIdFromTelegram(msg.from.id);
       if (!userId) {
-        return await bot.sendMessage(chatId, '❌ Please link your account first using /link <code>');
+        try {
+          await bot.sendMessage(chatId, '❌ Please link your account first using /link <code>');
+        } catch (sendError) {
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:371',message:'/add sendMessage ERROR (not linked)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+          // #endregion
+          console.error('Error sending /add not-linked message:', sendError.message || sendError);
+        }
+        return;
       }
 
       // Use AI to parse task
@@ -357,17 +407,31 @@ const setupBotHandlers = () => {
 
       await syncTask(userId, taskData);
       
-      await bot.sendMessage(
-        chatId,
-        `✅ Task added!\n\n` +
-        `📝 ${taskData.title}\n` +
-        `⚡ Energy: ${taskData.energy}\n` +
-        `🏢 Workspace: ${taskData.workspace}\n` +
-        `⏱️ Estimated: ${taskData.estimatedTime} min`
-      );
+      try {
+        await bot.sendMessage(
+          chatId,
+          `✅ Task added!\n\n` +
+          `📝 ${taskData.title}\n` +
+          `⚡ Energy: ${taskData.energy}\n` +
+          `🏢 Workspace: ${taskData.workspace}\n` +
+          `⏱️ Estimated: ${taskData.estimatedTime} min`
+        );
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:392',message:'/add sendMessage ERROR (success)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /add success message:', sendError.message || sendError);
+      }
     } catch (error) {
       console.error('Add task error:', error);
-      await bot.sendMessage(chatId, `❌ Failed to add task: ${error.message}`);
+      try {
+        await bot.sendMessage(chatId, `❌ Failed to add task: ${error.message}`);
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:402',message:'/add sendMessage ERROR (error msg)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /add error message:', sendError.message || sendError);
+      }
     }
   });
 
@@ -403,10 +467,31 @@ const setupBotHandlers = () => {
         message += `\n... and ${pendingTasks.length - 10} more tasks`;
       }
 
-      await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      try {
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:438',message:'/list sendMessage ERROR',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /list message:', sendError.message || sendError);
+        // Fallback to plain text
+        try {
+          const plainMessage = message.replace(/\*/g, '').replace(/`/g, '');
+          await bot.sendMessage(chatId, plainMessage);
+        } catch (fallbackError) {
+          console.error('Error sending /list fallback:', fallbackError.message || fallbackError);
+        }
+      }
     } catch (error) {
       console.error('List tasks error:', error);
-      await bot.sendMessage(chatId, `❌ Failed to list tasks: ${error.message}`);
+      try {
+        await bot.sendMessage(chatId, `❌ Failed to list tasks: ${error.message}`);
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:441',message:'/list sendMessage ERROR (error msg)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /list error message:', sendError.message || sendError);
+      }
     }
   });
 
@@ -444,10 +529,31 @@ const setupBotHandlers = () => {
         message += `   ID: \`${task.id.substring(0, 8)}\`\n\n`;
       });
 
-      await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      try {
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:479',message:'/today sendMessage ERROR',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /today message:', sendError.message || sendError);
+        // Fallback to plain text
+        try {
+          const plainMessage = message.replace(/\*/g, '').replace(/`/g, '');
+          await bot.sendMessage(chatId, plainMessage);
+        } catch (fallbackError) {
+          console.error('Error sending /today fallback:', fallbackError.message || fallbackError);
+        }
+      }
     } catch (error) {
       console.error('Today tasks error:', error);
-      await bot.sendMessage(chatId, `❌ Failed to get today's tasks: ${error.message}`);
+      try {
+        await bot.sendMessage(chatId, `❌ Failed to get today's tasks: ${error.message}`);
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:482',message:'/today sendMessage ERROR (error msg)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /today error message:', sendError.message || sendError);
+      }
     }
   });
 
@@ -480,10 +586,31 @@ const setupBotHandlers = () => {
         message += `   ID: \`${task.id.substring(0, 8)}\`\n\n`;
       });
 
-      await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      try {
+        await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:515',message:'/overdue sendMessage ERROR',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /overdue message:', sendError.message || sendError);
+        // Fallback to plain text
+        try {
+          const plainMessage = message.replace(/\*/g, '').replace(/`/g, '');
+          await bot.sendMessage(chatId, plainMessage);
+        } catch (fallbackError) {
+          console.error('Error sending /overdue fallback:', fallbackError.message || fallbackError);
+        }
+      }
     } catch (error) {
       console.error('Overdue tasks error:', error);
-      await bot.sendMessage(chatId, `❌ Failed to get overdue tasks: ${error.message}`);
+      try {
+        await bot.sendMessage(chatId, `❌ Failed to get overdue tasks: ${error.message}`);
+      } catch (sendError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:518',message:'/overdue sendMessage ERROR (error msg)',data:{error:sendError?.message,code:sendError?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
+        console.error('Error sending /overdue error message:', sendError.message || sendError);
+      }
     }
   });
 
@@ -523,20 +650,35 @@ const setupBotHandlers = () => {
   bot.onText(/\/help/, async (msg) => {
     const chatId = msg.chat.id;
     
-    const helpText = `📚 *TaskFlow.AI Bot Commands*\n\n` +
+    // Use HTML parse mode for better reliability, or plain text to avoid parsing errors
+    const helpText = `📚 <b>TaskFlow.AI Bot Commands</b>\n\n` +
       `/start - Welcome message\n` +
-      `/link <code> - Link Telegram to TaskFlow account\n` +
-      `/add <task> - Add a new task\n` +
+      `/link &lt;code&gt; - Link Telegram to TaskFlow account\n` +
+      `/add &lt;task&gt; - Add a new task\n` +
       `/list - List all pending tasks\n` +
       `/today - Show tasks due today\n` +
       `/overdue - Show overdue tasks\n` +
-      `/done <task_id> - Mark task as complete\n` +
+      `/done &lt;task_id&gt; - Mark task as complete\n` +
       `/help - Show this help message\n\n` +
-      `*Examples:*\n` +
+      `<b>Examples:</b>\n` +
       `/add Fix the bug in login page\n` +
       `/done abc12345`;
     
-    await bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+    try {
+      await bot.sendMessage(chatId, helpText, { parse_mode: 'HTML' });
+    } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:539',message:'/help sendMessage ERROR',data:{error:error?.message,code:error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      console.error('Error sending /help message:', error.message || error);
+      // Fallback to plain text if HTML parsing fails
+      try {
+        const plainText = helpText.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+        await bot.sendMessage(chatId, plainText);
+      } catch (fallbackError) {
+        console.error('Error sending /help fallback message:', fallbackError.message || fallbackError);
+      }
+    }
   });
 
   // DISABLED: Auto-create drafts from messages (was causing spam)
