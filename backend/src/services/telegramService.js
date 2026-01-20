@@ -6,6 +6,12 @@ import { getUserTasks, syncTask, completeTask } from './taskService.js';
 import crypto from 'crypto';
 
 let bot = null;
+let botInitialized = false;
+let botInitializationAttempts = 0;
+const MAX_INIT_ATTEMPTS = 3;
+// Global tracking to prevent spam across handler setups
+const globalProcessedMessages = new Set();
+const globalChatCooldowns = new Map();
 
 /**
  * Initialize Telegram bot
