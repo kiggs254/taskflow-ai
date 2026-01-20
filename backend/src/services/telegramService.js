@@ -128,30 +128,35 @@ const setupBotHandlers = () => {
   // Use global tracking (defined at module level)
   const MESSAGE_COOLDOWN = 300000; // 5 minute cooldown per chat
 
-  // /start command
+  // /start command with aggressive spam prevention
   bot.onText(/\/start/, async (msg) => {
+    if (!bot) {
+      console.error('Bot is null in /start handler');
+      return;
+    }
+    
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const messageId = msg.message_id;
     const messageKey = `${chatId}_start`;
+    const uniqueKey = `${chatId}_${messageId}`; // More specific key for message tracking
     
-    // Prevent processing the same message twice
-    if (globalProcessedMessages.has(messageId)) {
-      console.log(`Skipping duplicate /start message ${messageId}`);
+    // CRITICAL: Mark as processed IMMEDIATELY to prevent any duplicate processing
+    if (globalProcessedMessages.has(uniqueKey)) {
+      console.log(`[SPAM PREVENTION] Skipping duplicate /start - already processed ${uniqueKey}`);
       return;
     }
+    globalProcessedMessages.add(uniqueKey);
     
-    // Check cooldown to prevent spam
+    // Check cooldown to prevent spam (5 minutes)
     const lastSent = globalChatCooldowns.get(messageKey);
     if (lastSent && Date.now() - lastSent < MESSAGE_COOLDOWN) {
       const remaining = Math.round((MESSAGE_COOLDOWN - (Date.now() - lastSent)) / 1000);
-      console.log(`Skipping /start - cooldown active for chat ${chatId} (${remaining}s remaining)`);
-      globalProcessedMessages.add(messageId); // Mark as processed even if skipped
-      return;
+      console.log(`[SPAM PREVENTION] Skipping /start - cooldown active for chat ${chatId} (${remaining}s remaining)`);
+      return; // Already marked as processed above
     }
     
-    // Mark as processed IMMEDIATELY to prevent race conditions
-    globalProcessedMessages.add(messageId);
+    // Set cooldown IMMEDIATELY before any async operations
     globalChatCooldowns.set(messageKey, Date.now());
     
     console.log(`/start command received from user ${userId} in chat ${chatId}, message ${messageId}`);
@@ -164,6 +169,13 @@ const setupBotHandlers = () => {
       );
 
       if (integration.rows.length > 0) {
+        // User is linked - DON'T send message if we just sent one (extra safety check)
+        const timeSinceLastMessage = lastSent ? Date.now() - lastSent : Infinity;
+        if (timeSinceLastMessage < 60000) { // 1 minute minimum between messages
+          console.log(`[SPAM PREVENTION] Suppressing "Already linked" message - too soon after last message (${Math.round(timeSinceLastMessage/1000)}s ago)`);
+          return;
+        }
+        
         // User is linked - send brief message only once
         await bot.sendMessage(
           chatId,
@@ -184,17 +196,16 @@ const setupBotHandlers = () => {
         );
       }
       
-      // Already marked above, just clean up
-      // Clean up old processed messages (keep last 1000)
-      if (globalProcessedMessages.size > 1000) {
-        const oldest = Array.from(globalProcessedMessages).slice(0, 500);
+      // Clean up old processed messages (keep last 2000)
+      if (globalProcessedMessages.size > 2000) {
+        const oldest = Array.from(globalProcessedMessages).slice(0, 1000);
         oldest.forEach(id => globalProcessedMessages.delete(id));
       }
       
       console.log(`Response sent to user ${userId}`);
     } catch (error) {
       console.error(`Error sending /start response to user ${userId}:`, error);
-      // Already marked as processed above
+      // Don't remove from processed - keep it marked to prevent retry spam
     }
   });
 
