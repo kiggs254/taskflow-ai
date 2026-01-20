@@ -200,6 +200,11 @@ const setupBotHandlers = () => {
 
   // /link command
   bot.onText(/\/link (.+)/, async (msg, match) => {
+    if (!bot) {
+      console.error('Bot is null in /link handler');
+      return;
+    }
+    
     const chatId = msg.chat.id;
     const code = match[1];
     
@@ -211,7 +216,11 @@ const setupBotHandlers = () => {
       await bot.sendMessage(chatId, `✅ Successfully linked! You can now manage your tasks via Telegram.\n\nTry /help to see available commands.`);
     } catch (error) {
       console.error(`Telegram link error for user ${msg.from.id}:`, error);
-      await bot.sendMessage(chatId, `❌ ${error.message}\n\nUse /help for instructions.`);
+      try {
+        await bot.sendMessage(chatId, `❌ ${error.message}\n\nUse /help for instructions.`);
+      } catch (sendError) {
+        console.error('Error sending error message:', sendError);
+      }
     }
   });
 
@@ -376,6 +385,11 @@ const setupBotHandlers = () => {
 
   // /done command - Mark task as complete
   bot.onText(/\/done (.+)/, async (msg, match) => {
+    if (!bot) {
+      console.error('Bot is null in /done handler');
+      return;
+    }
+    
     const chatId = msg.chat.id;
     const taskId = match[1];
     
