@@ -18,14 +18,53 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
     loadDrafts();
   }, [selectedStatus]);
 
-  // Poll for new drafts when viewing this page (every 15 seconds)
+  // Graceful polling for drafts when viewing this page (every 15 seconds)
   useEffect(() => {
-    const interval = setInterval(() => {
-      loadDrafts();
-    }, 15000); // Poll every 15 seconds when on draft tasks view
+    const pollDrafts = async () => {
+      try {
+        const data = await api.draftTasks.getAll(token, selectedStatus);
+        
+        // Update drafts gracefully - merge new drafts and update existing ones
+        setDrafts(prevDrafts => {
+          const draftMap = new Map(prevDrafts.map(d => [d.id, d]));
+          const newDrafts: typeof data = [];
+          
+          data.forEach(fetchedDraft => {
+            const existingDraft = draftMap.get(fetchedDraft.id);
+            if (existingDraft) {
+              // Update existing draft if it changed
+              if (JSON.stringify(existingDraft) !== JSON.stringify(fetchedDraft)) {
+                draftMap.set(fetchedDraft.id, fetchedDraft);
+              }
+            } else {
+              // New draft
+              newDrafts.push(fetchedDraft);
+            }
+          });
+
+          // Remove drafts that no longer exist
+          const fetchedDraftIds = new Set(data.map(d => d.id));
+          const removedDrafts = prevDrafts.filter(d => !fetchedDraftIds.has(d.id));
+
+          // Return merged array
+          return Array.from(draftMap.values()).concat(newDrafts);
+        });
+        
+        // Update parent component with pending count
+        if (onDraftCountChange && selectedStatus === 'pending') {
+          onDraftCountChange(data.length);
+        }
+      } catch (error) {
+        console.error('Failed to poll draft tasks:', error);
+      }
+    };
+
+    // Poll immediately, then every 15 seconds
+    pollDrafts();
+    const interval = setInterval(pollDrafts, 15000);
     
     return () => clearInterval(interval);
-  }, [selectedStatus]);
+  }, [selectedStatus, token, onDraftCountChange]);
 
   const loadDrafts = async () => {
     setLoading(true);

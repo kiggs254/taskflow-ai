@@ -15,6 +15,8 @@ import { DraftTasksView } from './components/DraftTasksView';
 import { GmailSettings } from './components/GmailSettings';
 import { TelegramSettings } from './components/TelegramSettings';
 import { SlackSettings } from './components/SlackSettings';
+import { TaskDetailModal } from './components/TaskDetailModal';
+import { ToastContainer, Toast, ToastType } from './components/ToastNotification';
 import { 
   parseTaskWithGemini, 
   getDailyMotivation, 
@@ -255,7 +257,8 @@ const TaskCard: React.FC<{
   onRemoveDependency,
   onDelete,
   onSnooze,
-  onSetWaiting
+  onSetWaiting,
+  onViewDetails
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(task.title);
@@ -436,9 +439,12 @@ const TaskCard: React.FC<{
   }
 
   return (
-    <div className={`group relative p-4 rounded-xl bg-surface border transition-all border-l-4 mb-3 shadow-sm 
-      ${energyColors[task.energy]} 
-      ${isBlocked || task.status === 'waiting' ? 'opacity-60 border-slate-700 bg-slate-800/50' : 'border-slate-700/50 hover:border-slate-600'}`}>
+    <div 
+      className={`group relative p-4 rounded-xl bg-surface border transition-all border-l-4 mb-3 shadow-sm cursor-pointer
+        ${energyColors[task.energy]} 
+        ${isBlocked || task.status === 'waiting' ? 'opacity-60 border-slate-700 bg-slate-800/50' : 'border-slate-700/50 hover:border-slate-600'}`}
+      onClick={() => onViewDetails(task)}
+    >
       
       {isBlocked && (
         <div className="absolute top-2 right-2 text-slate-500">
@@ -582,14 +588,14 @@ const TaskCard: React.FC<{
         
         <div className={`flex flex-col gap-2 transition-opacity pl-4 ${isBlocked || task.status === 'waiting' ? 'opacity-20 pointer-events-none' : 'opacity-100 sm:opacity-0 group-hover:opacity-100'}`}>
            <button 
-            onClick={() => onStartFocus(task)}
+            onClick={(e) => { e.stopPropagation(); onStartFocus(task); }}
             className="p-2 rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white transition-colors"
             title="Focus Mode"
           >
             <Play className="w-5 h-5" />
           </button>
           <button 
-            onClick={() => onComplete(task.id)}
+            onClick={(e) => { e.stopPropagation(); onComplete(task.id); }}
             className="p-2 rounded-lg bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white transition-colors"
             title="Complete"
           >
@@ -1125,16 +1131,8 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
   });
 
   const toggleNotifications = () => {
-    if (!notifications && Notification.permission !== 'granted') {
-      Notification.requestPermission().then(perm => {
-        if (perm === 'granted') {
-          setNotifications(true);
-           new Notification("TASKFLOW.AI", { body: "Notifications enabled!" });
-        }
-      });
-    } else {
-      setNotifications(!notifications);
-    }
+    // Browser notifications are disabled - using toast notifications instead
+    setNotifications(!notifications);
   };
 
   useEffect(() => {
@@ -1410,6 +1408,8 @@ export default function App() {
   const [xpFloat, setXpFloat] = useState<{ id: number, val: number }[]>([]);
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [notifications, setNotifications] = useState<{id: string, message: string}[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
   const previousDraftCountRef = useRef<number>(0);
@@ -1432,10 +1432,8 @@ export default function App() {
       const updatedTasks = tasks.map(t => {
         if (t.snoozedUntil && t.snoozedUntil < now) {
           changed = true;
-          // Trigger notification for unsnoozed task
-          if (localStorage.getItem('tf_notifications') === 'true' && Notification.permission === 'granted') {
-             new Notification("Task Ready!", { body: `Your snoozed task is back: "${t.title}"`, icon: '/favicon.ico' });
-          }
+          // Trigger toast notification for unsnoozed task
+          addToast(`Task Ready! "${t.title}"`, 'info');
           const { snoozedUntil, ...rest } = t;
           return rest;
         }
@@ -1493,8 +1491,8 @@ export default function App() {
       if (newCount > previousDraftCountRef.current && previousDraftCountRef.current > 0) {
         const newDraftsCount = newCount - previousDraftCountRef.current;
         playSound('complete'); // Use existing sound
-        // Show notification
-        addNotification(`📧 ${newDraftsCount} new draft task${newDraftsCount > 1 ? 's' : ''} arrived!`);
+        // Show toast notification
+        addToast(`📧 ${newDraftsCount} new draft task${newDraftsCount > 1 ? 's' : ''} arrived!`, 'success');
       }
       
       setDraftTasksCount(newCount);
@@ -1519,16 +1517,110 @@ export default function App() {
     return () => clearInterval(interval);
   }, [token]);
 
-  // Poll for new tasks when on dashboard (every 30 seconds)
+  // Graceful polling for tasks when on dashboard (every 30 seconds)
   useEffect(() => {
     if (!token || view !== AppView.DASHBOARD) return;
     
-    const interval = setInterval(() => {
-      fetchData();
-    }, 30000); // Poll every 30 seconds
+    const pollTasks = async () => {
+      try {
+        let fetchedTasks = await api.getTasks(token);
+        
+        // Sanitize incoming data
+        const sanitizeTimestamp = (ts: any): number | undefined => {
+          if (ts === null || ts === undefined || ts === '') return undefined;
+          let num = Number(ts);
+          if (isNaN(num)) return undefined;
+          if (num > 0 && num < 100000000000) {
+            num *= 1000;
+          }
+          return num;
+        };
+
+        fetchedTasks = fetchedTasks.map(task => {
+          const sanitizedCompletedAt = sanitizeTimestamp(task.completedAt);
+          const sanitizedCreatedAt = sanitizeTimestamp(task.createdAt) || Date.now();
+          let finalCompletedAt = sanitizedCompletedAt;
+          if (task.status === 'done' && !finalCompletedAt) {
+            finalCompletedAt = 0;
+          }
+
+          return {
+            ...task,
+            id: String(task.id),
+            createdAt: sanitizedCreatedAt,
+            completedAt: finalCompletedAt,
+            dueDate: sanitizeTimestamp(task.dueDate),
+            estimatedTime: task.estimatedTime ? Number(task.estimatedTime) : undefined,
+            snoozedUntil: sanitizeTimestamp(task.snoozedUntil),
+          };
+        });
+
+        // Update tasks gracefully - merge new tasks and update existing ones
+        setTasks(prevTasks => {
+          const taskMap = new Map(prevTasks.map(t => [t.id, t]));
+          const newTasks: Task[] = [];
+          let hasNewTasks = false;
+
+          fetchedTasks.forEach(fetchedTask => {
+            const existingTask = taskMap.get(fetchedTask.id);
+            if (existingTask) {
+              // Update existing task if it changed
+              if (JSON.stringify(existingTask) !== JSON.stringify(fetchedTask)) {
+                taskMap.set(fetchedTask.id, fetchedTask);
+              }
+            } else {
+              // New task
+              newTasks.push(fetchedTask);
+              hasNewTasks = true;
+            }
+          });
+
+          // Remove tasks that no longer exist
+          const fetchedTaskIds = new Set(fetchedTasks.map(t => t.id));
+          const removedTasks = prevTasks.filter(t => !fetchedTaskIds.has(t.id));
+
+          // Notify about new tasks
+          if (hasNewTasks && newTasks.length > 0 && previousTasksCountRef.current > 0) {
+            playSound('complete');
+            addToast(`✨ ${newTasks.length} new task${newTasks.length > 1 ? 's' : ''} added!`, 'success');
+          }
+
+          // Update count
+          previousTasksCountRef.current = fetchedTasks.length;
+
+          // Return merged array
+          return Array.from(taskMap.values()).concat(newTasks);
+        });
+
+        // Update stats
+        const lastResetTime = user?.last_reset_at 
+          ? new Date(String(user.last_reset_at).replace(' ', 'T')).getTime() 
+          : 0;
+        const todayString = new Date().toDateString();
+        const completedToday = fetchedTasks.filter(t => {
+          if (t.status !== 'done' || !t.completedAt) return false;
+          if (lastResetTime > 0 && !isNaN(lastResetTime)) {
+            return t.completedAt > lastResetTime;
+          } else {
+            return new Date(t.completedAt).toDateString() === todayString;
+          }
+        }).length;
+
+        setStats(prev => ({
+          ...prev,
+          completedToday
+        }));
+      } catch (error) {
+        console.error('Failed to poll tasks:', error);
+      }
+    };
+
+    // Poll immediately, then every 30 seconds
+    pollTasks();
+    const interval = setInterval(pollTasks, 30000);
     
     return () => clearInterval(interval);
-  }, [token, view]);
+  }, [token, view, user]);
 
   // Fetch Data on Auth
   useEffect(() => {
@@ -1677,6 +1769,15 @@ export default function App() {
     }, 4000);
   };
 
+  const addToast = (message: string, type: ToastType = 'info', duration?: number) => {
+    const id = crypto.randomUUID();
+    setToasts(prev => [...prev, { id, message, type, duration }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
   const addTask = async (rawInput: string) => {
     if (!token) return;
 
@@ -1764,7 +1865,7 @@ export default function App() {
             return depTask && depTask.status !== 'done';
         });
         if (remainingBlockers.length === 0) {
-            addNotification(`🔓 Ready to start: ${blockedTask.title}`);
+            addToast(`🔓 Ready to start: ${blockedTask.title}`, 'success');
         }
     });
 
@@ -2063,6 +2164,16 @@ export default function App() {
         />
       )}
 
+      {/* Task Detail Modal */}
+      {selectedTask && (
+        <TaskDetailModal
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onComplete={completeTask}
+          onUpdate={updateTask}
+        />
+      )}
+
       {/* Mobile/Tablet Layout container */}
       <div className="max-w-4xl mx-auto min-h-screen flex flex-col md:flex-row">
         
@@ -2320,6 +2431,7 @@ export default function App() {
                              onDelete={deleteTask}
                              onSnooze={snoozeTask}
                              onSetWaiting={setWaitingStatus}
+                             onViewDetails={setSelectedTask}
                            />
                          );
                        })}
@@ -2379,6 +2491,7 @@ export default function App() {
                               onDelete={deleteTask}
                               onSnooze={snoozeTask}
                               onSetWaiting={setWaitingStatus}
+                              onViewDetails={setSelectedTask}
                             />
                           );
                         })}
