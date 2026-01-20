@@ -43,20 +43,42 @@ export const getAuthUrl = (userId) => {
  * Handle OAuth2 callback and store tokens
  */
 export const handleOAuthCallback = async (code, userId) => {
+  // Validate environment variables
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    throw new Error('Gmail OAuth credentials not configured');
+  }
+
   const oauth2Client = getOAuth2Client();
   
   try {
+    console.log('Exchanging authorization code for tokens...');
     const { tokens } = await oauth2Client.getToken(code);
     
+    if (!tokens.access_token) {
+      throw new Error('No access token received from Google');
+    }
+    
+    console.log('Tokens received, getting user profile...');
     // Get user's email from Gmail API
     oauth2Client.setCredentials(tokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const email = profile.data.emailAddress;
+    
+    if (!email) {
+      throw new Error('Could not retrieve email from Gmail profile');
+    }
+    
+    console.log('Profile retrieved, email:', email);
 
     // Encrypt tokens
+    console.log('Encrypting tokens...');
     const encryptedAccessToken = encrypt(tokens.access_token);
     const encryptedRefreshToken = encrypt(tokens.refresh_token);
+    
+    if (!encryptedAccessToken || !encryptedRefreshToken) {
+      throw new Error('Failed to encrypt tokens');
+    }
 
     // Calculate token expiration
     const expiresAt = tokens.expiry_date
@@ -64,6 +86,7 @@ export const handleOAuthCallback = async (code, userId) => {
       : new Date(Date.now() + 3600 * 1000); // Default 1 hour
 
     // Store or update integration
+    console.log('Storing integration in database for user:', userId);
     await query(
     `INSERT INTO gmail_integrations (user_id, email, access_token, refresh_token, token_expires_at)
      VALUES ($1, $2, $3, $4, $5)
@@ -81,9 +104,14 @@ export const handleOAuthCallback = async (code, userId) => {
       [userId]
     );
 
+    console.log('Gmail integration stored successfully');
     return { success: true, email };
   } catch (error) {
-    console.error('Gmail OAuth callback error:', error);
+    console.error('Gmail OAuth callback error details:', {
+      message: error.message,
+      stack: error.stack,
+      userId,
+    });
     throw new Error(`Failed to connect Gmail: ${error.message}`);
   }
 };
