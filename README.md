@@ -13,7 +13,7 @@
 - **Activity Streaks**: Track your daily consistency with the dynamic streak counter.
 - **Victory Fanfares**: Auditory and visual celebrations when you finish tasks or level up.
 
-### 🤖 AI-Powered Intelligence (Powered by Gemini)
+### 🤖 AI-Powered Intelligence (Powered by OpenAI & Deepseek)
 - **Natural Language Parsing**: Just type "Finish that API bug tomorrow 20m high energy" and let AI categorize it.
 - **Dopamine Boosts**: Personalized daily motivation based on your actual progress.
 - **Strategic Daily Planning**: AI-generated bullet points each evening to help you tackle the next day's workload without burnout.
@@ -38,10 +38,11 @@
   - [Tailwind CSS](https://tailwindcss.com/) - Utility-first styling (via CDN).
   - [Lucide React](https://lucide.dev/) - Beautiful, consistent iconography.
 - **Backend**:
-  - [PHP 8.x](https://www.php.net/) - Lightweight API layer.
-  - [MySQL](https://www.mysql.com/) - Persistent storage for tasks and user data.
+  - [Node.js](https://nodejs.org/) + [Express](https://expressjs.com/) - RESTful API server.
+  - [PostgreSQL](https://www.postgresql.org/) - Robust database for tasks and user data.
 - **AI**:
-  - [Google Gemini 2.0 Flash](https://ai.google.dev/) - High-speed, high-intelligence LLM.
+  - [OpenAI](https://openai.com/) - Primary AI provider for task parsing and generation.
+  - [Deepseek](https://www.deepseek.com/) - Alternative AI provider option.
 
 ---
 
@@ -63,21 +64,31 @@ npm run dev
 ```
 
 ### 2. Backend Setup
-1. Upload `api.php` to your PHP-enabled server.
-2. Create a MySQL database and update the credentials in `api.php`:
-   ```php
-   $host = "localhost";
-   $user = "your_db_user";
-   $pass = "your_db_pass";
-   $db   = "your_db_name";
-   ```
-3. Update the `API_BASE` URL in `services/apiService.ts` to point to your hosted `api.php`.
+See [backend/README.md](backend/README.md) for detailed backend setup instructions.
+
+Quick start:
+1. Navigate to the backend directory: `cd backend`
+2. Install dependencies: `npm install`
+3. Set up PostgreSQL database (see `backend/schema.sql`)
+4. Configure environment variables (see `backend/.env.example`)
+5. Start the server: `npm start`
 
 ### 3. Environment Variables
 Create a `.env.local` file in the root directory:
 ```env
-GEMINI_API_KEY=your_google_gemini_api_key_here
+# Backend API URL (update with your deployed backend URL)
+VITE_API_BASE_URL=http://localhost:3000/api
 ```
+
+For production, set this in your deployment platform (Netlify, Vercel, etc.)
+
+### 4. Deployment
+
+#### Frontend (Netlify)
+See [NETLIFY_DEPLOY.md](NETLIFY_DEPLOY.md) for detailed Netlify deployment instructions.
+
+#### Backend (Coolify)
+See [backend/README.md](backend/README.md) for Coolify deployment instructions.
 
 ---
 
