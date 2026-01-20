@@ -371,9 +371,23 @@ const setupBotHandlers = () => {
   });
 
   // /add command - Add new task
-  bot.onText(/\/add (.+)/, async (msg, match) => {
+  // Use [\s\S]* to capture multi-line text (including newlines)
+  bot.onText(/\/add ([\s\S]*)/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const taskText = match[1];
+    const taskText = match[1]?.trim();
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:374',message:'/add command received',data:{taskTextLength:taskText?.length,hasNewlines:taskText?.includes('\n'),firstLine:taskText?.split('\n')[0]?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'G'})}).catch(()=>{});
+    // #endregion
+    
+    if (!taskText || taskText.length === 0) {
+      try {
+        await bot.sendMessage(chatId, '❌ Please provide a task description. Example: /add Fix the bug');
+      } catch (sendError) {
+        console.error('Error sending /add empty message:', sendError.message || sendError);
+      }
+      return;
+    }
     
     try {
       const userId = await getUserIdFromTelegram(msg.from.id);
