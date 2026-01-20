@@ -231,6 +231,7 @@ const DueDateDisplay = ({ dueDate }: { dueDate?: number }) => {
 const TaskCard: React.FC<{ 
   task: Task; 
   blockingTasks: Task[];
+  token: string;
   onComplete: (id: string) => void;
   onUpdate: (task: Task) => void;
   onStartFocus: (task: Task) => void;
@@ -242,6 +243,7 @@ const TaskCard: React.FC<{
 }> = ({ 
   task, 
   blockingTasks,
+  token,
   onComplete, 
   onUpdate,
   onStartFocus,
@@ -297,7 +299,7 @@ const TaskCard: React.FC<{
     }
     setLoadingFollowUp(true);
     setShowFollowUp(true);
-    const text = await generateClientFollowUp(task.title);
+    const text = await generateClientFollowUp(task.title, token);
     setFollowUpText(text);
     setLoadingFollowUp(false);
   };
@@ -747,11 +749,13 @@ const LevelUpModal = ({
 const DailyReset = ({
   completedTasks,
   pendingTasks,
+  token,
   onClose,
   onExport,
 }: {
   completedTasks: Task[];
   pendingTasks: Task[];
+  token: string;
   onClose: () => void;
   onExport: (format: 'csv' | 'md', tasks: Task[]) => void;
 }) => {
@@ -760,11 +764,15 @@ const DailyReset = ({
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    generateDailyPlan(pendingTasks).then(plan => {
-      setAiPlan(plan);
+    if (token) {
+      generateDailyPlan(pendingTasks, token).then(plan => {
+        setAiPlan(plan);
+        setLoading(false);
+      });
+    } else {
       setLoading(false);
-    });
-  }, [pendingTasks]);
+    }
+  }, [pendingTasks, token]);
 
   const completedJobTasks = completedTasks.filter(t => t.workspace === 'job');
 
@@ -1614,7 +1622,7 @@ export default function App() {
       estimatedTime: 15,
     };
 
-    const aiResult = await parseTaskWithGemini(rawInput);
+    const aiResult = await parseTaskWithGemini(rawInput, token);
     
     if (aiResult) {
       newTask = {
@@ -1921,7 +1929,9 @@ export default function App() {
 
   useEffect(() => {
     if (user) {
-      getDailyMotivation(stats.completedToday, pendingTasksAll.length).then(setMotivation);
+      if (token) {
+        getDailyMotivation(stats.completedToday, pendingTasksAll.length, token).then(setMotivation);
+      }
     }
   }, [user, stats.completedToday]);
 
@@ -1938,7 +1948,7 @@ export default function App() {
   if (view === AppView.DAILY_RESET) {
     const today = new Date().toDateString();
     const completedToday = completedTasksAll.filter(t => t.completedAt && new Date(t.completedAt).toDateString() === today);
-    return <DailyReset completedTasks={completedToday} pendingTasks={pendingTasksAll} onClose={finishDailyReset} onExport={handleExport} />;
+    return <DailyReset completedTasks={completedToday} pendingTasks={pendingTasksAll} token={token!} onClose={finishDailyReset} onExport={handleExport} />;
   }
 
   return (
@@ -2216,6 +2226,7 @@ export default function App() {
                              key={task.id} 
                              task={task} 
                              blockingTasks={blockers}
+                             token={token!}
                              onComplete={completeTask} 
                              onUpdate={updateTask}
                              onStartFocus={startFocus}
@@ -2274,6 +2285,7 @@ export default function App() {
                               key={task.id} 
                               task={task} 
                               blockingTasks={blockers}
+                              token={token!}
                               onComplete={completeTask} 
                               onUpdate={updateTask}
                               onStartFocus={startFocus}

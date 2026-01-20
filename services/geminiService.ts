@@ -1,124 +1,124 @@
-// Fix: The `Schema` type is not exported from @google/genai.
-import { GoogleGenAI, Type } from "@google/genai";
-import { AIParsedTask, EnergyLevel, Task } from "../types";
+// AI Service - Now calls backend API instead of Gemini directly
+// Backend handles OpenAI and Deepseek integration
+import { AIParsedTask, Task } from "../types";
 
-// Fix: Removed `Schema` type annotation as it is not available.
-const parseTaskSchema = {
-  type: Type.OBJECT,
-  properties: {
-    title: {
-      type: Type.STRING,
-      description: "A clear, concise title for the task, cleaned of time estimates.",
-    },
-    energy: {
-      type: Type.STRING,
-      enum: ["high", "medium", "low"],
-      description: "The estimated cognitive load or energy required. 'high' for coding/complex logic, 'low' for admin/replies.",
-    },
-    estimatedTime: {
-      type: Type.INTEGER,
-      description: "Estimated time in minutes. Default to 15 if unknown.",
-    },
-    tags: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: "Up to 3 relevant short tags (e.g., 'bug', 'frontend', 'client').",
-    },
-    workspaceSuggestions: {
-      type: Type.STRING,
-      enum: ["job", "freelance", "personal"],
-      description: "Suggested workspace based on context (e.g., 'invoice' -> freelance).",
-    },
-  },
-  required: ["title", "energy", "estimatedTime", "tags"],
+const API_BASE = process.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+
+// Helper function to make authenticated AI API calls
+const aiRequest = async (
+  endpoint: string,
+  body: any,
+  token: string,
+  provider: 'openai' | 'deepseek' = 'openai'
+): Promise<any> => {
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/ai/${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...body, provider }),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(errorData.error || `HTTP ${res.status}`);
+    }
+
+    return await res.json();
+  } catch (error) {
+    console.error(`AI API Error (${endpoint}):`, error);
+    throw error;
+  }
 };
 
+/**
+ * Parse task input using AI (now calls backend)
+ * @deprecated Renamed from parseTaskWithGemini - now uses backend AI service
+ */
 export const parseTaskWithGemini = async (
-  input: string
+  input: string,
+  token: string,
+  provider: 'openai' | 'deepseek' = 'openai'
 ): Promise<AIParsedTask | null> => {
-  if (!process.env.API_KEY) {
-    console.warn("API Key is missing. Returning default task structure.");
+  if (!token) {
+    console.warn("Token is missing. Returning default task structure.");
     return null;
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
-    // We use gemini-2.5-flash for speed as this is a real-time UI action
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `Analyze this task input: "${input}". 
-      Context: User is a busy software developer. 
-      - "Fix bug" usually implies High energy.
-      - "Email" or "Call" usually implies Low energy.
-      - Extract time if mentioned (e.g. "20m").`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: parseTaskSchema,
-        temperature: 0.3, // Low temperature for deterministic categorization
-      },
-    });
-
-    const text = response.text;
-    if (!text) return null;
-
-    return JSON.parse(text) as AIParsedTask;
+    const result = await aiRequest('parse-task', { input }, token, provider);
+    return result;
   } catch (error) {
-    console.error("Gemini parsing failed:", error);
+    console.error("AI parsing failed:", error);
     return null;
   }
 };
 
 export const getDailyMotivation = async (
   completedTasks: number,
-  pendingTasks: number
+  pendingTasks: number,
+  token: string,
+  provider: 'openai' | 'deepseek' = 'openai'
 ): Promise<string> => {
-  if (!process.env.API_KEY) return "Great work today! Keep pushing forward.";
+  if (!token) return "Great work today! Keep pushing forward.";
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `User has completed ${completedTasks} tasks and has ${pendingTasks} remaining. Give a short, witty, 1-sentence dopamine-boosting encouragement for a developer. No cringe.`,
-    });
-    return response.text || "You're crushing it.";
+    const result = await aiRequest(
+      'daily-motivation',
+      { completedTasks, pendingTasks },
+      token,
+      provider
+    );
+    return result.message || "You're crushing it.";
   } catch (e) {
+    console.error("Daily motivation failed:", e);
     return "Stay flowy.";
   }
 };
 
-export const generateDailyPlan = async (pendingTasks: Task[]): Promise<string> => {
-  if (!process.env.API_KEY) return "Focus on the high energy tasks first tomorrow!";
+export const generateDailyPlan = async (
+  pendingTasks: Task[],
+  token: string,
+  provider: 'openai' | 'deepseek' = 'openai'
+): Promise<string> => {
+  if (!token) return "Focus on the high energy tasks first tomorrow!";
   if (pendingTasks.length === 0) return "No tasks left! Enjoy your clean slate.";
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const tasksList = pendingTasks.map(t => `- ${t.title} (${t.energy} energy)`).join('\n');
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `Here are the tasks remaining for tomorrow:
-      ${tasksList}
-      
-      Create a short, strategic bullet-point plan (max 3 points) for how to tackle these tomorrow to minimize burnout.`,
-    });
-    return response.text || "Prioritize high energy tasks in the morning.";
+    const result = await aiRequest(
+      'daily-plan',
+      { pendingTasks },
+      token,
+      provider
+    );
+    return result.plan || "Prioritize high energy tasks in the morning.";
   } catch (error) {
+    console.error("Daily plan failed:", error);
     return "Plan failed to load.";
   }
 };
 
-export const generateClientFollowUp = async (taskTitle: string): Promise<string> => {
-  if (!process.env.API_KEY) return "Hey, just checking in on this.";
+export const generateClientFollowUp = async (
+  taskTitle: string,
+  token: string,
+  provider: 'openai' | 'deepseek' = 'openai'
+): Promise<string> => {
+  if (!token) return "Hey, just checking in on this.";
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `Draft a professional, short, and polite follow-up message to a client regarding the task: "${taskTitle}". 
-      Keep it under 280 characters. Casual but professional tone.`,
-    });
-    return response.text || "Just checking in on this item.";
+    const result = await aiRequest(
+      'client-followup',
+      { taskTitle },
+      token,
+      provider
+    );
+    return result.message || "Just checking in on this item.";
   } catch (error) {
+    console.error("Client followup failed:", error);
     return "Follow-up generation failed.";
   }
 };

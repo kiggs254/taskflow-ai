@@ -1,8 +1,9 @@
 
 import { Task, User, UserStats } from '../types';
 
-// Updated to the exact link provided. 
-const API_BASE = 'https://yellow-salmon-323871.hostingersite.com/tskapi.php';
+// TODO: Update this to your Coolify backend URL
+// Example: https://api.yourdomain.com or https://your-app-name.coolify.app
+const API_BASE = process.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
 // Helper to handle requests
 const request = async (action: string, method: 'GET' | 'POST', body?: any, token?: string) => {
