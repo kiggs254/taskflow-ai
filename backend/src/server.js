@@ -26,29 +26,31 @@ app.get('/', (req, res) => {
   res.json({ message: 'TaskFlow API Online' });
 });
 
-// Handle query parameter routing first (for backward compatibility with PHP backend)
-// This must come before the direct routes to catch ?action= requests
-// The queryParamRoutes will check for action parameter and call next() if not found
-app.use('/api', queryParamRoutes);
+// Mount specific routes FIRST (before query parameter routes)
+// This ensures callbacks and webhooks don't get intercepted
 
-// Mount routes for direct access (without query parameters)
+// Gmail routes (callback doesn't require auth - routes handle auth individually)
+app.use('/api/gmail', gmailRoutes);
+
+// Telegram routes (webhook doesn't require auth)
+app.use('/api/telegram', telegramRoutes);
+
+// AI routes (require authentication - already has authenticate in router)
+app.use('/api/ai', aiRoutes);
+
+// Draft tasks routes (require authentication)
+app.use('/api/draft-tasks', authenticate, draftTasksRoutes);
+
 // Auth routes (no authentication required)
 app.use('/api', authRoutes);
 
 // Task routes (already has authenticate middleware in the router)
 app.use('/api', taskRoutes);
 
-// AI routes (require authentication - already has authenticate in router)
-app.use('/api/ai', aiRoutes);
-
-// Gmail routes (require authentication - routes handle auth individually)
-app.use('/api/gmail', gmailRoutes);
-
-// Telegram routes
-app.use('/api/telegram', telegramRoutes);
-
-// Draft tasks routes (require authentication)
-app.use('/api/draft-tasks', authenticate, draftTasksRoutes);
+// Handle query parameter routing LAST (for backward compatibility with PHP backend)
+// This must come after specific routes to avoid intercepting callbacks/webhooks
+// The queryParamRoutes will check for action parameter and call next() if not found
+app.use('/api', queryParamRoutes);
 
 // 404 handler for unmatched routes
 app.use('/api', (req, res) => {
