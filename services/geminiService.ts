@@ -2,7 +2,11 @@
 // Backend handles OpenAI and Deepseek integration
 import { AIParsedTask, Task } from "../types";
 
-const API_BASE = process.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+// Normalize API_BASE to always end with /api
+let API_BASE = process.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+if (!API_BASE.endsWith('/api')) {
+  API_BASE = API_BASE.replace(/\/$/, '') + '/api';
+}
 
 // Helper function to make authenticated AI API calls
 const aiRequest = async (

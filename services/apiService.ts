@@ -3,7 +3,14 @@ import { Task, User, UserStats } from '../types';
 
 // TODO: Update this to your Coolify backend URL
 // Example: https://api.yourdomain.com or https://your-app-name.coolify.app
-const API_BASE = process.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+// Note: Can include /api or not - we'll normalize it
+let API_BASE = process.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+
+// Ensure API_BASE ends with /api
+if (!API_BASE.endsWith('/api')) {
+  // Remove trailing slash if present, then add /api
+  API_BASE = API_BASE.replace(/\/$/, '') + '/api';
+}
 
 // Helper to handle requests
 const request = async (action: string, method: 'GET' | 'POST', body?: any, token?: string) => {
