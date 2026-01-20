@@ -19,27 +19,42 @@ const processingMessages = new Map(); // Track messages being processed
  * Initialize Telegram bot
  */
 export const initializeBot = () => {
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:21',message:'initializeBot ENTRY',data:{botInitialized,botInitializationAttempts,hasBot:!!bot},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
   const token = process.env.TELEGRAM_BOT_TOKEN;
   
   if (!token) {
     console.warn('TELEGRAM_BOT_TOKEN not set. Telegram bot will not be available.');
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:26',message:'initializeBot EXIT - no token',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     return null;
   }
 
   // Prevent multiple initializations
   if (botInitialized && bot) {
     console.warn('Telegram bot already initialized, skipping re-initialization');
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:32',message:'initializeBot EXIT - already initialized',data:{botInitialized,hasBot:!!bot},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     return bot;
   }
 
   // Circuit breaker: Stop trying after too many failures
   if (botInitializationAttempts >= MAX_INIT_ATTEMPTS) {
     console.error(`❌ Telegram bot initialization failed ${MAX_INIT_ATTEMPTS} times. Disabling bot to prevent server crashes.`);
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:38',message:'initializeBot EXIT - circuit breaker',data:{botInitializationAttempts,MAX_INIT_ATTEMPTS},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     return null;
   }
 
   try {
     botInitializationAttempts++;
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:42',message:'initializeBot BEFORE bot creation',data:{botInitializationAttempts,useWebhook:process.env.TELEGRAM_USE_WEBHOOK === 'true'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     // Use polling for development, webhook for production
     const useWebhook = process.env.TELEGRAM_USE_WEBHOOK === 'true';
     
@@ -75,9 +90,18 @@ export const initializeBot = () => {
 
     // Setup handlers before marking as initialized
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:77',message:'initializeBot BEFORE setupBotHandlers',data:{handlersSetup,hasBot:!!bot},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       setupBotHandlers();
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:80',message:'initializeBot AFTER setupBotHandlers',data:{handlersSetup},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       console.log('✅ Telegram bot handlers set up');
     } catch (handlerError) {
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:83',message:'initializeBot ERROR in setupBotHandlers',data:{error:handlerError.message,stack:handlerError.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       console.error('❌ Failed to setup bot handlers:', handlerError.message || handlerError);
       // Don't mark as initialized if handlers failed
       bot = null;
@@ -88,6 +112,9 @@ export const initializeBot = () => {
     // Mark as successfully initialized only if everything worked
     botInitialized = true;
     botInitializationAttempts = 0; // Reset on success
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:91',message:'initializeBot SUCCESS',data:{botInitialized,botInitializationAttempts,hasBot:!!bot},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     // Test that bot can receive updates
     if (!useWebhook) {
@@ -96,6 +123,9 @@ export const initializeBot = () => {
     
     return bot;
   } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:99',message:'initializeBot CATCH ERROR',data:{error:error.message,stack:error.stack,botInitializationAttempts},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     console.error('❌ Failed to initialize Telegram bot:', error.message || error);
     console.error('Error details:', error.stack);
     bot = null;
@@ -110,14 +140,23 @@ export const initializeBot = () => {
  * Setup bot command handlers
  */
 const setupBotHandlers = () => {
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:112',message:'setupBotHandlers ENTRY',data:{hasBot:!!bot,handlersSetup},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
   if (!bot) {
     console.error('Cannot setup bot handlers: bot is null');
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:115',message:'setupBotHandlers EXIT - bot is null',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     return;
   }
   
   // CRITICAL: Check if handlers already set up BEFORE registering
   if (handlersSetup) {
     console.warn('⚠️ Handlers already set up, skipping duplicate registration');
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:120',message:'setupBotHandlers EXIT - already setup',data:{handlersSetup},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     return;
   }
 
@@ -572,12 +611,18 @@ const setupBotHandlers = () => {
   
   // Error handler for bot (prevent crashes) - only register once
   bot.on('error', (error) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:540',message:'bot.on error FIRED',data:{error:error?.message||String(error),code:error?.code,stack:error?.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     console.error('Telegram bot error:', error.message || error);
     // Don't throw - just log the error
   });
   
   // Polling error handler (prevent crashes) - only register once
   bot.on('polling_error', (error) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:546',message:'bot.on polling_error FIRED',data:{error:error?.message||String(error),code:error?.code,stack:error?.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
     console.error('Telegram bot polling error:', error.message || error);
     // Don't throw - just log the error
     // The bot will automatically retry
@@ -607,6 +652,9 @@ const setupBotHandlers = () => {
   
   // Mark handlers as set up (only once)
   handlersSetup = true;
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:575',message:'setupBotHandlers SUCCESS',data:{handlersSetup},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
   console.log('✅ All bot handlers registered');
 };
 

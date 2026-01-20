@@ -68,16 +68,37 @@ app.use(errorHandler);
 // Initialize Telegram bot (with error handling to prevent crashes)
 // Wrap in setTimeout to prevent blocking server startup
 setTimeout(() => {
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.js:70',message:'server setTimeout - calling initializeBot',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
   try {
     const botInstance = initializeBot();
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.js:73',message:'server setTimeout - initializeBot returned',data:{hasBotInstance:!!botInstance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     if (!botInstance) {
       console.warn('⚠️ Telegram bot not available - server will continue without it');
     }
   } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.js:77',message:'server setTimeout - initializeBot ERROR',data:{error:error.message,stack:error.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     console.error('Failed to initialize Telegram bot (non-critical):', error.message || error);
     // Don't crash the server if bot fails to initialize
   }
 }, 2000); // Delay 2 seconds to let server start first
+
+// Global error handlers for unhandled rejections and exceptions
+// #region agent log
+process.on('unhandledRejection', (reason, promise) => {
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.js:92',message:'unhandledRejection',data:{reason:String(reason),promise:String(promise)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (error) => {
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.js:96',message:'uncaughtException',data:{error:error.message,stack:error.stack},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+  console.error('Uncaught Exception:', error);
+});
+// #endregion
 
 // Start scheduled jobs
 if (config.nodeEnv === 'production' || process.env.ENABLE_JOBS === 'true') {
@@ -91,6 +112,9 @@ if (config.nodeEnv === 'production' || process.env.ENABLE_JOBS === 'true') {
 // Start server
 const PORT = config.api.port;
 app.listen(PORT, () => {
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'server.js:110',message:'server STARTED',data:{port:PORT,env:config.nodeEnv},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
   console.log(`TaskFlow API server running on port ${PORT}`);
   console.log(`Environment: ${config.nodeEnv}`);
 });
