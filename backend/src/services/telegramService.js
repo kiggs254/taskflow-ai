@@ -57,21 +57,12 @@ export const initializeBot = () => {
           params: {
             timeout: 10
           }
-        }
+        },
+        onlyFirstMatch: true // Stop after first regex match to prevent duplicate handlers
       });
       console.log('✅ Polling started - bot will receive messages automatically');
       
-      // Verify polling is active
-      bot.on('polling_error', (error) => {
-        console.error('❌ Polling error - bot cannot receive messages:', error.message || error);
-        // Don't crash - just log
-      });
-      
-      // Handle connection errors gracefully
-      bot.on('error', (error) => {
-        console.error('❌ Telegram bot connection error:', error.message || error);
-        // Don't crash on errors
-      });
+      // NOTE: Error handlers are registered in setupBotHandlers() to prevent duplicates
     }
 
     // Verify bot is working
@@ -128,6 +119,15 @@ const setupBotHandlers = () => {
   if (handlersSetup) {
     console.warn('⚠️ Handlers already set up, skipping duplicate registration');
     return;
+  }
+
+  // Clear any existing listeners to prevent duplicates
+  try {
+    bot.clearTextListeners();
+    console.log('Cleared existing text listeners');
+  } catch (error) {
+    // Ignore if clearTextListeners doesn't exist or fails
+    console.log('Note: Could not clear text listeners (may not be needed)');
   }
 
   console.log('Setting up Telegram bot handlers...');
