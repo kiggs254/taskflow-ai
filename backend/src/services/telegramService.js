@@ -505,9 +505,13 @@ const setupBotHandlers = () => {
   });
   */
   
-  // Mark handlers as set up
-  handlersSetup = true;
-  console.log('✅ All bot handlers registered');
+  // Mark handlers as set up (only once)
+  if (!handlersSetup) {
+    handlersSetup = true;
+    console.log('✅ All bot handlers registered');
+  } else {
+    console.warn('⚠️ Handlers already set up, skipping duplicate registration');
+  }
   
   // Error handler for bot (prevent crashes)
   bot.on('error', (error) => {
