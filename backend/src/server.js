@@ -66,12 +66,18 @@ app.use('/api', (req, res) => {
 app.use(errorHandler);
 
 // Initialize Telegram bot (with error handling to prevent crashes)
-try {
-  initializeBot();
-} catch (error) {
-  console.error('Failed to initialize Telegram bot (non-critical):', error);
-  // Don't crash the server if bot fails to initialize
-}
+// Wrap in setTimeout to prevent blocking server startup
+setTimeout(() => {
+  try {
+    const botInstance = initializeBot();
+    if (!botInstance) {
+      console.warn('⚠️ Telegram bot not available - server will continue without it');
+    }
+  } catch (error) {
+    console.error('Failed to initialize Telegram bot (non-critical):', error.message || error);
+    // Don't crash the server if bot fails to initialize
+  }
+}, 2000); // Delay 2 seconds to let server start first
 
 // Start scheduled jobs
 if (config.nodeEnv === 'production' || process.env.ENABLE_JOBS === 'true') {

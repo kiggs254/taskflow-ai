@@ -19,12 +19,19 @@ export const initializeBot = () => {
   }
 
   // Prevent multiple initializations
-  if (bot) {
+  if (botInitialized && bot) {
     console.warn('Telegram bot already initialized, skipping re-initialization');
     return bot;
   }
 
+  // Circuit breaker: Stop trying after too many failures
+  if (botInitializationAttempts >= MAX_INIT_ATTEMPTS) {
+    console.error(`❌ Telegram bot initialization failed ${MAX_INIT_ATTEMPTS} times. Disabling bot to prevent server crashes.`);
+    return null;
+  }
+
   try {
+    botInitializationAttempts++;
     // Use polling for development, webhook for production
     const useWebhook = process.env.TELEGRAM_USE_WEBHOOK === 'true';
     
@@ -70,6 +77,10 @@ export const initializeBot = () => {
     setupBotHandlers();
     console.log('✅ Telegram bot handlers set up');
     
+    // Mark as successfully initialized
+    botInitialized = true;
+    botInitializationAttempts = 0; // Reset on success
+    
     // Test that bot can receive updates
     if (!useWebhook) {
       console.log('📡 Bot is polling for messages. Send /start to test.');
@@ -77,8 +88,11 @@ export const initializeBot = () => {
     
     return bot;
   } catch (error) {
-    console.error('❌ Failed to initialize Telegram bot:', error);
+    console.error('❌ Failed to initialize Telegram bot:', error.message || error);
     console.error('Error details:', error.stack);
+    bot = null;
+    botInitialized = false;
+    // Don't throw - let server continue
     return null;
   }
 };
