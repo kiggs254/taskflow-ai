@@ -5,7 +5,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
 import taskRoutes from './routes/tasks.js';
 import aiRoutes from './routes/ai.js';
-import { authenticate } from './middleware/auth.js';
+import queryParamRoutes from './routes/queryParams.js';
 
 const app = express();
 
@@ -19,52 +19,19 @@ app.get('/', (req, res) => {
   res.json({ message: 'TaskFlow API Online' });
 });
 
-// Middleware to handle query parameter routing (for backward compatibility with PHP backend)
-app.use((req, res, next) => {
-  const action = req.query.action;
+// Handle query parameter routing first (for backward compatibility with PHP backend)
+// This must come before the direct routes
+app.use('/api', queryParamRoutes);
 
-  if (action) {
-    // Rewrite URL based on action parameter for backward compatibility
-    // Routes are mounted at /api, so we rewrite to /api/{action}
-    if (action === 'register' && req.method === 'POST') {
-      req.url = '/register';
-      req.path = '/register';
-    } else if (action === 'login' && req.method === 'POST') {
-      req.url = '/login';
-      req.path = '/login';
-    } else if (action === 'get_tasks' && req.method === 'GET') {
-      req.url = '/get_tasks';
-      req.path = '/get_tasks';
-    } else if (action === 'sync_tasks' && req.method === 'POST') {
-      req.url = '/sync_tasks';
-      req.path = '/sync_tasks';
-    } else if (action === 'delete_task' && req.method === 'POST') {
-      req.url = '/delete_task';
-      req.path = '/delete_task';
-    } else if (action === 'complete_task' && req.method === 'POST') {
-      req.url = '/complete_task';
-      req.path = '/complete_task';
-    } else if (action === 'uncomplete_task' && req.method === 'POST') {
-      req.url = '/uncomplete_task';
-      req.path = '/uncomplete_task';
-    } else if (action === 'daily_reset' && req.method === 'POST') {
-      req.url = '/daily_reset';
-      req.path = '/daily_reset';
-    }
-  }
-
-  next();
-});
-
-// Mount routes
+// Mount routes for direct access (without query parameters)
 // Auth routes (no authentication required)
 app.use('/api', authRoutes);
 
 // Task routes (already has authenticate middleware in the router)
 app.use('/api', taskRoutes);
 
-// AI routes (require authentication)
-app.use('/api/ai', authenticate, aiRoutes);
+// AI routes (require authentication - already has authenticate in router)
+app.use('/api/ai', aiRoutes);
 
 // Error handler (must be last)
 app.use(errorHandler);

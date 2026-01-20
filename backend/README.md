@@ -95,9 +95,14 @@ All AI endpoints accept optional `provider` parameter (`openai` or `deepseek`), 
    - Use the PostgreSQL connection string from step 1
    - Set `CORS_ORIGIN` to your Netlify frontend URL
 
-4. **Set FQDN:**
+4. **Set FQDN and Enable HTTPS:**
    - Configure your domain (e.g., `api.yourdomain.com`)
-   - Coolify will handle SSL automatically
+   - **Enable SSL/HTTPS** in Coolify:
+     - Go to your application → **Settings** → **SSL/TLS**
+     - Enable **Let's Encrypt** (free SSL certificates)
+     - Coolify will automatically provision HTTPS
+   - ⚠️ **IMPORTANT**: Your backend MUST use HTTPS when frontend is on HTTPS (Netlify)
+   - Copy your HTTPS URL (e.g., `https://api.yourdomain.com` or `https://your-app.coolify.app`)
 
 ## Database Schema
 
