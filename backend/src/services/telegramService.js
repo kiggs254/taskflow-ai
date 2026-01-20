@@ -48,7 +48,14 @@ export const initializeBot = () => {
       
       // Verify polling is active
       bot.on('polling_error', (error) => {
-        console.error('❌ Polling error - bot cannot receive messages:', error.message);
+        console.error('❌ Polling error - bot cannot receive messages:', error.message || error);
+        // Don't crash - just log
+      });
+      
+      // Handle connection errors gracefully
+      bot.on('error', (error) => {
+        console.error('❌ Telegram bot connection error:', error.message || error);
+        // Don't crash on errors
       });
     }
 
@@ -383,26 +390,45 @@ const setupBotHandlers = () => {
     await bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
   });
 
-  // Handle any other message as potential task
+  // DISABLED: Auto-create drafts from messages (was causing spam)
+  // Users should use /add command instead
+  // If you want to re-enable, uncomment and add proper cooldown/message tracking
+  /*
   bot.on('message', async (msg) => {
     // Skip if it's a command
     if (msg.text && msg.text.startsWith('/')) {
       return;
     }
 
+    // Skip if already processed
+    if (globalProcessedMessages.has(msg.message_id)) {
+      return;
+    }
+
+    // Skip if it's not a text message
+    if (!msg.text || msg.text.trim().length === 0) {
+      globalProcessedMessages.add(msg.message_id);
+      return;
+    }
+
     const chatId = msg.chat.id;
+    const messageKey = `${chatId}_draft`;
     
-    console.log(`Telegram message received from user ${msg.from.id}: ${msg.text?.substring(0, 50)}`);
+    // Check cooldown (5 minutes)
+    const lastSent = globalChatCooldowns.get(messageKey);
+    if (lastSent && Date.now() - lastSent < 300000) {
+      globalProcessedMessages.add(msg.message_id);
+      return;
+    }
     
     try {
       const userId = await getUserIdFromTelegram(msg.from.id);
       if (!userId) {
-        console.log(`User ${msg.from.id} not linked, ignoring message`);
-        return; // User not linked, ignore
+        globalProcessedMessages.add(msg.message_id);
+        return;
       }
 
-      console.log(`Creating draft task for user ${userId}`);
-      // Create draft task from message
+      console.log(`Creating draft task for user ${userId} from Telegram message`);
       const aiResult = await parseTask(msg.text, 'openai');
       
       const draftTask = await createDraftTask(userId, {
@@ -421,13 +447,18 @@ const setupBotHandlers = () => {
         chatId,
         `📝 Task draft created!\n\n` +
         `Title: ${draftTask.title}\n` +
-        `Go to your TaskFlow app to approve or edit it.`
+        `Go to your TaskFlow app to approve or edit it.`,
+        { reply_to_message_id: msg.message_id }
       );
+      
+      globalChatCooldowns.set(messageKey, Date.now());
+      globalProcessedMessages.add(msg.message_id);
     } catch (error) {
-      // Log error but don't spam user
       console.error('Message handling error:', error);
+      globalProcessedMessages.add(msg.message_id);
     }
   });
+  */
   
   // Error handler for bot (prevent crashes)
   bot.on('error', (error) => {
@@ -442,19 +473,23 @@ const setupBotHandlers = () => {
     // The bot will automatically retry
   });
   
-  // Log all incoming messages for debugging (but don't process commands twice)
+  // Log all incoming messages for debugging (but don't process or respond)
   bot.on('message', (msg) => {
     // Skip if it's a command (handled by onText handlers)
     if (msg.text && msg.text.startsWith('/')) {
       return;
     }
     
-    console.log(`📨 Telegram message received:`, {
-      from: msg.from?.username || msg.from?.first_name,
-      userId: msg.from?.id,
-      chatId: msg.chat.id,
-      text: msg.text?.substring(0, 50),
-    });
+    // Only log, never respond or process
+    if (msg.message_id && !globalProcessedMessages.has(msg.message_id)) {
+      console.log(`📨 Telegram message received:`, {
+        from: msg.from?.username || msg.from?.first_name,
+        userId: msg.from?.id,
+        chatId: msg.chat.id,
+        text: msg.text?.substring(0, 50),
+      });
+      globalProcessedMessages.add(msg.message_id);
+    }
   });
   
   console.log('✅ All Telegram bot handlers registered');
