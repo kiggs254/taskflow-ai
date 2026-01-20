@@ -595,7 +595,12 @@ const setupBotHandlers = () => {
       );
 
       if (overdueTasks.length === 0) {
-        return await bot.sendMessage(chatId, '✅ No overdue tasks!');
+        try {
+          await bot.sendMessage(chatId, '✅ No overdue tasks!');
+        } catch (sendError) {
+          console.error('Error sending /overdue empty message:', sendError.message || sendError);
+        }
+        return;
       }
 
       let message = `⚠️ *Overdue Tasks* (${overdueTasks.length})\n\n`;
