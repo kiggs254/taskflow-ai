@@ -108,10 +108,8 @@ const setupBotHandlers = () => {
 
   console.log('Setting up Telegram bot handlers...');
 
-  // Track processed message IDs to prevent duplicate processing
-  const processedMessages = new Set();
+  // Use global tracking (defined at module level)
   const MESSAGE_COOLDOWN = 300000; // 5 minute cooldown per chat
-  const chatCooldowns = new Map();
 
   // /start command
   bot.onText(/\/start/, async (msg) => {
@@ -121,18 +119,23 @@ const setupBotHandlers = () => {
     const messageKey = `${chatId}_start`;
     
     // Prevent processing the same message twice
-    if (processedMessages.has(messageId)) {
+    if (globalProcessedMessages.has(messageId)) {
       console.log(`Skipping duplicate /start message ${messageId}`);
       return;
     }
     
     // Check cooldown to prevent spam
-    const lastSent = chatCooldowns.get(messageKey);
+    const lastSent = globalChatCooldowns.get(messageKey);
     if (lastSent && Date.now() - lastSent < MESSAGE_COOLDOWN) {
-      console.log(`Skipping /start - cooldown active for chat ${chatId} (${Math.round((MESSAGE_COOLDOWN - (Date.now() - lastSent)) / 1000)}s remaining)`);
-      processedMessages.add(messageId); // Mark as processed even if skipped
+      const remaining = Math.round((MESSAGE_COOLDOWN - (Date.now() - lastSent)) / 1000);
+      console.log(`Skipping /start - cooldown active for chat ${chatId} (${remaining}s remaining)`);
+      globalProcessedMessages.add(messageId); // Mark as processed even if skipped
       return;
     }
+    
+    // Mark as processed IMMEDIATELY to prevent race conditions
+    globalProcessedMessages.add(messageId);
+    globalChatCooldowns.set(messageKey, Date.now());
     
     console.log(`/start command received from user ${userId} in chat ${chatId}, message ${messageId}`);
     
