@@ -1410,8 +1410,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<{id: string, message: string}[]>([]);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
-  const [previousDraftCount, setPreviousDraftCount] = useState<number>(0);
-  const [previousTasksCount, setPreviousTasksCount] = useState<number>(0);
+  const previousDraftCountRef = useRef<number>(0);
+  const previousTasksCountRef = useRef<number>(0);
   
   // Power User Features
   const [searchQuery, setSearchQuery] = useState('');
@@ -1488,15 +1488,15 @@ export default function App() {
       const newCount = drafts.length;
       
       // Play sound if new drafts arrived
-      if (newCount > previousDraftCount && previousDraftCount > 0) {
-        const newDraftsCount = newCount - previousDraftCount;
+      if (newCount > previousDraftCountRef.current && previousDraftCountRef.current > 0) {
+        const newDraftsCount = newCount - previousDraftCountRef.current;
         playSound('complete'); // Use existing sound
         // Show notification
         addNotification(`📧 ${newDraftsCount} new draft task${newDraftsCount > 1 ? 's' : ''} arrived!`);
       }
       
       setDraftTasksCount(newCount);
-      setPreviousDraftCount(newCount);
+      previousDraftCountRef.current = newCount;
     } catch (error) {
       console.error('Failed to fetch draft tasks count:', error);
     }
@@ -1526,8 +1526,7 @@ export default function App() {
     }, 30000); // Poll every 30 seconds
     
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, view]); // Only depend on token and view, fetchData uses previousTasksCount from closure
+  }, [token, view]);
 
   // Fetch Data on Auth
   useEffect(() => {
