@@ -625,9 +625,6 @@ const setupBotHandlers = () => {
     try {
       await bot.sendMessage(chatId, helpText, { parse_mode: 'HTML' });
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:539',message:'/help sendMessage ERROR',data:{error:error?.message,code:error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
       console.error('Error sending /help message:', error.message || error);
       // Fallback to plain text if HTML parsing fails
       try {
