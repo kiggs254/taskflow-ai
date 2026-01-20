@@ -167,20 +167,17 @@ const setupBotHandlers = () => {
         );
       }
       
-      chatCooldowns.set(messageKey, Date.now());
-      processedMessages.add(messageId);
-      
+      // Already marked above, just clean up
       // Clean up old processed messages (keep last 1000)
-      if (processedMessages.size > 1000) {
-        const oldest = Array.from(processedMessages).slice(0, 500);
-        oldest.forEach(id => processedMessages.delete(id));
+      if (globalProcessedMessages.size > 1000) {
+        const oldest = Array.from(globalProcessedMessages).slice(0, 500);
+        oldest.forEach(id => globalProcessedMessages.delete(id));
       }
       
       console.log(`Response sent to user ${userId}`);
     } catch (error) {
       console.error(`Error sending /start response to user ${userId}:`, error);
-      // Mark as processed even on error to prevent retry spam
-      processedMessages.add(messageId);
+      // Already marked as processed above
     }
   });
 
