@@ -1409,6 +1409,7 @@ export default function App() {
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [notifications, setNotifications] = useState<{id: string, message: string}[]>([]);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
   
   // Power User Features
   const [searchQuery, setSearchQuery] = useState('');
@@ -1477,6 +1478,43 @@ export default function App() {
     }
   }, []);
 
+  // Fetch draft tasks count
+  const fetchDraftTasksCount = async () => {
+    if (!token) return;
+    try {
+      const drafts = await api.draftTasks.getAll(token, 'pending');
+      setDraftTasksCount(drafts.length);
+    } catch (error) {
+      console.error('Failed to fetch draft tasks count:', error);
+    }
+  };
+
+  // Poll for draft tasks count (every 30 seconds)
+  useEffect(() => {
+    if (!token) return;
+    
+    // Fetch immediately
+    fetchDraftTasksCount();
+    
+    // Then poll every 30 seconds
+    const interval = setInterval(() => {
+      fetchDraftTasksCount();
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, [token]);
+
+  // Poll for new tasks when on dashboard (every 30 seconds)
+  useEffect(() => {
+    if (!token || view !== AppView.DASHBOARD) return;
+    
+    const interval = setInterval(() => {
+      fetchData();
+    }, 30000); // Poll every 30 seconds
+    
+    return () => clearInterval(interval);
+  }, [token, view]);
+
   // Fetch Data on Auth
   useEffect(() => {
     if (token && user) {
@@ -1526,6 +1564,11 @@ export default function App() {
       // *** END OF FIX ***
 
       setTasks(fetchedTasks);
+      
+      // Refresh draft tasks count after fetching tasks (in case new drafts were created)
+      if (token) {
+        fetchDraftTasksCount();
+      }
       
       // Calculate daily stats from tasks
       // UPDATED LOGIC: Respect "last_reset_at" if it exists, handle date parsing safely
@@ -2062,9 +2105,16 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => setView(AppView.DRAFT_TASKS)}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.DRAFT_TASKS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center justify-between gap-3 ${view === AppView.DRAFT_TASKS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
-                  <Mail className="w-4 h-4" /> Draft Tasks
+                  <div className="flex items-center gap-3">
+                    <Mail className="w-4 h-4" /> Draft Tasks
+                  </div>
+                  {draftTasksCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-accent text-white text-xs font-bold min-w-[20px] text-center">
+                      {draftTasksCount > 99 ? '99+' : draftTasksCount}
+                    </span>
+                  )}
                 </button>
                 <button 
                   onClick={() => setView(AppView.SETTINGS)}
@@ -2337,7 +2387,12 @@ export default function App() {
           {view === AppView.COMPLETED_TASKS && <CompletedTasksScreen tasks={completedTasksAll} onBack={() => setView(AppView.DASHBOARD)} onExport={handleExport} onUncomplete={uncompleteTask} />}
 
           {/* Draft Tasks View */}
-          {view === AppView.DRAFT_TASKS && token && <DraftTasksView token={token} />}
+          {view === AppView.DRAFT_TASKS && token && (
+            <DraftTasksView 
+              token={token} 
+              onDraftCountChange={setDraftTasksCount}
+            />
+          )}
 
           {/* Settings View */}
           {view === AppView.SETTINGS && user && <SettingsScreen user={user} onLogout={handleLogout} onBack={() => setView(AppView.DASHBOARD)} token={token!} />}

@@ -6,9 +6,10 @@ import { Mail, MessageSquare, CheckCircle2, X } from 'lucide-react';
 
 interface DraftTasksViewProps {
   token: string;
+  onDraftCountChange?: (count: number) => void;
 }
 
-export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token }) => {
+export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCountChange }) => {
   const [drafts, setDrafts] = useState<DraftTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStatus, setSelectedStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
@@ -17,11 +18,25 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token }) => {
     loadDrafts();
   }, [selectedStatus]);
 
+  // Poll for new drafts when viewing this page (every 15 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadDrafts();
+    }, 15000); // Poll every 15 seconds when on draft tasks view
+    
+    return () => clearInterval(interval);
+  }, [selectedStatus]);
+
   const loadDrafts = async () => {
     setLoading(true);
     try {
       const data = await api.draftTasks.getAll(token, selectedStatus);
       setDrafts(data);
+      
+      // Update parent component with pending count
+      if (onDraftCountChange && selectedStatus === 'pending') {
+        onDraftCountChange(data.length);
+      }
     } catch (error) {
       console.error('Failed to load draft tasks:', error);
     } finally {
@@ -33,6 +48,11 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token }) => {
     try {
       await api.draftTasks.approve(token, id, edits);
       await loadDrafts();
+      // Notify parent to refresh tasks and update count
+      if (onDraftCountChange) {
+        const updatedDrafts = await api.draftTasks.getAll(token, 'pending');
+        onDraftCountChange(updatedDrafts.length);
+      }
     } catch (error) {
       console.error('Failed to approve draft:', error);
       alert('Failed to approve draft task.');
@@ -45,6 +65,10 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token }) => {
     try {
       await api.draftTasks.reject(token, id);
       await loadDrafts();
+      // Update count
+      if (onDraftCountChange && selectedStatus === 'pending') {
+        onDraftCountChange(drafts.length - 1);
+      }
     } catch (error) {
       console.error('Failed to reject draft:', error);
       alert('Failed to reject draft task.');
