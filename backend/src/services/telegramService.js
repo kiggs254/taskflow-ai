@@ -477,6 +477,10 @@ const setupBotHandlers = () => {
   });
   */
   
+  // Mark handlers as set up
+  handlersSetup = true;
+  console.log('✅ All bot handlers registered');
+  
   // Error handler for bot (prevent crashes)
   bot.on('error', (error) => {
     console.error('Telegram bot error:', error.message || error);
@@ -490,7 +494,9 @@ const setupBotHandlers = () => {
     // The bot will automatically retry
   });
   
-  // Log all incoming messages for debugging (but don't process or respond)
+  // DISABLED: Message logging handler (was causing duplicate processing)
+  // Only enable if needed for debugging
+  /*
   bot.on('message', (msg) => {
     // Skip if it's a command (handled by onText handlers)
     if (msg.text && msg.text.startsWith('/')) {
@@ -508,6 +514,7 @@ const setupBotHandlers = () => {
       globalProcessedMessages.add(msg.message_id);
     }
   });
+  */
   
   console.log('✅ All Telegram bot handlers registered');
 };
