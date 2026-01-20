@@ -65,8 +65,13 @@ app.use('/api', (req, res) => {
 // Error handler (must be last)
 app.use(errorHandler);
 
-// Initialize Telegram bot
-initializeBot();
+// Initialize Telegram bot (with error handling to prevent crashes)
+try {
+  initializeBot();
+} catch (error) {
+  console.error('Failed to initialize Telegram bot (non-critical):', error);
+  // Don't crash the server if bot fails to initialize
+}
 
 // Start scheduled jobs
 if (config.nodeEnv === 'production' || process.env.ENABLE_JOBS === 'true') {

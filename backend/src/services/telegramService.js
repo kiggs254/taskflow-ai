@@ -81,24 +81,52 @@ const setupBotHandlers = () => {
 
   console.log('Setting up Telegram bot handlers...');
 
+  // Track sent messages to prevent spam
+  const sentMessages = new Map();
+  const MESSAGE_COOLDOWN = 60000; // 1 minute cooldown per chat
+
   // /start command
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
+    const messageKey = `${chatId}_start`;
+    
+    // Check cooldown to prevent spam
+    const lastSent = sentMessages.get(messageKey);
+    if (lastSent && Date.now() - lastSent < MESSAGE_COOLDOWN) {
+      console.log(`Skipping /start - cooldown active for chat ${chatId}`);
+      return;
+    }
     
     console.log(`/start command received from user ${userId} in chat ${chatId}`);
     
     try {
-      await bot.sendMessage(
-        chatId,
-        `👋 Welcome to TaskFlow.AI!\n\n` +
-        `To get started, link your Telegram account to your TaskFlow account.\n\n` +
-        `1. Go to your TaskFlow app settings\n` +
-        `2. Find the Telegram integration section\n` +
-        `3. Copy the linking code\n` +
-        `4. Use /link <code> to connect\n\n` +
-        `Use /help to see all commands.`
+      // Check if user is already linked
+      const integration = await query(
+        `SELECT user_id FROM telegram_integrations WHERE telegram_user_id = $1`,
+        [userId]
       );
+
+      if (integration.rows.length > 0) {
+        await bot.sendMessage(
+          chatId,
+          `✅ You're already linked to TaskFlow.AI!\n\n` +
+          `Use /help to see available commands.`
+        );
+      } else {
+        await bot.sendMessage(
+          chatId,
+          `👋 Welcome to TaskFlow.AI!\n\n` +
+          `To get started, link your Telegram account to your TaskFlow account.\n\n` +
+          `1. Go to your TaskFlow app settings\n` +
+          `2. Find the Telegram integration section\n` +
+          `3. Copy the linking code\n` +
+          `4. Use /link <code> to connect\n\n` +
+          `Use /help to see all commands.`
+        );
+      }
+      
+      sentMessages.set(messageKey, Date.now());
       console.log(`Response sent to user ${userId}`);
     } catch (error) {
       console.error(`Error sending /start response to user ${userId}:`, error);
@@ -374,24 +402,31 @@ const setupBotHandlers = () => {
     }
   });
   
-  // Error handler for bot
+  // Error handler for bot (prevent crashes)
   bot.on('error', (error) => {
-    console.error('Telegram bot error:', error);
+    console.error('Telegram bot error:', error.message || error);
+    // Don't throw - just log the error
   });
   
-  // Polling error handler
+  // Polling error handler (prevent crashes)
   bot.on('polling_error', (error) => {
-    console.error('Telegram bot polling error:', error);
+    console.error('Telegram bot polling error:', error.message || error);
+    // Don't throw - just log the error
+    // The bot will automatically retry
   });
   
-  // Log all incoming messages for debugging
+  // Log all incoming messages for debugging (but don't process commands twice)
   bot.on('message', (msg) => {
+    // Skip if it's a command (handled by onText handlers)
+    if (msg.text && msg.text.startsWith('/')) {
+      return;
+    }
+    
     console.log(`📨 Telegram message received:`, {
       from: msg.from?.username || msg.from?.first_name,
       userId: msg.from?.id,
       chatId: msg.chat.id,
       text: msg.text?.substring(0, 50),
-      isCommand: msg.text?.startsWith('/'),
     });
   });
   
