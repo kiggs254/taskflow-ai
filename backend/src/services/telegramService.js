@@ -26,6 +26,7 @@ export const initializeBot = () => {
       console.log('Initializing Telegram bot with webhook mode');
       bot = new TelegramBot(token);
       console.log('⚠️ Webhook mode: Make sure webhook is set up at /api/telegram/webhook');
+      console.log('⚠️ In webhook mode, bot will NOT receive messages until webhook is configured');
     } else {
       console.log('Initializing Telegram bot with polling mode');
       bot = new TelegramBot(token, { 
@@ -38,6 +39,11 @@ export const initializeBot = () => {
         }
       });
       console.log('✅ Polling started - bot will receive messages automatically');
+      
+      // Verify polling is active
+      bot.on('polling_error', (error) => {
+        console.error('❌ Polling error - bot cannot receive messages:', error.message);
+      });
     }
 
     // Verify bot is working
