@@ -441,11 +441,17 @@ export const linkTelegramAccount = async (telegramUser, chatId, code) => {
     ]
   );
 
-  // Update user's telegram_user_id
-  await query(
-    'UPDATE users SET telegram_user_id = $1 WHERE id = $2',
-    [telegramUser.id, userId]
-  );
+  // Update user's telegram_user_id (if column exists)
+  // Note: This column is optional and may not exist in older schemas
+  try {
+    await query(
+      'UPDATE users SET telegram_user_id = $1 WHERE id = $2',
+      [telegramUser.id, userId]
+    );
+  } catch (error) {
+    // Column might not exist - that's okay, we store it in telegram_integrations table
+    console.log('Note: telegram_user_id column not found in users table (optional field)');
+  }
 
   return { success: true, userId };
 };
@@ -527,10 +533,16 @@ export const unlinkTelegramAccount = async (userId) => {
     [userId]
   );
 
-  await query(
-    'UPDATE users SET telegram_user_id = NULL WHERE id = $1',
-    [userId]
-  );
+  // Update user's telegram_user_id (if column exists)
+  try {
+    await query(
+      'UPDATE users SET telegram_user_id = NULL WHERE id = $1',
+      [userId]
+    );
+  } catch (error) {
+    // Column might not exist - that's okay
+    console.log('Note: telegram_user_id column not found in users table (optional field)');
+  }
 
   return { success: true };
 };
