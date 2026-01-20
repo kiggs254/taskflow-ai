@@ -403,21 +403,31 @@ const setupBotHandlers = () => {
         return;
       }
 
-      // Use AI to parse task
+      // Use AI to parse task (pass full multi-line text)
       const aiResult = await parseTask(taskText, 'openai');
       
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:407',message:'/add BEFORE createDraftTask',data:{taskTextLength:taskText.length,aiTitle:aiResult?.title,descriptionLength:taskText.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'G'})}).catch(()=>{});
+      // #endregion
+      
       // Create draft task (user can approve/edit in app)
+      // Use first line or AI title for title, full text for description
+      const title = aiResult?.title || taskText.split('\n')[0].substring(0, 100) || taskText.substring(0, 100);
       const draftTask = await createDraftTask(userId, {
         source: 'telegram',
         sourceId: msg.message_id.toString(),
-        title: aiResult?.title || taskText,
-        description: taskText,
+        title: title,
+        description: taskText, // Store full multi-line text in description
         workspace: aiResult?.workspaceSuggestions || 'personal',
         energy: aiResult?.energy || 'medium',
         estimatedTime: aiResult?.estimatedTime || 15,
         tags: aiResult?.tags || [],
         aiConfidence: 0.8,
       });
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'telegramService.js:422',message:'/add AFTER createDraftTask',data:{draftId:draftTask.id,title:draftTask.title,descriptionLength:draftTask.description?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run3',hypothesisId:'G'})}).catch(()=>{});
+      // #endregion
       
       try {
         await bot.sendMessage(
