@@ -13,6 +13,7 @@ const MAX_INIT_ATTEMPTS = 3;
 // Global tracking to prevent spam across handler setups
 const globalProcessedMessages = new Set();
 const globalChatCooldowns = new Map();
+const processingMessages = new Map(); // Track messages being processed
 
 /**
  * Initialize Telegram bot
