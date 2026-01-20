@@ -2,6 +2,7 @@ import express from 'express';
 import { config } from './config/env.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { authenticate } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
 import taskRoutes from './routes/tasks.js';
 import aiRoutes from './routes/ai.js';
