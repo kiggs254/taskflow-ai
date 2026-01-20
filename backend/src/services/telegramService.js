@@ -123,6 +123,12 @@ const setupBotHandlers = () => {
     console.error('Cannot setup bot handlers: bot is null');
     return;
   }
+  
+  // CRITICAL: Check if handlers already set up BEFORE registering
+  if (handlersSetup) {
+    console.warn('⚠️ Handlers already set up, skipping duplicate registration');
+    return;
+  }
 
   console.log('Setting up Telegram bot handlers...');
 
@@ -142,23 +148,33 @@ const setupBotHandlers = () => {
     const messageKey = `${chatId}_start`;
     const uniqueKey = `${chatId}_${messageId}`; // More specific key for message tracking
     
-    // CRITICAL: Mark as processed IMMEDIATELY to prevent any duplicate processing
+    // Atomic check: cooldown + processing lock
+    const now = Date.now();
+    const isProcessing = processingMessages.has(uniqueKey);
+    const lastSent = globalChatCooldowns.get(messageKey);
+    const inCooldown = lastSent && (now - lastSent < MESSAGE_COOLDOWN);
+    
+    // Check if already processed
     if (globalProcessedMessages.has(uniqueKey)) {
       console.log(`[SPAM PREVENTION] Skipping duplicate /start - already processed ${uniqueKey}`);
       return;
     }
-    globalProcessedMessages.add(uniqueKey);
     
-    // Check cooldown to prevent spam (5 minutes)
-    const lastSent = globalChatCooldowns.get(messageKey);
-    if (lastSent && Date.now() - lastSent < MESSAGE_COOLDOWN) {
-      const remaining = Math.round((MESSAGE_COOLDOWN - (Date.now() - lastSent)) / 1000);
-      console.log(`[SPAM PREVENTION] Skipping /start - cooldown active for chat ${chatId} (${remaining}s remaining)`);
-      return; // Already marked as processed above
+    // Check if currently processing or in cooldown
+    if (isProcessing || inCooldown) {
+      if (isProcessing) {
+        console.log(`[SPAM PREVENTION] Skipping /start - message ${uniqueKey} is currently being processed`);
+      } else {
+        const remaining = Math.round((MESSAGE_COOLDOWN - (now - lastSent)) / 1000);
+        console.log(`[SPAM PREVENTION] Skipping /start - cooldown active for chat ${chatId} (${remaining}s remaining)`);
+      }
+      return;
     }
     
-    // Set cooldown IMMEDIATELY before any async operations
-    globalChatCooldowns.set(messageKey, Date.now());
+    // Set processing lock and cooldown atomically
+    processingMessages.set(uniqueKey, now);
+    globalChatCooldowns.set(messageKey, now);
+    globalProcessedMessages.add(uniqueKey);
     
     console.log(`/start command received from user ${userId} in chat ${chatId}, message ${messageId}`);
     
@@ -171,7 +187,7 @@ const setupBotHandlers = () => {
 
       if (integration.rows.length > 0) {
         // User is linked - DON'T send message if we just sent one (extra safety check)
-        const timeSinceLastMessage = lastSent ? Date.now() - lastSent : Infinity;
+        const timeSinceLastMessage = lastSent ? now - lastSent : Infinity;
         if (timeSinceLastMessage < 60000) { // 1 minute minimum between messages
           console.log(`[SPAM PREVENTION] Suppressing "Already linked" message - too soon after last message (${Math.round(timeSinceLastMessage/1000)}s ago)`);
           return;
@@ -207,6 +223,9 @@ const setupBotHandlers = () => {
     } catch (error) {
       console.error(`Error sending /start response to user ${userId}:`, error);
       // Don't remove from processed - keep it marked to prevent retry spam
+    } finally {
+      // Always release processing lock
+      processingMessages.delete(uniqueKey);
     }
   });
 
@@ -517,21 +536,13 @@ const setupBotHandlers = () => {
   });
   */
   
-  // Mark handlers as set up (only once)
-  if (!handlersSetup) {
-    handlersSetup = true;
-    console.log('✅ All bot handlers registered');
-  } else {
-    console.warn('⚠️ Handlers already set up, skipping duplicate registration');
-  }
-  
-  // Error handler for bot (prevent crashes)
+  // Error handler for bot (prevent crashes) - only register once
   bot.on('error', (error) => {
     console.error('Telegram bot error:', error.message || error);
     // Don't throw - just log the error
   });
   
-  // Polling error handler (prevent crashes)
+  // Polling error handler (prevent crashes) - only register once
   bot.on('polling_error', (error) => {
     console.error('Telegram bot polling error:', error.message || error);
     // Don't throw - just log the error
@@ -560,7 +571,9 @@ const setupBotHandlers = () => {
   });
   */
   
-  console.log('✅ All Telegram bot handlers registered');
+  // Mark handlers as set up (only once)
+  handlersSetup = true;
+  console.log('✅ All bot handlers registered');
 };
 
 /**
