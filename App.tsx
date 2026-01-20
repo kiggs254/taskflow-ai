@@ -14,6 +14,7 @@ import {
 import { DraftTasksView } from './components/DraftTasksView';
 import { GmailSettings } from './components/GmailSettings';
 import { TelegramSettings } from './components/TelegramSettings';
+import { SlackSettings } from './components/SlackSettings';
 import { 
   parseTaskWithGemini, 
   getDailyMotivation, 
@@ -1211,6 +1212,7 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
               <div className="space-y-4">
                  <GmailSettings token={token} />
                  <TelegramSettings token={token} />
+                 <SlackSettings token={token} />
               </div>
            </div>
 

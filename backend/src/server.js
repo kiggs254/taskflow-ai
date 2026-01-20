@@ -9,9 +9,11 @@ import aiRoutes from './routes/ai.js';
 import queryParamRoutes from './routes/queryParams.js';
 import gmailRoutes from './routes/gmail.js';
 import telegramRoutes from './routes/telegram.js';
+import slackRoutes from './routes/slack.js';
 import draftTasksRoutes from './routes/draftTasks.js';
 import { initializeBot } from './services/telegramService.js';
 import { startEmailScanner } from './jobs/emailScanner.js';
+import { startSlackScanner } from './jobs/slackScanner.js';
 import { startOverdueNotifier, startDailySummary } from './jobs/overdueNotifier.js';
 
 const app = express();
@@ -34,6 +36,9 @@ app.use('/api/gmail', gmailRoutes);
 
 // Telegram routes (webhook doesn't require auth)
 app.use('/api/telegram', telegramRoutes);
+
+// Slack routes (callback doesn't require auth - routes handle auth individually)
+app.use('/api/slack', slackRoutes);
 
 // AI routes (require authentication - already has authenticate in router)
 app.use('/api/ai', aiRoutes);
@@ -66,6 +71,7 @@ initializeBot();
 // Start scheduled jobs
 if (config.nodeEnv === 'production' || process.env.ENABLE_JOBS === 'true') {
   startEmailScanner();
+  startSlackScanner();
   startOverdueNotifier();
   startDailySummary();
   console.log('Scheduled jobs started');

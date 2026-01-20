@@ -65,7 +65,7 @@ export interface AIParsedTask {
 export interface DraftTask {
   id: number;
   userId: number;
-  source: 'gmail' | 'telegram';
+  source: 'gmail' | 'telegram' | 'slack';
   sourceId?: string;
   title: string;
   description?: string;

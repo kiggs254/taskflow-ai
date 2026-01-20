@@ -84,6 +84,23 @@ CREATE TABLE IF NOT EXISTS telegram_integrations (
     UNIQUE(telegram_user_id)
 );
 
+-- Slack integrations table
+CREATE TABLE IF NOT EXISTS slack_integrations (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slack_user_id VARCHAR(255) NOT NULL,
+    slack_team_id VARCHAR(255) NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    token_expires_at TIMESTAMP WITH TIME ZONE,
+    last_scan_at TIMESTAMP WITH TIME ZONE,
+    scan_frequency INTEGER DEFAULT 15,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id),
+    UNIQUE(slack_user_id, slack_team_id)
+);
+
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -94,6 +111,8 @@ CREATE INDEX IF NOT EXISTS idx_draft_tasks_user_id ON draft_tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_draft_tasks_status ON draft_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_telegram_integrations_user_id ON telegram_integrations(user_id);
 CREATE INDEX IF NOT EXISTS idx_telegram_integrations_telegram_user_id ON telegram_integrations(telegram_user_id);
+CREATE INDEX IF NOT EXISTS idx_slack_integrations_user_id ON slack_integrations(user_id);
+CREATE INDEX IF NOT EXISTS idx_slack_integrations_slack_user_id ON slack_integrations(slack_user_id);
 
 -- Comments for documentation
 COMMENT ON TABLE users IS 'User accounts with gamification stats';
@@ -102,5 +121,6 @@ COMMENT ON COLUMN tasks.tags IS 'JSON array of tag strings';
 COMMENT ON COLUMN tasks.dependencies IS 'JSON array of task IDs this task depends on';
 COMMENT ON COLUMN tasks.recurrence IS 'JSON object with frequency and interval for recurring tasks';
 COMMENT ON TABLE gmail_integrations IS 'Gmail OAuth2 integrations for email scanning';
-COMMENT ON TABLE draft_tasks IS 'Tasks extracted from Gmail/Telegram pending user approval';
+COMMENT ON TABLE draft_tasks IS 'Tasks extracted from Gmail/Telegram/Slack pending user approval';
 COMMENT ON TABLE telegram_integrations IS 'Telegram bot account linkages and notification settings';
+COMMENT ON TABLE slack_integrations IS 'Slack OAuth2 integrations for monitoring mentions and creating tasks';

@@ -148,6 +148,60 @@ export const api = {
     },
   },
 
+  // Slack Integration
+  slack: {
+    connect: async (token: string) => {
+      const res = await fetch(`${API_BASE}/slack/connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error('Failed to get Slack auth URL');
+      return res.json();
+    },
+    status: async (token: string) => {
+      const res = await fetch(`${API_BASE}/slack/status`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to get Slack status');
+      return res.json();
+    },
+    scanNow: async (token: string, maxMentions = 50) => {
+      const res = await fetch(`${API_BASE}/slack/scan-now`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ maxMentions }),
+      });
+      if (!res.ok) throw new Error('Failed to scan Slack mentions');
+      return res.json();
+    },
+    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean }) => {
+      const res = await fetch(`${API_BASE}/slack/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) throw new Error('Failed to update Slack settings');
+      return res.json();
+    },
+    disconnect: async (token: string) => {
+      const res = await fetch(`${API_BASE}/slack/disconnect`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to disconnect Slack');
+      return res.json();
+    },
+  },
+
   // Telegram Integration
   telegram: {
     getLinkCode: async (token: string) => {

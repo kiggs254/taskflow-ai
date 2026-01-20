@@ -1,0 +1,53 @@
+import cron from 'node-cron';
+import { query } from '../config/database.js';
+import { scanSlackMentions } from '../services/slackService.js';
+
+/**
+ * Scheduled job to scan Slack mentions for all users with Slack connected
+ * Runs every 15 minutes by default (more frequent than email since mentions are time-sensitive)
+ */
+export const startSlackScanner = () => {
+  // Run every 15 minutes
+  cron.schedule('*/15 * * * *', async () => {
+    console.log('Running scheduled Slack mention scan...');
+    
+    try {
+      // Get all enabled Slack integrations
+      const result = await query(
+        `SELECT user_id, scan_frequency, last_scan_at
+         FROM slack_integrations
+         WHERE enabled = true`
+      );
+
+      for (const integration of result.rows) {
+        try {
+          const lastScanAt = integration.last_scan_at;
+          const scanFrequency = integration.scan_frequency || 15; // minutes
+          
+          // Check if it's time to scan
+          if (lastScanAt) {
+            const lastScan = new Date(lastScanAt);
+            const now = new Date();
+            const minutesSinceLastScan = (now - lastScan) / (1000 * 60);
+            
+            if (minutesSinceLastScan < scanFrequency) {
+              // Not time to scan yet
+              continue;
+            }
+          }
+
+          // Scan mentions for this user
+          await scanSlackMentions(integration.user_id, 50);
+          console.log(`Slack mention scan completed for user ${integration.user_id}`);
+        } catch (error) {
+          console.error(`Error scanning Slack mentions for user ${integration.user_id}:`, error);
+          // Continue with next user
+        }
+      }
+    } catch (error) {
+      console.error('Slack scanner job error:', error);
+    }
+  });
+
+  console.log('Slack scanner job scheduled (runs every 15 minutes)');
+};

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DraftTask } from '../types';
 import { api } from '../services/apiService';
 import { DraftTaskCard } from './DraftTaskCard';
-import { Mail, MessageSquare, CheckCircle2, X } from 'lucide-react';
+import { Mail, MessageSquare, CheckCircle2, X, Hash } from 'lucide-react';
 
 interface DraftTasksViewProps {
   token: string;
@@ -102,6 +102,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
 
   const gmailCount = drafts.filter(d => d.source === 'gmail').length;
   const telegramCount = drafts.filter(d => d.source === 'telegram').length;
+  const slackCount = drafts.filter(d => d.source === 'slack').length;
 
   if (loading) {
     return (
@@ -171,7 +172,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
         </div>
       ) : (
         <>
-          {(gmailCount > 0 || telegramCount > 0) && (
+          {(gmailCount > 0 || telegramCount > 0 || slackCount > 0) && (
             <div className="flex gap-4 text-sm text-slate-400">
               {gmailCount > 0 && (
                 <div className="flex items-center gap-2">
@@ -183,6 +184,12 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
                 <div className="flex items-center gap-2">
                   <MessageSquare className="w-4 h-4" />
                   {telegramCount} from Telegram
+                </div>
+              )}
+              {slackCount > 0 && (
+                <div className="flex items-center gap-2">
+                  <Hash className="w-4 h-4" />
+                  {slackCount} from Slack
                 </div>
               )}
             </div>

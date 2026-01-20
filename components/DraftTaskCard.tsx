@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { DraftTask, WorkspaceType, EnergyLevel } from '../types';
-import { CheckCircle2, X, Pencil, Mail, MessageSquare } from 'lucide-react';
+import { CheckCircle2, X, Pencil, Mail, MessageSquare, Hash } from 'lucide-react';
 
 interface DraftTaskCardProps {
   draft: DraftTask;
@@ -37,7 +37,7 @@ export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
     low: 'border-l-success bg-success/5',
   };
 
-  const sourceIcon = draft.source === 'gmail' ? Mail : MessageSquare;
+  const sourceIcon = draft.source === 'gmail' ? Mail : draft.source === 'slack' ? Hash : MessageSquare;
   const SourceIcon = sourceIcon;
 
   if (isEditing) {
