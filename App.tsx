@@ -1526,7 +1526,8 @@ export default function App() {
     }, 30000); // Poll every 30 seconds
     
     return () => clearInterval(interval);
-  }, [token, view, previousTasksCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, view]); // Only depend on token and view, fetchData uses previousTasksCount from closure
 
   // Fetch Data on Auth
   useEffect(() => {
