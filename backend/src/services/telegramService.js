@@ -229,7 +229,7 @@ const setupBotHandlers = () => {
     }
   });
 
-  // /link command
+  // /link command with spam prevention
   bot.onText(/\/link (.+)/, async (msg, match) => {
     if (!bot) {
       console.error('Bot is null in /link handler');
@@ -237,21 +237,55 @@ const setupBotHandlers = () => {
     }
     
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const messageId = msg.message_id;
+    const uniqueKey = `${chatId}_${messageId}_link`;
+    const messageKey = `${chatId}_link`;
+    
+    // Atomic check: processing lock + cooldown
+    const now = Date.now();
+    const isProcessing = processingMessages.has(uniqueKey);
+    const lastSent = globalChatCooldowns.get(messageKey);
+    const inCooldown = lastSent && (now - lastSent < MESSAGE_COOLDOWN);
+    
+    if (globalProcessedMessages.has(uniqueKey)) {
+      console.log(`[SPAM PREVENTION] Skipping duplicate /link - already processed ${uniqueKey}`);
+      return;
+    }
+    
+    if (isProcessing || inCooldown) {
+      if (isProcessing) {
+        console.log(`[SPAM PREVENTION] Skipping /link - message ${uniqueKey} is currently being processed`);
+      } else {
+        const remaining = Math.round((MESSAGE_COOLDOWN - (now - lastSent)) / 1000);
+        console.log(`[SPAM PREVENTION] Skipping /link - cooldown active for chat ${chatId} (${remaining}s remaining)`);
+      }
+      return;
+    }
+    
+    // Set processing lock and cooldown atomically
+    processingMessages.set(uniqueKey, now);
+    globalChatCooldowns.set(messageKey, now);
+    globalProcessedMessages.add(uniqueKey);
+    
     const code = match[1];
     
-    console.log(`Telegram /link command received from user ${msg.from.id}, code: ${code}`);
+    console.log(`Telegram /link command received from user ${userId}, code: ${code}`);
     
     try {
       const result = await linkTelegramAccount(msg.from, chatId, code);
       console.log(`Telegram account linked successfully for user ${result.userId}`);
       await bot.sendMessage(chatId, `✅ Successfully linked! You can now manage your tasks via Telegram.\n\nTry /help to see available commands.`);
     } catch (error) {
-      console.error(`Telegram link error for user ${msg.from.id}:`, error);
+      console.error(`Telegram link error for user ${userId}:`, error);
       try {
         await bot.sendMessage(chatId, `❌ ${error.message}\n\nUse /help for instructions.`);
       } catch (sendError) {
         console.error('Error sending error message:', sendError);
       }
+    } finally {
+      // Always release processing lock
+      processingMessages.delete(uniqueKey);
     }
   });
 
