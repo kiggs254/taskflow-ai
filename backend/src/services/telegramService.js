@@ -25,6 +25,7 @@ export const initializeBot = () => {
     if (useWebhook) {
       console.log('Initializing Telegram bot with webhook mode');
       bot = new TelegramBot(token);
+      console.log('⚠️ Webhook mode: Make sure webhook is set up at /api/telegram/webhook');
     } else {
       console.log('Initializing Telegram bot with polling mode');
       bot = new TelegramBot(token, { 
@@ -36,20 +37,29 @@ export const initializeBot = () => {
           }
         }
       });
+      console.log('✅ Polling started - bot will receive messages automatically');
     }
 
     // Verify bot is working
     bot.getMe().then((botInfo) => {
       console.log(`✅ Telegram bot started: ${botInfo.first_name} (@${botInfo.username})`);
+      console.log(`   Bot ID: ${botInfo.id}`);
     }).catch((error) => {
       console.error('❌ Failed to verify Telegram bot:', error);
     });
 
     setupBotHandlers();
-    console.log('Telegram bot handlers set up');
+    console.log('✅ Telegram bot handlers set up');
+    
+    // Test that bot can receive updates
+    if (!useWebhook) {
+      console.log('📡 Bot is polling for messages. Send /start to test.');
+    }
+    
     return bot;
   } catch (error) {
-    console.error('Failed to initialize Telegram bot:', error);
+    console.error('❌ Failed to initialize Telegram bot:', error);
+    console.error('Error details:', error.stack);
     return null;
   }
 };
@@ -58,23 +68,35 @@ export const initializeBot = () => {
  * Setup bot command handlers
  */
 const setupBotHandlers = () => {
-  if (!bot) return;
+  if (!bot) {
+    console.error('Cannot setup bot handlers: bot is null');
+    return;
+  }
+
+  console.log('Setting up Telegram bot handlers...');
 
   // /start command
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    await bot.sendMessage(
-      chatId,
-      `👋 Welcome to TaskFlow.AI!\n\n` +
-      `To get started, link your Telegram account to your TaskFlow account.\n\n` +
-      `1. Go to your TaskFlow app settings\n` +
-      `2. Find the Telegram integration section\n` +
-      `3. Copy the linking code\n` +
-      `4. Use /link <code> to connect\n\n` +
-      `Use /help to see all commands.`
-    );
+    console.log(`/start command received from user ${userId} in chat ${chatId}`);
+    
+    try {
+      await bot.sendMessage(
+        chatId,
+        `👋 Welcome to TaskFlow.AI!\n\n` +
+        `To get started, link your Telegram account to your TaskFlow account.\n\n` +
+        `1. Go to your TaskFlow app settings\n` +
+        `2. Find the Telegram integration section\n` +
+        `3. Copy the linking code\n` +
+        `4. Use /link <code> to connect\n\n` +
+        `Use /help to see all commands.`
+      );
+      console.log(`Response sent to user ${userId}`);
+    } catch (error) {
+      console.error(`Error sending /start response to user ${userId}:`, error);
+    }
   });
 
   // /link command
@@ -355,6 +377,19 @@ const setupBotHandlers = () => {
   bot.on('polling_error', (error) => {
     console.error('Telegram bot polling error:', error);
   });
+  
+  // Log all incoming messages for debugging
+  bot.on('message', (msg) => {
+    console.log(`📨 Telegram message received:`, {
+      from: msg.from?.username || msg.from?.first_name,
+      userId: msg.from?.id,
+      chatId: msg.chat.id,
+      text: msg.text?.substring(0, 50),
+      isCommand: msg.text?.startsWith('/'),
+    });
+  });
+  
+  console.log('✅ All Telegram bot handlers registered');
 };
 
 /**
