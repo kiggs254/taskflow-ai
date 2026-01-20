@@ -81,24 +81,33 @@ const setupBotHandlers = () => {
 
   console.log('Setting up Telegram bot handlers...');
 
-  // Track sent messages to prevent spam
-  const sentMessages = new Map();
-  const MESSAGE_COOLDOWN = 60000; // 1 minute cooldown per chat
+  // Track processed message IDs to prevent duplicate processing
+  const processedMessages = new Set();
+  const MESSAGE_COOLDOWN = 300000; // 5 minute cooldown per chat
+  const chatCooldowns = new Map();
 
   // /start command
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
+    const messageId = msg.message_id;
     const messageKey = `${chatId}_start`;
     
-    // Check cooldown to prevent spam
-    const lastSent = sentMessages.get(messageKey);
-    if (lastSent && Date.now() - lastSent < MESSAGE_COOLDOWN) {
-      console.log(`Skipping /start - cooldown active for chat ${chatId}`);
+    // Prevent processing the same message twice
+    if (processedMessages.has(messageId)) {
+      console.log(`Skipping duplicate /start message ${messageId}`);
       return;
     }
     
-    console.log(`/start command received from user ${userId} in chat ${chatId}`);
+    // Check cooldown to prevent spam
+    const lastSent = chatCooldowns.get(messageKey);
+    if (lastSent && Date.now() - lastSent < MESSAGE_COOLDOWN) {
+      console.log(`Skipping /start - cooldown active for chat ${chatId} (${Math.round((MESSAGE_COOLDOWN - (Date.now() - lastSent)) / 1000)}s remaining)`);
+      processedMessages.add(messageId); // Mark as processed even if skipped
+      return;
+    }
+    
+    console.log(`/start command received from user ${userId} in chat ${chatId}, message ${messageId}`);
     
     try {
       // Check if user is already linked
@@ -108,28 +117,40 @@ const setupBotHandlers = () => {
       );
 
       if (integration.rows.length > 0) {
+        // User is linked - send brief message only once
         await bot.sendMessage(
           chatId,
-          `✅ You're already linked to TaskFlow.AI!\n\n` +
-          `Use /help to see available commands.`
+          `✅ Already linked! Use /help for commands.`,
+          { reply_to_message_id: messageId } // Reply to the command
         );
       } else {
+        // User not linked - send welcome
         await bot.sendMessage(
           chatId,
           `👋 Welcome to TaskFlow.AI!\n\n` +
-          `To get started, link your Telegram account to your TaskFlow account.\n\n` +
-          `1. Go to your TaskFlow app settings\n` +
-          `2. Find the Telegram integration section\n` +
-          `3. Copy the linking code\n` +
-          `4. Use /link <code> to connect\n\n` +
-          `Use /help to see all commands.`
+          `To link your account:\n` +
+          `1. Go to TaskFlow app settings\n` +
+          `2. Get your linking code\n` +
+          `3. Use /link <code> here\n\n` +
+          `Use /help for commands.`,
+          { reply_to_message_id: messageId }
         );
       }
       
-      sentMessages.set(messageKey, Date.now());
+      chatCooldowns.set(messageKey, Date.now());
+      processedMessages.add(messageId);
+      
+      // Clean up old processed messages (keep last 1000)
+      if (processedMessages.size > 1000) {
+        const oldest = Array.from(processedMessages).slice(0, 500);
+        oldest.forEach(id => processedMessages.delete(id));
+      }
+      
       console.log(`Response sent to user ${userId}`);
     } catch (error) {
       console.error(`Error sending /start response to user ${userId}:`, error);
+      // Mark as processed even on error to prevent retry spam
+      processedMessages.add(messageId);
     }
   });
 
