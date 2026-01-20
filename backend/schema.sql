@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     id VARCHAR(255) PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
+    description TEXT,
     workspace VARCHAR(50),
     energy VARCHAR(50),
     status VARCHAR(50) DEFAULT 'todo',
