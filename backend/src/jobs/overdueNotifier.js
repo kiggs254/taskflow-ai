@@ -9,7 +9,18 @@ import { sendNotification } from '../services/telegramService.js';
 export const startOverdueNotifier = () => {
   // Run every hour at minute 15 (15 minutes past the hour)
   cron.schedule('15 * * * *', async () => {
-    console.log('Checking for overdue tasks...');
+    // Convert to user's local time (UTC+3) and only notify during working hours (09:00–17:00)
+    const TZ_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC+3
+    const localNow = new Date(Date.now() + TZ_OFFSET_MS);
+    const localHour = localNow.getUTCHours();
+
+    // Skip notifications outside 09:00–17:00 local time
+    if (localHour < 9 || localHour >= 17) {
+      console.log('Skipping overdue check outside working hours (UTC+3 09:00–17:00).');
+      return;
+    }
+
+    console.log('Checking for overdue tasks (within working hours)...');
     
     try {
       const now = Date.now();
@@ -79,8 +90,8 @@ export const startOverdueNotifier = () => {
  * Runs once per day at configured time
  */
 export const startDailySummary = () => {
-  // Run every day at 9:00 AM (can be customized per user)
-  cron.schedule('0 9 * * *', async () => {
+  // Run every day at 6:00 AM server time, which corresponds to 9:00 AM in UTC+3
+  cron.schedule('0 6 * * *', async () => {
     console.log('Sending daily summaries...');
     
     try {
@@ -96,11 +107,16 @@ export const startDailySummary = () => {
           const userId = userRow.user_id;
           const summaryTime = userRow.daily_summary_time || '09:00';
           
-          // Get today's tasks
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const tomorrow = new Date(today);
-          tomorrow.setDate(tomorrow.getDate() + 1);
+          // Define "today" based on UTC+3 so summaries align with local day
+          const TZ_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC+3
+          const nowUtc = Date.now();
+          const localToday = new Date(nowUtc + TZ_OFFSET_MS);
+          localToday.setHours(0, 0, 0, 0);
+          const localTomorrow = new Date(localToday);
+          localTomorrow.setDate(localTomorrow.getDate() + 1);
+
+          const todayUtcStart = localToday.getTime() - TZ_OFFSET_MS;
+          const tomorrowUtcStart = localTomorrow.getTime() - TZ_OFFSET_MS;
           
           const tasksResult = await query(
             `SELECT id, title, workspace, energy, status, due_date
@@ -110,7 +126,7 @@ export const startDailySummary = () => {
                AND (due_date IS NULL OR (due_date >= $2 AND due_date < $3))
              ORDER BY due_date ASC NULLS LAST
              LIMIT 10`,
-            [userId, today.getTime(), tomorrow.getTime()]
+            [userId, todayUtcStart, tomorrowUtcStart]
           );
 
           const tasks = tasksResult.rows;
@@ -120,7 +136,7 @@ export const startDailySummary = () => {
              WHERE user_id = $1
                AND status = 'done'
                AND completed_at >= $2`,
-            [userId, today.getTime()]
+            [userId, todayUtcStart]
           );
           
           const completedToday = parseInt(completedTodayResult.rows[0].count, 10);
