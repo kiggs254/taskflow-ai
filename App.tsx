@@ -78,19 +78,56 @@ const playSound = (type: 'complete' | 'levelUp') => {
 
 const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stats: UserStats) => void }) => {
   const [isRegister, setIsRegister] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   
   const [formData, setFormData] = useState({
     username: '',
     email: '',
     password: ''
   });
+  
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  const [resetPasswordData, setResetPasswordData] = useState({
+    password: '',
+    confirmPassword: ''
+  });
+
+  // Check for reset token in URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (token) {
+      setResetToken(token);
+      setShowResetPassword(true);
+      setShowForgotPassword(false);
+      setIsRegister(false);
+    }
+  }, []);
+
+  // Check for reset token in URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (token) {
+      setResetToken(token);
+      setShowResetPassword(true);
+      setShowForgotPassword(false);
+      setIsRegister(false);
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setSuccessMessage('');
 
     try {
       let res;
@@ -128,6 +165,64 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stat
         msg = 'Invalid email or password. Please check your credentials.';
       }
       setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const res = await api.forgotPassword(forgotPasswordEmail);
+      setSuccessMessage(res.message || 'If an account exists with this email, a password reset link has been sent.');
+      setError('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to send password reset email. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccessMessage('');
+
+    if (resetPasswordData.password !== resetPasswordData.confirmPassword) {
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
+
+    if (resetPasswordData.password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      setLoading(false);
+      return;
+    }
+
+    if (!resetToken) {
+      setError('Invalid reset token');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await api.resetPassword(resetToken, resetPasswordData.password);
+      setSuccessMessage(res.message || 'Password reset successfully! You can now sign in with your new password.');
+      setError('');
+      // Redirect to login after 2 seconds
+      setTimeout(() => {
+        setShowResetPassword(false);
+        setResetToken(null);
+        setResetPasswordData({ password: '', confirmPassword: '' });
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset password. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -185,9 +280,27 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stat
               />
             </div>
 
+            {!isRegister && (
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => { setShowForgotPassword(true); setError(''); }}
+                  className="text-xs text-slate-400 hover:text-primary transition-colors"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
+
             {error && (
               <div className="p-3 bg-red-900/20 border border-red-900/50 rounded-lg text-red-400 text-sm">
                 {error}
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="p-3 bg-emerald-900/20 border border-emerald-900/50 rounded-lg text-emerald-400 text-sm">
+                {successMessage}
               </div>
             )}
 
@@ -203,7 +316,255 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stat
 
           <div className="mt-6 text-center">
             <button 
-              onClick={() => { setIsRegister(!isRegister); setError(''); }}
+              onClick={() => { setIsRegister(!isRegister); setError(''); setSuccessMessage(''); }}
+              className="text-sm text-slate-400 hover:text-white transition-colors"
+            >
+              {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Forgot Password Screen
+  if (showForgotPassword) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 shadow-xl shadow-primary/20 mb-4">
+              <Mail className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white tracking-tight">TASKFLOW.AI</h1>
+            <p className="text-slate-400 mt-2">Reset your password</p>
+          </div>
+
+          <div className="bg-surface border border-slate-700 p-8 rounded-2xl shadow-2xl">
+            <button
+              onClick={() => { setShowForgotPassword(false); setError(''); setSuccessMessage(''); }}
+              className="mb-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to login
+            </button>
+
+            <h2 className="text-xl font-semibold text-white mb-6">Forgot Password</h2>
+            <p className="text-sm text-slate-400 mb-6">
+              Enter your email address and we'll send you a link to reset your password.
+            </p>
+
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
+                <input 
+                  type="email" 
+                  required
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
+                  value={forgotPasswordEmail}
+                  onChange={e => setForgotPasswordEmail(e.target.value)}
+                  placeholder="your@email.com"
+                />
+              </div>
+
+              {error && (
+                <div className="p-3 bg-red-900/20 border border-red-900/50 rounded-lg text-red-400 text-sm">
+                  {error}
+                </div>
+              )}
+
+              {successMessage && (
+                <div className="p-3 bg-emerald-900/20 border border-emerald-900/50 rounded-lg text-emerald-400 text-sm flex items-start gap-2">
+                  <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>{successMessage}</div>
+                </div>
+              )}
+
+              <button 
+                type="submit" 
+                disabled={loading}
+                className="w-full py-3 bg-primary hover:bg-blue-600 text-white font-bold rounded-lg transition-all flex items-center justify-center gap-2"
+              >
+                {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                Send Reset Link
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Reset Password Screen
+  if (showResetPassword) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 shadow-xl shadow-primary/20 mb-4">
+              <Lock className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white tracking-tight">TASKFLOW.AI</h1>
+            <p className="text-slate-400 mt-2">Set your new password</p>
+          </div>
+
+          <div className="bg-surface border border-slate-700 p-8 rounded-2xl shadow-2xl">
+            <h2 className="text-xl font-semibold text-white mb-6">Reset Password</h2>
+
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">New Password</label>
+                <input 
+                  type="password" 
+                  required
+                  minLength={6}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
+                  value={resetPasswordData.password}
+                  onChange={e => setResetPasswordData({...resetPasswordData, password: e.target.value})}
+                  placeholder="At least 6 characters"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Confirm Password</label>
+                <input 
+                  type="password" 
+                  required
+                  minLength={6}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
+                  value={resetPasswordData.confirmPassword}
+                  onChange={e => setResetPasswordData({...resetPasswordData, confirmPassword: e.target.value})}
+                  placeholder="Confirm your new password"
+                />
+              </div>
+
+              {error && (
+                <div className="p-3 bg-red-900/20 border border-red-900/50 rounded-lg text-red-400 text-sm">
+                  {error}
+                </div>
+              )}
+
+              {successMessage && (
+                <div className="p-3 bg-emerald-900/20 border border-emerald-900/50 rounded-lg text-emerald-400 text-sm flex items-start gap-2">
+                  <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>{successMessage}</div>
+                </div>
+              )}
+
+              <button 
+                type="submit" 
+                disabled={loading || !!successMessage}
+                className="w-full py-3 bg-primary hover:bg-blue-600 text-white font-bold rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                {successMessage ? 'Redirecting...' : 'Reset Password'}
+              </button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <button 
+                onClick={() => { setShowResetPassword(false); setResetToken(null); setError(''); setSuccessMessage(''); }}
+                className="text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Back to login
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Login/Register Screen (default)
+  return (
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 shadow-xl shadow-primary/20 mb-4">
+            <Brain className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">TASKFLOW.AI</h1>
+          <p className="text-slate-400 mt-2">Neuro-friendly task management for devs.</p>
+        </div>
+
+        <div className="bg-surface border border-slate-700 p-8 rounded-2xl shadow-2xl">
+          <h2 className="text-xl font-semibold text-white mb-6">
+            {isRegister ? 'Create Account' : 'Welcome Back'}
+          </h2>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {isRegister && (
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Username</label>
+                <input 
+                  type="text" 
+                  required
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
+                  value={formData.username}
+                  onChange={e => setFormData({...formData, username: e.target.value})}
+                />
+              </div>
+            )}
+            
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
+              <input 
+                type="email" 
+                required
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
+                value={formData.email}
+                onChange={e => setFormData({...formData, email: e.target.value})}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Password</label>
+              <input 
+                type="password" 
+                required
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
+                value={formData.password}
+                onChange={e => setFormData({...formData, password: e.target.value})}
+              />
+            </div>
+
+            {!isRegister && (
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => { setShowForgotPassword(true); setError(''); setSuccessMessage(''); }}
+                  className="text-xs text-slate-400 hover:text-primary transition-colors"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
+
+            {error && (
+              <div className="p-3 bg-red-900/20 border border-red-900/50 rounded-lg text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="p-3 bg-emerald-900/20 border border-emerald-900/50 rounded-lg text-emerald-400 text-sm">
+                {successMessage}
+              </div>
+            )}
+
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full py-3 bg-primary hover:bg-blue-600 text-white font-bold rounded-lg transition-all flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {isRegister ? 'Start Flowing' : 'Sign In'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <button 
+              onClick={() => { setIsRegister(!isRegister); setError(''); setSuccessMessage(''); }}
               className="text-sm text-slate-400 hover:text-white transition-colors"
             >
               {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
