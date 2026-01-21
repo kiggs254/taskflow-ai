@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, CheckCircle2, X, RefreshCw, Settings } from 'lucide-react';
+import { MessageSquare, CheckCircle2, X, RefreshCw, Settings, Bell } from 'lucide-react';
 import { api } from '../services/apiService';
 import { ConfirmationModal } from './ConfirmationModal';
 import { AlertModal } from './AlertModal';
@@ -13,6 +13,7 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanFrequency, setScanFrequency] = useState(15);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [disconnectConfirm, setDisconnectConfirm] = useState(false);
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
@@ -26,6 +27,9 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
       setStatus(data);
       if (data.connected && data.scanFrequency) {
         setScanFrequency(data.scanFrequency);
+      }
+      if (data.connected && data.notificationsEnabled !== undefined) {
+        setNotificationsEnabled(data.notificationsEnabled);
       }
     } catch (error) {
       console.error('Failed to load Slack status:', error);
@@ -68,7 +72,8 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
     setScanning(true);
     try {
       const result = await api.slack.scanNow(token);
-      setAlertModal({ isOpen: true, title: 'Scan Complete', message: `Found ${result.draftsCreated} potential tasks from mentions.`, type: 'success' });
+      const taskCount = result.tasksCreated || 0;
+      setAlertModal({ isOpen: true, title: 'Scan Complete', message: `Added ${taskCount} task${taskCount !== 1 ? 's' : ''} to your Job list from Slack mentions.`, type: 'success' });
       loadStatus();
     } catch (error) {
       console.error('Failed to scan Slack mentions:', error);
@@ -81,7 +86,7 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
   const handleUpdateSettings = async () => {
     setLoading(true);
     try {
-      await api.slack.updateSettings(token, { scanFrequency });
+      await api.slack.updateSettings(token, { scanFrequency, notificationsEnabled });
       setAlertModal({ isOpen: true, title: 'Success', message: 'Settings updated successfully!', type: 'success' });
       loadStatus();
     } catch (error) {
@@ -116,25 +121,46 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
             </div>
           )}
 
-          <div className="space-y-2">
-            <label className="block text-sm text-slate-300">
-              Scan Frequency (minutes)
-            </label>
-            <input
-              type="number"
-              value={scanFrequency}
-              onChange={(e) => setScanFrequency(parseInt(e.target.value, 10))}
-              min="5"
-              max="60"
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700"
-            />
-            <p className="text-xs text-slate-500">
-              How often to check for new mentions (default: 15 minutes)
-            </p>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="block text-sm text-slate-300">
+                Scan Frequency (minutes)
+              </label>
+              <input
+                type="number"
+                value={scanFrequency}
+                onChange={(e) => setScanFrequency(parseInt(e.target.value, 10))}
+                min="5"
+                max="60"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700"
+              />
+              <p className="text-xs text-slate-500">
+                How often to check for new mentions (default: 15 minutes)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={notificationsEnabled}
+                  onChange={(e) => setNotificationsEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded bg-slate-800 border-slate-700"
+                />
+                <span className="text-sm text-slate-300 flex items-center gap-2">
+                  <Bell className="w-4 h-4" />
+                  Enable Slack notifications
+                </span>
+              </label>
+              <p className="text-xs text-slate-500 ml-6">
+                Receive notifications in Slack when tasks are created from scans
+              </p>
+            </div>
+
             <button
               onClick={handleUpdateSettings}
               disabled={loading}
-              className="px-4 py-2 rounded-lg bg-primary text-white hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2"
+              className="w-full px-4 py-2 rounded-lg bg-primary text-white hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <Settings className="w-4 h-4" />
               Update Settings

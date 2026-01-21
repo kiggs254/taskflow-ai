@@ -2,7 +2,24 @@ import { WebClient } from '@slack/web-api';
 import { query } from '../config/database.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import { parseTask } from './aiService.js';
-import { createDraftTask } from './draftTaskService.js';
+import { syncTask } from './taskService.js';
+import crypto from 'crypto';
+
+/**
+ * Get user ID from Slack user ID
+ */
+const getUserIdFromSlack = async (slackUserId) => {
+  const result = await query(
+    'SELECT user_id FROM slack_integrations WHERE slack_user_id = $1',
+    [slackUserId]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return result.rows[0].user_id;
+};
 
 /**
  * Generate Slack OAuth authorization URL
@@ -149,7 +166,7 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
       oldestTimestamp = Math.floor(new Date(lastScanAt).getTime() / 1000); // Slack uses Unix timestamp in seconds
     }
 
-    const draftTasks = [];
+    const createdTasks = [];
     let processedCount = 0;
 
     // Get list of channels the user is a member of
@@ -233,20 +250,22 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
             const aiResult = await parseTask(messageText, 'openai');
             
             if (aiResult && aiResult.title) {
-              // Create draft task
-              const draftTask = await createDraftTask(userId, {
-                source: 'slack',
-                sourceId: message.ts, // Slack message timestamp
+              // Create approved task directly (no draft step)
+              const newTask = {
+                id: crypto.randomUUID(),
                 title: aiResult.title,
                 description: `From Slack #${channelName}\n\n${messageText}${permalink ? `\n\nLink: ${permalink}` : ''}`,
-                workspace: aiResult.workspaceSuggestions || 'job',
-                energy: aiResult.energy,
-                estimatedTime: aiResult.estimatedTime,
+                workspace: 'job', // All Slack tasks go to Job workspace
+                energy: aiResult.energy || 'medium',
+                estimatedTime: aiResult.estimatedTime || 15,
                 tags: [...(aiResult.tags || []), 'slack', channelName],
-                aiConfidence: 0.8,
-              });
+                status: 'todo',
+                dependencies: [],
+                createdAt: Date.now(),
+              };
 
-              draftTasks.push(draftTask);
+              await syncTask(userId, newTask);
+              createdTasks.push(newTask);
               processedCount++;
             }
           } catch (error) {
@@ -266,7 +285,7 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
       [userId]
     );
 
-    return { success: true, draftsCreated: draftTasks.length, drafts: draftTasks };
+    return { success: true, tasksCreated: createdTasks.length, tasks: createdTasks };
   } catch (error) {
     console.error('Slack mention scanning error:', error);
     
@@ -284,14 +303,69 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
 };
 
 /**
+ * Send notification to user via Slack DM
+ */
+export const sendSlackNotification = async (userId, message, options = {}) => {
+  try {
+    const result = await query(
+      'SELECT slack_user_id, notifications_enabled FROM slack_integrations WHERE user_id = $1 AND enabled = true',
+      [userId]
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].notifications_enabled) {
+      return false;
+    }
+
+    const client = await getSlackClient(userId);
+    const slackUserId = result.rows[0].slack_user_id;
+
+    // Open or get DM channel with user
+    const dmResponse = await client.conversations.open({
+      users: slackUserId,
+    });
+
+    if (!dmResponse.ok || !dmResponse.channel) {
+      console.error('Failed to open Slack DM channel');
+      return false;
+    }
+
+    await client.chat.postMessage({
+      channel: dmResponse.channel.id,
+      text: message,
+      ...options,
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Send Slack notification error:', error);
+    return false;
+  }
+};
+
+/**
  * Get Slack connection status
  */
 export const getSlackStatus = async (userId) => {
-  const result = await query(
-    `SELECT slack_user_id, slack_team_id, enabled, last_scan_at, scan_frequency, created_at
-     FROM slack_integrations WHERE user_id = $1`,
-    [userId]
-  );
+  let result;
+  try {
+    result = await query(
+      `SELECT slack_user_id, slack_team_id, enabled, last_scan_at, scan_frequency, notifications_enabled, created_at
+       FROM slack_integrations WHERE user_id = $1`,
+      [userId]
+    );
+  } catch (error) {
+    // Backwards compatibility if notifications_enabled column doesn't exist yet
+    if (error?.code === '42703') {
+      result = await query(
+        `SELECT slack_user_id, slack_team_id, enabled, last_scan_at, scan_frequency, created_at
+         FROM slack_integrations WHERE user_id = $1`,
+        [userId]
+      );
+      result.rows = result.rows.map((row) => ({ ...row, notifications_enabled: true }));
+    } else {
+      throw error;
+    }
+  }
 
   if (result.rows.length === 0) {
     return { connected: false };
@@ -304,6 +378,7 @@ export const getSlackStatus = async (userId) => {
     enabled: result.rows[0].enabled,
     lastScanAt: result.rows[0].last_scan_at,
     scanFrequency: result.rows[0].scan_frequency,
+    notificationsEnabled: result.rows[0].notifications_enabled !== false, // Default to true if null
     createdAt: result.rows[0].created_at,
   };
 };
@@ -335,6 +410,10 @@ export const updateSlackSettings = async (userId, settings) => {
   if (settings.enabled !== undefined) {
     updates.push(`enabled = $${paramCount++}`);
     values.push(settings.enabled);
+  }
+  if (settings.notificationsEnabled !== undefined) {
+    updates.push(`notifications_enabled = $${paramCount++}`);
+    values.push(settings.notificationsEnabled);
   }
 
   if (updates.length === 0) {
@@ -398,6 +477,89 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => 
     return { success: true, posted: true };
   } catch (error) {
     console.error('Slack daily summary error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Handle Slack Events API webhook
+ * Processes events like message events in DMs
+ */
+export const handleSlackEvent = async (event) => {
+  try {
+    // Handle URL verification challenge
+    if (event.type === 'url_verification') {
+      return { challenge: event.challenge };
+    }
+
+    // Handle event callbacks
+    if (event.type === 'event_callback') {
+      const eventData = event.event;
+
+      // Only process message events in DMs (im channel type)
+      if (eventData.type === 'message' && eventData.channel_type === 'im' && !eventData.bot_id) {
+        const slackUserId = eventData.user;
+        const messageText = eventData.text || '';
+
+        // Check if it's a command
+        if (messageText.startsWith('/add ')) {
+          const taskText = messageText.substring(5).trim();
+
+          const userId = await getUserIdFromSlack(slackUserId);
+          if (!userId) {
+            // User not linked - we can't send a message without their access token
+            // They need to link their account first in the app
+            console.log(`Slack user ${slackUserId} tried to use /add but account is not linked`);
+            return { success: true };
+          }
+
+          if (!taskText) {
+            // Send error message back
+            await sendSlackNotification(userId, '❌ Please provide a task description. Example: /add Fix the bug');
+            return { success: true };
+          }
+
+          try {
+            // Use AI to parse task
+            const aiResult = await parseTask(taskText, 'openai');
+
+            // Create a fully approved task directly (no draft step)
+            const title = aiResult?.title || taskText.split('\n')[0].substring(0, 100) || taskText.substring(0, 100);
+            const newTask = {
+              id: crypto.randomUUID(),
+              title,
+              description: taskText,
+              workspace: 'job', // All Slack tasks go to Job workspace
+              energy: aiResult?.energy || 'medium',
+              estimatedTime: aiResult?.estimatedTime || 15,
+              tags: [...(aiResult?.tags || []), 'slack'],
+              status: 'todo',
+              dependencies: [],
+              createdAt: Date.now(),
+            };
+
+            await syncTask(userId, newTask);
+
+            // Send confirmation message
+            await sendSlackNotification(
+              userId,
+              `✅ Task created in your Job list!\n\n` +
+              `📋 ${newTask.title}\n` +
+              `⚡ Energy: ${newTask.energy}\n` +
+              `🏢 Workspace: Job\n` +
+              `⏱️ Estimated: ${newTask.estimatedTime} min`
+            );
+          } catch (error) {
+            console.error('Slack /add command error:', error);
+            await sendSlackNotification(userId, `❌ Failed to add task: ${error.message}`);
+          }
+        }
+      }
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Slack event handling error:', error);
     throw error;
   }
 };

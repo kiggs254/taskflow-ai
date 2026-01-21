@@ -7,6 +7,7 @@ import {
   disconnectSlack,
   updateSlackSettings,
   postDailySummaryToSlack,
+  handleSlackEvent,
 } from '../services/slackService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
@@ -98,7 +99,7 @@ router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
  * Update Slack settings
  */
 router.put('/settings', authenticate, asyncHandler(async (req, res) => {
-  const { scanFrequency, enabled } = req.body;
+  const { scanFrequency, enabled, notificationsEnabled } = req.body;
   
   const settings = {};
   if (scanFrequency !== undefined) {
@@ -106,6 +107,9 @@ router.put('/settings', authenticate, asyncHandler(async (req, res) => {
   }
   if (enabled !== undefined) {
     settings.enabled = Boolean(enabled);
+  }
+  if (notificationsEnabled !== undefined) {
+    settings.notificationsEnabled = Boolean(notificationsEnabled);
   }
 
   const result = await updateSlackSettings(req.user.id, settings);
@@ -129,6 +133,34 @@ router.post('/daily-summary', authenticate, asyncHandler(async (req, res) => {
   const { tasks, dateLabel } = req.body;
   const result = await postDailySummaryToSlack(req.user.id, tasks || [], dateLabel);
   res.json(result);
+}));
+
+/**
+ * POST /api/slack/events
+ * Handle Slack Events API webhook (public endpoint, no auth required)
+ * Used for bot commands like /add in DMs
+ * Note: Slack sends JSON body, but we need to handle raw body for signature verification
+ * For now, we'll parse JSON directly since express.json() middleware handles it
+ */
+router.post('/events', asyncHandler(async (req, res) => {
+  const event = req.body;
+
+  // Handle URL verification challenge
+  if (event.type === 'url_verification') {
+    return res.json({ challenge: event.challenge });
+  }
+
+  // Verify request signature (optional but recommended for production)
+  // TODO: Add signature verification using SLACK_SIGNING_SECRET
+  // For now, we'll process the event
+
+  try {
+    const result = await handleSlackEvent(event);
+    res.json(result);
+  } catch (error) {
+    console.error('Slack events webhook error:', error);
+    res.status(500).json({ error: 'Failed to process Slack event' });
+  }
 }));
 
 export default router;

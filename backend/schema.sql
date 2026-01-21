@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS slack_integrations (
     last_scan_at TIMESTAMP WITH TIME ZONE,
     scan_frequency INTEGER DEFAULT 15,
     enabled BOOLEAN DEFAULT true,
+    notifications_enabled BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id),
     UNIQUE(slack_user_id, slack_team_id)

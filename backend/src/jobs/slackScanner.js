@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { query } from '../config/database.js';
 import { scanSlackMentions } from '../services/slackService.js';
+import { sendNotification } from '../services/telegramService.js';
 
 /**
  * Scheduled job to scan Slack mentions for all users with Slack connected
@@ -37,8 +38,19 @@ export const startSlackScanner = () => {
           }
 
           // Scan mentions for this user
-          await scanSlackMentions(integration.user_id, 50);
+          const result = await scanSlackMentions(integration.user_id, 50);
           console.log(`Slack mention scan completed for user ${integration.user_id}`);
+          
+          // Send Telegram notification if tasks were created
+          if (result && result.tasksCreated > 0) {
+            try {
+              const message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Slack`;
+              await sendNotification(integration.user_id, message);
+            } catch (notifError) {
+              console.error(`Error sending Telegram notification for user ${integration.user_id}:`, notifError);
+              // Don't fail the scan if notification fails
+            }
+          }
         } catch (error) {
           console.error(`Error scanning Slack mentions for user ${integration.user_id}:`, error);
           // Continue with next user

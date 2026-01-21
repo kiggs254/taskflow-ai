@@ -180,7 +180,7 @@ export const api = {
       if (!res.ok) throw new Error('Failed to scan Slack mentions');
       return res.json();
     },
-    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean }) => {
+    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean; notificationsEnabled?: boolean }) => {
       const res = await fetch(`${API_BASE}/slack/settings`, {
         method: 'PUT',
         headers: {
