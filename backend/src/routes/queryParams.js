@@ -16,9 +16,17 @@ const router = express.Router();
 // Handle query parameter routing for backward compatibility
 // These routes handle ?action= parameter
 
-// Auth routes
+// Auth routes (NO authentication required)
 router.post('/', asyncHandler(async (req, res, next) => {
   const action = req.query.action;
+  
+  // Debug logging
+  console.log('=== QUERY PARAMS ROUTE ===');
+  console.log('Action:', action);
+  console.log('Method:', req.method);
+  console.log('Path:', req.path);
+  console.log('Query:', req.query);
+  console.log('Body keys:', Object.keys(req.body || {}));
   
   if (action === 'register') {
     const { username, email, password } = req.body;
@@ -35,12 +43,19 @@ router.post('/', asyncHandler(async (req, res, next) => {
       throw error;
     }
   } else if (action === 'login') {
+    console.log('=== LOGIN REQUEST ===');
     const { email, password } = req.body;
+    console.log('Email provided:', email ? 'Yes' : 'No');
+    console.log('Password provided:', password ? 'Yes' : 'No');
+    
     if (!email || !password) {
+      console.log('Missing fields - returning 400');
       return res.status(400).json({ error: 'Missing fields' });
     }
     try {
+      console.log('Calling loginUser...');
       const result = await loginUser(email, password);
+      console.log('Login successful for:', email);
       return res.json(result);
     } catch (error) {
       // Enhanced logging for debugging
@@ -62,6 +77,7 @@ router.post('/', asyncHandler(async (req, res, next) => {
   
   // If action doesn't match, continue to next middleware (don't return 404 here)
   // This allows direct routes to handle the request
+  console.log('Action not matched, calling next()');
   return next();
 }));
 

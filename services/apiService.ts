@@ -61,8 +61,13 @@ const request = async (action: string, method: 'GET' | 'POST', body?: any, token
         status: res.status,
         statusText: res.statusText,
         error: errorMessage,
-        response: data
+        response: data,
+        fullResponse: text
       });
+      // For 401 errors, provide more context
+      if (res.status === 401) {
+        throw new Error(errorMessage || 'Unauthorized - Please check your credentials');
+      }
       throw new Error(errorMessage);
     }
     return data;
