@@ -9,6 +9,7 @@ import {
   postDailySummaryToSlack,
   handleSlackEvent,
 } from '../services/slackService.js';
+import { sendNotification } from '../services/telegramService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 
