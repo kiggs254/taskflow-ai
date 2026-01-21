@@ -206,7 +206,7 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stat
   );
 };
 
-const DueDateDisplay = ({ dueDate }: { dueDate?: number }) => {
+const DueDateDisplay = ({ dueDate, isMeeting }: { dueDate?: number; isMeeting?: boolean }) => {
   if (!dueDate) return null;
 
   const date = new Date(dueDate);
@@ -217,21 +217,25 @@ const DueDateDisplay = ({ dueDate }: { dueDate?: number }) => {
 
   let color = 'text-slate-500';
   let text = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const prefix = isMeeting ? 'Meeting Time: ' : '';
 
   if (date < today) {
-    color = 'text-red-400';
-    text = 'Overdue';
+    color = isMeeting ? 'text-red-400' : 'text-red-400';
+    text = isMeeting ? 'Past' : 'Overdue';
   } else if (date.toDateString() === today.toDateString()) {
-    color = 'text-orange-400';
-    text = 'Today';
+    color = isMeeting ? 'text-blue-400' : 'text-orange-400';
+    text = isMeeting ? 'Today ' + date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : 'Today';
   } else if (date.toDateString() === tomorrow.toDateString()) {
-    color = 'text-yellow-500';
-    text = 'Tomorrow';
+    color = isMeeting ? 'text-blue-400' : 'text-yellow-500';
+    text = isMeeting ? 'Tomorrow ' + date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : 'Tomorrow';
+  } else if (isMeeting) {
+    text = date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    color = 'text-blue-400';
   }
 
   return (
     <span className={`flex items-center gap-1 text-xs font-medium ${color}`}>
-      <Calendar className="w-3 h-3" /> {text}
+      <Calendar className="w-3 h-3" /> {prefix}{text}
     </span>
   );
 };
@@ -539,12 +543,7 @@ const TaskCard: React.FC<{
                 <Hourglass className="w-3 h-3" /> Waiting
               </span>
             )}
-            <DueDateDisplay dueDate={task.dueDate} />
-            {task.tags.includes('meeting') && task.dueDate && (
-              <span className="text-xs text-violet-300 flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-900/40 border border-violet-500/40">
-                <Calendar className="w-3 h-3" /> Meeting {new Date(task.dueDate).toLocaleString()}
-              </span>
-            )}
+            <DueDateDisplay dueDate={task.dueDate} isMeeting={task.tags.includes('meeting')} />
             {task.recurrence && (
               <span className="text-xs text-slate-500 flex items-center gap-1">
                 <Repeat className="w-3 h-3" /> Repeats
@@ -1191,6 +1190,9 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
     const val = localStorage.getItem('tf_sounds');
     return val === null ? true : val === 'true';
   });
+  const [showFreelanceTab, setShowFreelanceTab] = useState(false);
+  const [showPersonalTab, setShowPersonalTab] = useState(false);
+  const [loadingPrefs, setLoadingPrefs] = useState(true);
 
   const toggleNotifications = () => {
     // Browser notifications are disabled - using toast notifications instead
@@ -1204,6 +1206,30 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
   useEffect(() => {
     localStorage.setItem('tf_sounds', sounds.toString());
   }, [sounds]);
+
+  // Load user preferences
+  useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const prefs = await api.getUserPreferences(token);
+        setShowFreelanceTab(prefs.showFreelanceTab || false);
+        setShowPersonalTab(prefs.showPersonalTab || false);
+      } catch (error) {
+        console.error('Failed to load preferences:', error);
+      } finally {
+        setLoadingPrefs(false);
+      }
+    };
+    loadPreferences();
+  }, [token]);
+
+  const updatePreferences = async (prefs: { showFreelanceTab?: boolean; showPersonalTab?: boolean }) => {
+    try {
+      await api.updateUserPreferences(token, prefs);
+    } catch (error) {
+      console.error('Failed to update preferences:', error);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -1266,6 +1292,47 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
               </div>
            </div>
 
+           {/* Workspace Tabs */}
+           <div>
+              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Workspace Tabs</h4>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                   <div className="flex items-center gap-3">
+                      <Laptop className="w-5 h-5 text-slate-400" />
+                      <span className="text-slate-200">Show Freelance Tab</span>
+                   </div>
+                   <button 
+                     onClick={() => {
+                       const newValue = !showFreelanceTab;
+                       setShowFreelanceTab(newValue);
+                       updatePreferences({ showFreelanceTab: newValue });
+                     }}
+                     disabled={loadingPrefs}
+                     className={`w-12 h-6 rounded-full transition-colors relative ${showFreelanceTab ? 'bg-primary' : 'bg-slate-700'} ${loadingPrefs ? 'opacity-50 cursor-not-allowed' : ''}`}
+                   >
+                      <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${showFreelanceTab ? 'translate-x-6' : ''}`} />
+                   </button>
+                </div>
+                <div className="flex items-center justify-between">
+                   <div className="flex items-center gap-3">
+                      <User className="w-5 h-5 text-slate-400" />
+                      <span className="text-slate-200">Show Personal Tab</span>
+                   </div>
+                   <button 
+                     onClick={() => {
+                       const newValue = !showPersonalTab;
+                       setShowPersonalTab(newValue);
+                       updatePreferences({ showPersonalTab: newValue });
+                     }}
+                     disabled={loadingPrefs}
+                     className={`w-12 h-6 rounded-full transition-colors relative ${showPersonalTab ? 'bg-primary' : 'bg-slate-700'} ${loadingPrefs ? 'opacity-50 cursor-not-allowed' : ''}`}
+                   >
+                      <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${showPersonalTab ? 'translate-x-6' : ''}`} />
+                   </button>
+                </div>
+              </div>
+           </div>
+
            {/* Integrations */}
            <div>
               <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Integrations</h4>
@@ -1297,6 +1364,157 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
       <div className="text-center text-xs text-slate-600 pt-8">
         TASKFLOW.AI v1.3.0 • Build 2024.11
       </div>
+    </div>
+  );
+};
+
+const MeetingsScreen = ({
+  tasks,
+  onBack,
+  onComplete,
+  onSelectTask,
+  token,
+}: {
+  tasks: Task[];
+  onBack: () => void;
+  onComplete: (id: string) => void;
+  onSelectTask: (task: Task) => void;
+  token: string;
+}) => {
+  const now = Date.now();
+  
+  // Filter meetings: must have 'meeting' tag and meeting time hasn't passed
+  const upcomingMeetings = tasks.filter(task => {
+    const isMeeting = task.tags && Array.isArray(task.tags) && task.tags.includes('meeting');
+    if (!isMeeting) return false;
+    // Only show meetings that haven't passed
+    if (task.dueDate && task.dueDate < now) return false;
+    // Only show non-completed meetings
+    return task.status !== 'done';
+  });
+
+  // Sort by meeting time (dueDate)
+  const sortedMeetings = [...upcomingMeetings].sort((a, b) => {
+    const timeA = a.dueDate || 0;
+    const timeB = b.dueDate || 0;
+    return timeA - timeB;
+  });
+
+  const groupMeetingsByDate = (meetings: Task[]) => {
+    const groups: { [key: string]: Task[] } = {
+      Today: [],
+      Tomorrow: [],
+      'This Week': [],
+      'Next Week': [],
+      'Later': [],
+    };
+
+    const now = new Date();
+    const todayStart = new Date(now).setHours(0, 0, 0, 0);
+    const tomorrowStart = todayStart + 86400000;
+    const dayOfWeek = now.getDay();
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek).getTime();
+    const startOfNextWeek = startOfWeek + 7 * 86400000;
+
+    for (const meeting of meetings) {
+      if (!meeting.dueDate) {
+        groups['Later'].push(meeting);
+        continue;
+      }
+
+      const meetingTime = meeting.dueDate;
+      if (meetingTime >= todayStart && meetingTime < tomorrowStart) {
+        groups.Today.push(meeting);
+      } else if (meetingTime >= tomorrowStart && meetingTime < startOfWeek + 7 * 86400000) {
+        if (meetingTime < startOfNextWeek) {
+          groups['This Week'].push(meeting);
+        } else {
+          groups['Next Week'].push(meeting);
+        }
+      } else {
+        groups['Later'].push(meeting);
+      }
+    }
+
+    return groups;
+  };
+
+  const groupedMeetings = groupMeetingsByDate(sortedMeetings);
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="md:hidden p-2 -ml-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800">
+          <ArrowLeft className="w-6 h-6" />
+        </button>
+        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+          <Calendar className="w-6 h-6 text-blue-400" /> Meetings
+        </h2>
+      </div>
+
+      {sortedMeetings.length === 0 ? (
+        <div className="text-center py-20 text-slate-600">
+          <Calendar className="w-12 h-12 mx-auto mb-4 opacity-20" />
+          <p>No upcoming meetings.</p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {Object.entries(groupedMeetings).map(([groupName, meetingsInGroup]) => {
+            if (meetingsInGroup.length === 0) return null;
+            return (
+              <div key={groupName}>
+                <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">{groupName}</h3>
+                <div className="space-y-2">
+                  {meetingsInGroup.map(meeting => (
+                    <div
+                      key={meeting.id}
+                      onClick={() => onSelectTask(meeting)}
+                      className="bg-surface p-4 rounded-lg border border-slate-700 hover:border-slate-600 cursor-pointer transition-colors"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <h4 className="text-white font-medium mb-1">{meeting.title}</h4>
+                          {meeting.description && (
+                            <p className="text-sm text-slate-400 line-clamp-2">{meeting.description.replace(/<!-- Email metadata:.*?-->/, '').replace(/<!-- Slack metadata:.*?-->/, '').substring(0, 100)}</p>
+                          )}
+                          <div className="flex items-center gap-4 mt-2">
+                            {meeting.dueDate && (
+                              <div className="flex items-center gap-1 text-sm text-blue-400">
+                                <Calendar className="w-4 h-4" />
+                                <span>Meeting Time: {new Date(meeting.dueDate).toLocaleString(undefined, { 
+                                  month: 'short', 
+                                  day: 'numeric', 
+                                  hour: 'numeric', 
+                                  minute: '2-digit' 
+                                })}</span>
+                              </div>
+                            )}
+                            {meeting.workspace && (
+                              <span className="text-xs text-slate-500 capitalize">{meeting.workspace}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onComplete(meeting.id);
+                            }}
+                            className="p-2 rounded-lg bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 transition-colors"
+                            title="Mark as Done"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -1476,6 +1694,9 @@ export default function App() {
   const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
   const previousDraftCountRef = useRef<number>(0);
   const previousTasksCountRef = useRef<number>(0);
+  const [syncingSources, setSyncingSources] = useState(false);
+  const [showFreelanceTab, setShowFreelanceTab] = useState(false);
+  const [showPersonalTab, setShowPersonalTab] = useState(false);
   
   // Power User Features
   const [searchQuery, setSearchQuery] = useState('');
@@ -1580,7 +1801,32 @@ export default function App() {
     return () => clearInterval(interval);
   }, [token]);
 
-  // Graceful polling for tasks when on dashboard (every 30 seconds)
+  // Load user preferences for workspace tabs
+  useEffect(() => {
+    const loadPreferences = async () => {
+      if (!token) return;
+      try {
+        const prefs = await api.getUserPreferences(token);
+        setShowFreelanceTab(prefs.showFreelanceTab || false);
+        setShowPersonalTab(prefs.showPersonalTab || false);
+        // If current workspace is hidden, switch to job
+        if (activeWorkspace === 'freelance' && !prefs.showFreelanceTab) {
+          setActiveWorkspace('job');
+        }
+        if (activeWorkspace === 'personal' && !prefs.showPersonalTab) {
+          setActiveWorkspace('job');
+        }
+      } catch (error) {
+        console.error('Failed to load preferences:', error);
+        // Default to false if preferences can't be loaded
+        setShowFreelanceTab(false);
+        setShowPersonalTab(false);
+      }
+    };
+    loadPreferences();
+  }, [token, activeWorkspace]);
+
+  // Graceful polling for tasks when on tasks view (every 30 seconds)
   useEffect(() => {
     if (!token || view !== AppView.DASHBOARD) return;
     
@@ -1934,7 +2180,7 @@ export default function App() {
     }
   };
 
-  const completeTask = async (id: string) => {
+  const completeTask = async (id: string, sendEmailReply = false) => {
     if (!token) return;
 
     const completedTask = tasks.find(t => t.id === id);
@@ -1992,7 +2238,7 @@ export default function App() {
            api.syncTask(token, nextTask);
        }
        // Mark original as complete
-       const res = await api.completeTask(token, id);
+       const res = await api.completeTask(token, id, sendEmailReply);
        
        if (res.success) {
          // Show XP Float
@@ -2368,13 +2614,19 @@ export default function App() {
                   onClick={() => setView(AppView.DASHBOARD)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.DASHBOARD ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
-                  <Layout className="w-4 h-4" /> Dashboard
+                  <Layout className="w-4 h-4" /> Tasks
                 </button>
                  <button 
                   onClick={() => setView(AppView.COMPLETED_TASKS)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.COMPLETED_TASKS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
                   <CheckSquare className="w-4 h-4" /> Completed
+                </button>
+                <button 
+                  onClick={() => setView(AppView.MEETINGS)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.MEETINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                >
+                  <Calendar className="w-4 h-4" /> Meetings
                 </button>
                 <button 
                   onClick={() => setView(AppView.ANALYTICS)}
@@ -2425,7 +2677,7 @@ export default function App() {
         {/* Main Content */}
         <div className="flex-1 p-4 md:p-8 overflow-y-auto">
           
-          {/* Dashboard View */}
+          {/* Tasks View */}
           {view === AppView.DASHBOARD && (
             <>
               {/* Header & Tabs */}
@@ -2438,18 +2690,22 @@ export default function App() {
                       onClick={() => setActiveWorkspace('job')} 
                       icon={<Briefcase className="w-4 h-4" />} 
                     />
-                    <WorkspaceTab 
-                      active={activeWorkspace === 'freelance'} 
-                      type="freelance" 
-                      onClick={() => setActiveWorkspace('freelance')} 
-                      icon={<Laptop className="w-4 h-4" />} 
-                    />
-                    <WorkspaceTab 
-                      active={activeWorkspace === 'personal'} 
-                      type="personal" 
-                      onClick={() => setActiveWorkspace('personal')} 
-                      icon={<User className="w-4 h-4" />} 
-                    />
+                    {showFreelanceTab && (
+                      <WorkspaceTab 
+                        active={activeWorkspace === 'freelance'} 
+                        type="freelance" 
+                        onClick={() => setActiveWorkspace('freelance')} 
+                        icon={<Laptop className="w-4 h-4" />} 
+                      />
+                    )}
+                    {showPersonalTab && (
+                      <WorkspaceTab 
+                        active={activeWorkspace === 'personal'} 
+                        type="personal" 
+                        onClick={() => setActiveWorkspace('personal')} 
+                        icon={<User className="w-4 h-4" />} 
+                      />
+                    )}
                   </div>
                   <div className="md:hidden flex gap-3">
                      <button onClick={() => setView(AppView.COMPLETED_TASKS)} className="text-slate-400">
@@ -2511,27 +2767,34 @@ export default function App() {
                         </select>
                         <ArrowUpDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" />
                         
-                        {/* Manual integration fetch button */}
+                        {/* Sync All Sources button */}
                         {token && (
                           <button
                             type="button"
                             onClick={async () => {
+                              setSyncingSources(true);
                               try {
                                 await Promise.all([
                                   api.gmail.scanNow(token, 50).catch((e) => console.error('Gmail scan error', e)),
                                   api.slack.scanNow(token, 50).catch((e) => console.error('Slack scan error', e)),
                                 ]);
-                                addToast('🔄 Fetched tasks from integrations (Gmail & Slack)', 'info');
+                                addToast('🔄 Synced all sources (Gmail & Slack)', 'success');
                                 // Refresh drafts count after manual sync
                                 fetchDraftTasksCount();
+                                // Refresh tasks list
+                                fetchData();
                               } catch (err) {
-                                console.error('Manual integration fetch failed', err);
-                                addToast('Failed to fetch from integrations', 'error');
+                                console.error('Sync sources failed', err);
+                                addToast('Failed to sync sources', 'error');
+                              } finally {
+                                setSyncingSources(false);
                               }
                             }}
-                            className="hidden md:inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:bg-slate-700"
+                            disabled={syncingSources}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-500 hover:to-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium shadow-lg shadow-blue-500/20"
                           >
-                            <RefreshCw className="w-3 h-3" /> Fetch Integrations
+                            <RefreshCw className={`w-4 h-4 ${syncingSources ? 'animate-spin' : ''}`} /> 
+                            {syncingSources ? 'Syncing...' : 'Sync All Sources'}
                           </button>
                         )}
                       </div>
@@ -2691,6 +2954,17 @@ export default function App() {
           {/* Completed Tasks View */}
           {view === AppView.COMPLETED_TASKS && <CompletedTasksScreen tasks={completedTasksAll} onBack={() => setView(AppView.DASHBOARD)} onExport={handleExport} onUncomplete={uncompleteTask} />}
 
+          {/* Meetings View */}
+          {view === AppView.MEETINGS && token && (
+            <MeetingsScreen 
+              tasks={tasks}
+              onBack={() => setView(AppView.DASHBOARD)}
+              onComplete={completeTask}
+              onSelectTask={setSelectedTask}
+              token={token}
+            />
+          )}
+
           {/* Draft Tasks View */}
           {view === AppView.DRAFT_TASKS && token && (
             <DraftTasksView 
@@ -2705,7 +2979,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Floating Action Button (Desktop) - Only show on Dashboard */}
+      {/* Floating Action Button (Desktop) - Only show on Tasks */}
       {view === AppView.DASHBOARD && (
         <button
           onClick={() => setShowQuickAdd(true)}

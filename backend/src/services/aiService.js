@@ -299,6 +299,55 @@ Return valid JSON with: { title: string, description: string (markdown), todos: 
 };
 
 /**
+ * Generate email completion reply for Gmail tasks
+ */
+export const generateEmailCompletionReply = async (
+  taskTitle,
+  taskDescription,
+  provider = 'openai'
+) => {
+  if (!taskTitle || typeof taskTitle !== 'string') {
+    throw new Error('Invalid input: taskTitle must be a string');
+  }
+
+  const client = getClient(provider);
+  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+
+  // Extract context from description (remove metadata comments)
+  const cleanDescription = taskDescription
+    ? taskDescription.replace(/<!-- Email metadata:.*?-->/, '').replace(/<!-- Slack metadata:.*?-->/, '').trim()
+    : '';
+
+  try {
+    const response = await client.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an email assistant. Generate a brief, professional email reply to inform the sender that a task has been completed. Keep it concise (2-3 sentences max) and professional.`,
+        },
+        {
+          role: 'user',
+          content: `Generate a completion email reply for this task:
+          
+Task: ${taskTitle}
+${cleanDescription ? `Context: ${cleanDescription.substring(0, 500)}` : ''}
+
+Write a brief, professional email reply informing them the task is complete.`,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 200,
+    });
+
+    return response.choices[0]?.message?.content || 'Thank you for your email. This task has been completed.';
+  } catch (error) {
+    console.error('AI generateEmailCompletionReply error:', error);
+    throw error;
+  }
+};
+
+/**
  * Generate email draft reply with AI based on task context and tone
  */
 export const generateEmailDraft = async (

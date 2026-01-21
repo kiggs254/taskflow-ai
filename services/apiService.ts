@@ -81,8 +81,8 @@ export const api = {
     return request('delete_task', 'POST', { id }, token);
   },
 
-  completeTask: async (token: string, id: string) => {
-    return request('complete_task', 'POST', { id }, token);
+  completeTask: async (token: string, id: string, sendEmailReply = false) => {
+    return request('complete_task', 'POST', { id, sendEmailReply }, token);
   },
   
   uncompleteTask: async (token: string, id: string) => {
@@ -92,6 +92,15 @@ export const api = {
   // Misc
   dailyReset: async (token: string) => {
     return request('daily_reset', 'POST', {}, token);
+  },
+
+  // User Preferences
+  getUserPreferences: async (token: string) => {
+    return request('get_user_preferences', 'GET', undefined, token);
+  },
+
+  updateUserPreferences: async (token: string, preferences: { showFreelanceTab?: boolean; showPersonalTab?: boolean }) => {
+    return request('update_user_preferences', 'POST', preferences, token);
   },
 
   // Gmail Integration

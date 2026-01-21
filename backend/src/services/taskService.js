@@ -107,10 +107,11 @@ export const deleteTask = async (userId, taskId) => {
 /**
  * Complete a task
  */
-export const completeTask = async (userId, taskId) => {
+export const completeTask = async (userId, taskId, options = {}) => {
+  const { sendEmailReply = false } = options;
   const now = Date.now();
 
-  // Get task details before updating (to check if it's a Slack task)
+  // Get task details before updating (to check if it's a Slack or Gmail task)
   const taskResult = await query(
     'SELECT title, description, tags FROM tasks WHERE id = $1 AND user_id = $2',
     [taskId, userId]
@@ -131,6 +132,7 @@ export const completeTask = async (userId, taskId) => {
     }
   }
   const isSlackTask = Array.isArray(tags) && tags.includes('slack');
+  const isGmailTask = Array.isArray(tags) && tags.includes('gmail');
 
   // Update task status
   await query(
@@ -146,6 +148,27 @@ export const completeTask = async (userId, taskId) => {
     } catch (error) {
       console.error('Error replying to Slack task:', error);
       // Don't fail task completion if Slack reply fails
+    }
+  }
+
+  // If it's a Gmail task and user wants to send auto-reply
+  if (isGmailTask && sendEmailReply && task.description) {
+    try {
+      const { generateEmailCompletionReply } = await import('./aiService.js');
+      const { replyToEmail } = await import('./gmailService.js');
+      
+      // Generate completion reply
+      const replyMessage = await generateEmailCompletionReply(
+        task.title,
+        task.description,
+        'openai'
+      );
+      
+      // Send the reply
+      await replyToEmail(userId, taskId, replyMessage, false, '');
+    } catch (error) {
+      console.error('Error sending Gmail auto-reply:', error);
+      // Don't fail task completion if email reply fails
     }
   }
 

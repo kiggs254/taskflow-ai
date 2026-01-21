@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 interface TaskDetailModalProps {
   task: Task;
   onClose: () => void;
-  onComplete?: (id: string) => void;
+  onComplete?: (id: string, sendEmailReply?: boolean) => void;
   onUpdate?: (task: Task) => void;
 }
 
@@ -27,6 +27,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [selectedTone, setSelectedTone] = useState('professional');
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [customToneInstructions, setCustomToneInstructions] = useState('');
+  const [sendEmailReplyOnComplete, setSendEmailReplyOnComplete] = useState(false);
 
   // Extract email metadata if this is a Gmail task
   const isGmailTask = task.tags?.includes('gmail');
@@ -453,7 +454,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           setGeneratingDraft(true);
                           try {
                             const { api } = await import('../services/apiService');
-                            const token = localStorage.getItem('tf_token');
+                            const token = localStorage.getItem('taskflow_token');
                             if (!token) throw new Error('Not authenticated');
                             
                             const result = await api.gmail.generateDraft(token, {
@@ -513,7 +514,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           onClick={async () => {
                             try {
                               const { api } = await import('../services/apiService');
-                              const token = localStorage.getItem('tf_token');
+                              const token = localStorage.getItem('taskflow_token');
                               if (!token) throw new Error('Not authenticated');
                               
                               const messageToPolish = polishedMessage || replyMessage;
@@ -602,22 +603,37 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Footer Actions */}
         {task.status !== 'done' && onComplete && (
-          <div className="sticky bottom-0 bg-surface border-t border-slate-700 p-6 flex gap-3">
-            <button
-              onClick={() => {
-                onComplete(task.id);
-                onClose();
-              }}
-              className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors"
-            >
-              Mark as Complete
-            </button>
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg bg-slate-700 text-white hover:bg-slate-600 transition-colors"
-            >
-              Close
-            </button>
+          <div className="sticky bottom-0 bg-surface border-t border-slate-700 p-6 space-y-3">
+            {isGmailTask && emailMetadata && (
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={sendEmailReplyOnComplete}
+                  onChange={(e) => setSendEmailReplyOnComplete(e.target.checked)}
+                  className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-slate-300 group-hover:text-white transition-colors">
+                  Send AI-generated completion reply to email
+                </span>
+              </label>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  onComplete(task.id, sendEmailReplyOnComplete);
+                  onClose();
+                }}
+                className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors"
+              >
+                Mark as Complete
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg bg-slate-700 text-white hover:bg-slate-600 transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         )}
         {task.status === 'done' && (

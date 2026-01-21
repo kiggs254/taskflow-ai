@@ -7,7 +7,7 @@ import {
   completeTask,
   uncompleteTask,
 } from '../services/taskService.js';
-import { updateUserXP, updateDailyReset } from '../services/userService.js';
+import { updateUserXP, updateDailyReset, getUserPreferences, updateUserPreferences } from '../services/userService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 
@@ -84,11 +84,11 @@ router.post('/', authenticate, asyncHandler(async (req, res, next) => {
     const result = await deleteTask(req.user.id, id);
     return res.json(result);
   } else if (action === 'complete_task') {
-    const { id } = req.body;
+    const { id, sendEmailReply } = req.body;
     if (!id) {
       return res.status(400).json({ error: 'Task id is required' });
     }
-    await completeTask(req.user.id, id);
+    await completeTask(req.user.id, id, { sendEmailReply: Boolean(sendEmailReply) });
     const xpResult = await updateUserXP(req.user.id, 50);
     return res.json({
       success: true,
@@ -103,6 +103,12 @@ router.post('/', authenticate, asyncHandler(async (req, res, next) => {
     return res.json(result);
   } else if (action === 'daily_reset') {
     const result = await updateDailyReset(req.user.id);
+    return res.json(result);
+  } else if (action === 'get_user_preferences') {
+    const preferences = await getUserPreferences(req.user.id);
+    return res.json(preferences);
+  } else if (action === 'update_user_preferences') {
+    const result = await updateUserPreferences(req.user.id, req.body);
     return res.json(result);
   }
   

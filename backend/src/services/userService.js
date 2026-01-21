@@ -155,3 +155,54 @@ export const updateDailyReset = async (userId) => {
     reset_time: result.rows[0].last_reset_at,
   };
 };
+
+/**
+ * Get user preferences
+ */
+export const getUserPreferences = async (userId) => {
+  const result = await query(
+    'SELECT show_freelance_tab, show_personal_tab FROM users WHERE id = $1',
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error('User not found');
+  }
+
+  const prefs = result.rows[0];
+  return {
+    showFreelanceTab: prefs.show_freelance_tab || false,
+    showPersonalTab: prefs.show_personal_tab || false,
+  };
+};
+
+/**
+ * Update user preferences
+ */
+export const updateUserPreferences = async (userId, preferences) => {
+  const updates = [];
+  const values = [];
+  let paramCount = 1;
+
+  if (preferences.showFreelanceTab !== undefined) {
+    updates.push(`show_freelance_tab = $${paramCount++}`);
+    values.push(Boolean(preferences.showFreelanceTab));
+  }
+  if (preferences.showPersonalTab !== undefined) {
+    updates.push(`show_personal_tab = $${paramCount++}`);
+    values.push(Boolean(preferences.showPersonalTab));
+  }
+
+  if (updates.length === 0) {
+    throw new Error('No preferences to update');
+  }
+
+  values.push(userId);
+
+  await query(
+    `UPDATE users SET ${updates.join(', ')} WHERE id = $${paramCount++}`,
+    values
+  );
+
+  return { success: true };
+};
