@@ -3,6 +3,8 @@ import { DraftTask } from '../types';
 import { api } from '../services/apiService';
 import { DraftTaskCard } from './DraftTaskCard';
 import { Mail, MessageSquare, CheckCircle2, X, Hash } from 'lucide-react';
+import { ConfirmationModal } from './ConfirmationModal';
+import { AlertModal } from './AlertModal';
 
 interface DraftTasksViewProps {
   token: string;
