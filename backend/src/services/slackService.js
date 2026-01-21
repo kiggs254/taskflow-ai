@@ -383,11 +383,11 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => 
     const dateText = dateLabel || new Date().toLocaleDateString();
 
     const lines = tasks.map((t, index) => {
-      const workspace = t.workspace ? ` [${t.workspace}]` : '';
-      return `${index + 1}.${workspace} ${t.title}`;
+      // No workspace tag, just a clean numbered list of titles
+      return `${index + 1}. ${t.title}`;
     });
 
-    const text = `*Daily summary for ${dateText}*\n${lines.join('\n')}`;
+    const text = `*Newtons Tasks - ${dateText}*\n${lines.join('\n')}`;
 
     await client.chat.postMessage({
       channel: channel.id,
