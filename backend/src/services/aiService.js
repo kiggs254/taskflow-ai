@@ -23,10 +23,14 @@ const getClient = (provider = 'openai') => {
  * Parse task input using AI
  * Returns structured task data: title, energy, estimatedTime, tags, workspaceSuggestions
  */
-export const parseTask = async (input, provider = 'openai') => {
+export const parseTask = async (input, provider = 'openai', options = {}) => {
   if (!input || typeof input !== 'string') {
     throw new Error('Invalid input: task input must be a string');
   }
+
+  const promptInstructions = options.promptInstructions
+    ? `Additional instructions from user:\n${options.promptInstructions}\n\n`
+    : '';
 
   const client = getClient(provider);
   const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
@@ -42,7 +46,8 @@ Context: User is a busy software developer.
 - "Fix bug" usually implies High energy.
 - "Email" or "Call" usually implies Low energy.
 - Extract time if mentioned (e.g., "20m").
-Return valid JSON only.`,
+Return valid JSON only.
+${promptInstructions}`,
         },
         {
           role: 'user',

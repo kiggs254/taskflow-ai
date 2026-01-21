@@ -1,8 +1,10 @@
 import { google } from 'googleapis';
 import { query } from '../config/database.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
+import crypto from 'crypto';
 import { parseTask } from './aiService.js';
 import { createDraftTask } from './draftTaskService.js';
+import { syncTask } from './taskService.js';
 import { config } from '../config/env.js';
 
 const OAuth2Client = google.auth.OAuth2;
@@ -184,14 +186,14 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     
     // Get integration settings
     const integrationResult = await query(
-      'SELECT last_scan_at, filter_prompt FROM gmail_integrations WHERE user_id = $1',
+      'SELECT last_scan_at, prompt_instructions FROM gmail_integrations WHERE user_id = $1',
       [userId]
     );
     
-    const integration = integrationResult.rows[0] || {};
-    const lastScanAt = integration.last_scan_at;
-    const filterPrompt = integration.filter_prompt;
-    let queryString = 'is:unread';
+    const integrationSettings = integrationResult.rows[0] || {};
+    const lastScanAt = integrationSettings.last_scan_at;
+    const promptInstructions = integrationSettings.prompt_instructions || '';
+    let queryString = 'is:unread category:primary';
     
     if (lastScanAt) {
       // Only get emails after last scan
@@ -240,28 +242,47 @@ export const scanEmails = async (userId, maxEmails = 50) => {
         }
 
         // Combine subject and body for AI analysis
-        const instructions = filterPrompt
-          ? `\n\nUser instructions for filtering tasks:\n${filterPrompt}\n\nOnly create a task if it matches these instructions. Otherwise, return no task.`
-          : '';
-
-        const emailContent = `Subject: ${subject}\n\nFrom: ${from}\n\n${bodyText.substring(0, 2000)}${instructions}`;
+        const emailContent = `Subject: ${subject}\n\nFrom: ${from}\n\n${bodyText.substring(0, 2000)}`;
 
         // Use AI to extract task
         try {
-          const aiResult = await parseTask(emailContent, 'openai');
+          const aiResult = await parseTask(emailContent, 'openai', { promptInstructions });
           
-          if (aiResult && aiResult.title) {
+          const baseTaskData = {
+            title: aiResult?.title || subject || 'Email Task',
+            description: `From: ${from}\nSubject: ${subject}\n\n${bodyText.substring(0, 1000)}`,
+            workspace: aiResult?.workspaceSuggestions || 'personal',
+            energy: aiResult?.energy || 'medium',
+            estimatedTime: aiResult?.estimatedTime || 15,
+            tags: aiResult?.tags || [],
+            aiConfidence: 0.8,
+          };
+
+          const contentLower = `${subject} ${bodyText}`.toLowerCase();
+          const looksLikeEvent =
+            contentLower.includes('meeting') ||
+            contentLower.includes('invite') ||
+            contentLower.includes('invitation') ||
+            contentLower.includes('event') ||
+            contentLower.includes('calendar') ||
+            contentLower.includes('zoom') ||
+            contentLower.includes('google meet') ||
+            contentLower.includes('teams');
+
+          if (looksLikeEvent) {
+            await syncTask(userId, {
+              id: crypto.randomUUID(),
+              ...baseTaskData,
+              status: 'todo',
+              dependencies: [],
+              createdAt: Date.now(),
+            });
+          } else {
             // Create draft task
             const draftTask = await createDraftTask(userId, {
               source: 'gmail',
               sourceId: message.id,
-              title: aiResult.title,
-              description: `From: ${from}\nSubject: ${subject}\n\n${bodyText.substring(0, 1000)}`,
-              workspace: aiResult.workspaceSuggestions || 'personal',
-              energy: aiResult.energy,
-              estimatedTime: aiResult.estimatedTime,
-              tags: aiResult.tags,
-              aiConfidence: 0.8, // Could be calculated based on AI response quality
+              ...baseTaskData,
             });
 
             draftTasks.push(draftTask);
@@ -302,7 +323,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
  */
 export const getGmailStatus = async (userId) => {
   const result = await query(
-    `SELECT email, enabled, last_scan_at, scan_frequency, filter_prompt, created_at
+    `SELECT email, enabled, last_scan_at, scan_frequency, prompt_instructions, created_at
      FROM gmail_integrations WHERE user_id = $1`,
     [userId]
   );
@@ -317,7 +338,7 @@ export const getGmailStatus = async (userId) => {
     enabled: result.rows[0].enabled,
     lastScanAt: result.rows[0].last_scan_at,
     scanFrequency: result.rows[0].scan_frequency,
-    filterPrompt: result.rows[0].filter_prompt,
+    promptInstructions: result.rows[0].prompt_instructions,
     createdAt: result.rows[0].created_at,
   };
 };
@@ -355,9 +376,9 @@ export const updateGmailSettings = async (userId, settings) => {
     updates.push(`enabled = $${paramCount++}`);
     values.push(settings.enabled);
   }
-  if (settings.filterPrompt !== undefined) {
-    updates.push(`filter_prompt = $${paramCount++}`);
-    values.push(settings.filterPrompt || null);
+  if (settings.promptInstructions !== undefined) {
+    updates.push(`prompt_instructions = $${paramCount++}`);
+    values.push(settings.promptInstructions);
   }
 
   if (updates.length === 0) {

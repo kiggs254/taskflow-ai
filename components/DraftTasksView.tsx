@@ -17,6 +17,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
   const [selectedStatus, setSelectedStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [rejectConfirm, setRejectConfirm] = useState<{ isOpen: boolean; draftId: number | null }>({ isOpen: false, draftId: null });
   const [bulkApproveConfirm, setBulkApproveConfirm] = useState<{ isOpen: boolean; count: number }>({ isOpen: false, count: 0 });
+  const [bulkRejectConfirm, setBulkRejectConfirm] = useState<{ isOpen: boolean; count: number }>({ isOpen: false, count: 0 });
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
   useEffect(() => {
@@ -155,6 +156,27 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
     }
   };
 
+  const handleBulkReject = async () => {
+    const pendingDrafts = drafts.filter(d => d.status === 'pending');
+    if (pendingDrafts.length === 0) return;
+    setBulkRejectConfirm({ isOpen: true, count: pendingDrafts.length });
+  };
+
+  const confirmBulkReject = async () => {
+    const pendingDrafts = drafts.filter(d => d.status === 'pending');
+    setBulkRejectConfirm({ isOpen: false, count: 0 });
+    try {
+      await api.draftTasks.bulkReject(token, pendingDrafts.map(d => d.id));
+      await loadDrafts();
+      if (onDraftCountChange && selectedStatus === 'pending') {
+        onDraftCountChange(0);
+      }
+    } catch (error) {
+      console.error('Failed to bulk reject drafts:', error);
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to reject drafts.', type: 'error' });
+    }
+  };
+
   const gmailCount = drafts.filter(d => d.source === 'gmail').length;
   const telegramCount = drafts.filter(d => d.source === 'telegram').length;
   const slackCount = drafts.filter(d => d.source === 'slack').length;
@@ -177,13 +199,22 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
           </p>
         </div>
         {selectedStatus === 'pending' && drafts.length > 0 && (
-          <button
-            onClick={handleBulkApprove}
-            className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-2"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            Approve All ({drafts.length})
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleBulkApprove}
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Approve All ({drafts.length})
+            </button>
+            <button
+              onClick={handleBulkReject}
+              className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-500 flex items-center gap-2"
+            >
+              <X className="w-4 h-4" />
+              Reject All ({drafts.length})
+            </button>
+          </div>
         )}
       </div>
 
@@ -287,6 +318,18 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
         variant="info"
         onConfirm={confirmBulkApprove}
         onCancel={() => setBulkApproveConfirm({ isOpen: false, count: 0 })}
+      />
+
+      {/* Bulk Reject Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={bulkRejectConfirm.isOpen}
+        title="Reject All Drafts"
+        message={`Are you sure you want to reject all ${bulkRejectConfirm.count} pending drafts? This cannot be undone.`}
+        confirmText="Reject All"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={confirmBulkReject}
+        onCancel={() => setBulkRejectConfirm({ isOpen: false, count: 0 })}
       />
 
       {/* Alert Modal */}

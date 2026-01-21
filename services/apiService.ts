@@ -126,7 +126,7 @@ export const api = {
       if (!res.ok) throw new Error('Failed to scan emails');
       return res.json();
     },
-    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean; filterPrompt?: string | null }) => {
+    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean; promptInstructions?: string }) => {
       const res = await fetch(`${API_BASE}/gmail/settings`, {
         method: 'PUT',
         headers: {
@@ -306,6 +306,18 @@ export const api = {
         body: JSON.stringify({ draftIds }),
       });
       if (!res.ok) throw new Error('Failed to bulk approve draft tasks');
+      return res.json();
+    },
+    bulkReject: async (token: string, draftIds: number[]) => {
+      const res = await fetch(`${API_BASE}/draft-tasks/bulk-reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ draftIds }),
+      });
+      if (!res.ok) throw new Error('Failed to bulk reject draft tasks');
       return res.json();
     },
   },

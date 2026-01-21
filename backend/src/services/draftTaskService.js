@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { query } from '../config/database.js';
 import { syncTask } from './taskService.js';
+import { parseTask } from './aiService.js';
 
 /**
  * Get all draft tasks for a user
@@ -100,10 +101,22 @@ export const approveDraftTask = async (userId, draftId, edits = {}) => {
   // Get the draft task
   const draft = await getDraftTask(userId, draftId);
 
+  // Auto-correct title using AI if possible
+  let aiTitle = '';
+  try {
+    const aiResult = await parseTask(
+      `${draft.title}\n${draft.description || ''}`,
+      'openai'
+    );
+    aiTitle = aiResult?.title || '';
+  } catch (err) {
+    // Ignore AI errors; fallback to existing title
+  }
+
   // Merge any edits
   const taskData = {
     id: crypto.randomUUID(),
-    title: edits.title || draft.title,
+    title: edits.title || aiTitle || draft.title,
     description: edits.description || draft.description,
     workspace: edits.workspace || draft.workspace || 'personal',
     energy: edits.energy || draft.energy || 'medium',
@@ -235,6 +248,33 @@ export const bulkApproveDraftTasks = async (userId, draftIds) => {
     try {
       const result = await approveDraftTask(userId, draftId);
       results.push({ id: draftId, success: true, task: result.task });
+    } catch (error) {
+      results.push({ id: draftId, success: false, error: error.message });
+    }
+  }
+
+  return { results };
+};
+
+/**
+ * Bulk reject draft tasks
+ */
+export const bulkRejectDraftTasks = async (userId, draftIds) => {
+  if (!Array.isArray(draftIds) || draftIds.length === 0) {
+    throw new Error('Invalid draft task IDs');
+  }
+
+  const results = [];
+  for (const draftId of draftIds) {
+    try {
+      const result = await query(
+        'UPDATE draft_tasks SET status = $1 WHERE id = $2 AND user_id = $3 RETURNING id',
+        ['rejected', draftId, userId]
+      );
+      if (result.rows.length === 0) {
+        throw new Error('Draft task not found');
+      }
+      results.push({ id: draftId, success: true });
     } catch (error) {
       results.push({ id: draftId, success: false, error: error.message });
     }

@@ -93,7 +93,7 @@ router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
  * Update Gmail settings
  */
 router.put('/settings', authenticate, asyncHandler(async (req, res) => {
-  const { scanFrequency, enabled, filterPrompt } = req.body;
+  const { scanFrequency, enabled, promptInstructions } = req.body;
   
   const settings = {};
   if (scanFrequency !== undefined) {
@@ -102,8 +102,8 @@ router.put('/settings', authenticate, asyncHandler(async (req, res) => {
   if (enabled !== undefined) {
     settings.enabled = Boolean(enabled);
   }
-  if (filterPrompt !== undefined) {
-    settings.filterPrompt = filterPrompt;
+  if (promptInstructions !== undefined) {
+    settings.promptInstructions = promptInstructions;
   }
 
   const result = await updateGmailSettings(req.user.id, settings);

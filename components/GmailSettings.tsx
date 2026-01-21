@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Mail, CheckCircle2, X, RefreshCw, Settings, Filter } from 'lucide-react';
+import { Mail, CheckCircle2, X, RefreshCw, Settings } from 'lucide-react';
 import { api } from '../services/apiService';
 import { ConfirmationModal } from './ConfirmationModal';
 import { AlertModal } from './AlertModal';
@@ -13,7 +13,7 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanFrequency, setScanFrequency] = useState(60);
-  const [filterPrompt, setFilterPrompt] = useState('');
+  const [promptInstructions, setPromptInstructions] = useState('');
   const [disconnectConfirm, setDisconnectConfirm] = useState(false);
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
@@ -28,8 +28,8 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
       if (data.connected && data.scanFrequency) {
         setScanFrequency(data.scanFrequency);
       }
-      if (data.filterPrompt !== undefined && data.filterPrompt !== null) {
-        setFilterPrompt(data.filterPrompt);
+      if (data.promptInstructions !== undefined) {
+        setPromptInstructions(data.promptInstructions || '');
       }
     } catch (error) {
       console.error('Failed to load Gmail status:', error);
@@ -85,7 +85,7 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
   const handleUpdateSettings = async () => {
     setLoading(true);
     try {
-      await api.gmail.updateSettings(token, { scanFrequency, filterPrompt: filterPrompt || null });
+      await api.gmail.updateSettings(token, { scanFrequency, promptInstructions });
       setAlertModal({ isOpen: true, title: 'Success', message: 'Settings updated successfully!', type: 'success' });
       loadStatus();
     } catch (error) {
@@ -143,28 +143,17 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-sm text-slate-300 flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              Email Filter Instructions (Do's and Don'ts)
+            <label className="block text-sm text-slate-300">
+              AI Instructions (Do's and Don'ts)
             </label>
             <textarea
-              value={filterPrompt}
-              onChange={(e) => setFilterPrompt(e.target.value)}
+              value={promptInstructions}
+              onChange={(e) => setPromptInstructions(e.target.value)}
               rows={4}
-              className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none resize-y"
-              placeholder={`Examples:\n- Only create tasks if the email asks me to do something\n- Ignore marketing emails\n- Ignore newsletters\n- Ignore automated notifications unless they mention an action item`}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700"
+              placeholder="Example: Only create tasks for bugs and deployments. Ignore marketing emails."
             />
-            <p className="text-xs text-slate-500">
-              These instructions are appended to the AI prompt to decide which emails become draft tasks. Leave empty to use the default behavior.
-            </p>
-            <button
-              onClick={handleUpdateSettings}
-              disabled={loading}
-              className="px-4 py-2 rounded-lg bg-primary text-white hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2"
-            >
-              <Settings className="w-4 h-4" />
-              Save Filter Instructions
-            </button>
+            <p className="text-xs text-slate-500">These instructions are sent to the AI when parsing emails.</p>
           </div>
 
           <div className="flex gap-2">

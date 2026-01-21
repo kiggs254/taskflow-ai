@@ -7,6 +7,7 @@ import {
   editDraftTask,
   deleteDraftTask,
   bulkApproveDraftTasks,
+  bulkRejectDraftTasks,
 } from '../services/draftTaskService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
@@ -105,6 +106,21 @@ router.post('/bulk-approve', asyncHandler(async (req, res) => {
   }
 
   const result = await bulkApproveDraftTasks(req.user.id, draftIds);
+  res.json(result);
+}));
+
+/**
+ * POST /api/draft-tasks/bulk-reject
+ * Reject multiple draft tasks
+ */
+router.post('/bulk-reject', asyncHandler(async (req, res) => {
+  const { draftIds } = req.body;
+  
+  if (!Array.isArray(draftIds) || draftIds.length === 0) {
+    return res.status(400).json({ error: 'draftIds must be a non-empty array' });
+  }
+
+  const result = await bulkRejectDraftTasks(req.user.id, draftIds);
   res.json(result);
 }));
 
