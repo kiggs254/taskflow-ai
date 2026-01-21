@@ -1193,6 +1193,7 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
   const [showFreelanceTab, setShowFreelanceTab] = useState(false);
   const [showPersonalTab, setShowPersonalTab] = useState(false);
   const [loadingPrefs, setLoadingPrefs] = useState(true);
+  const [savingPrefs, setSavingPrefs] = useState(false);
 
   const toggleNotifications = () => {
     // Browser notifications are disabled - using toast notifications instead
@@ -1223,11 +1224,20 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
     loadPreferences();
   }, [token]);
 
-  const updatePreferences = async (prefs: { showFreelanceTab?: boolean; showPersonalTab?: boolean }) => {
+  const saveWorkspacePreferences = async () => {
+    setSavingPrefs(true);
     try {
-      await api.updateUserPreferences(token, prefs);
+      await api.updateUserPreferences(token, {
+        showFreelanceTab,
+        showPersonalTab,
+      });
+      // Show success message
+      alert('Workspace tab preferences saved!');
     } catch (error) {
       console.error('Failed to update preferences:', error);
+      alert('Failed to save preferences: ' + (error as Error).message);
+    } finally {
+      setSavingPrefs(false);
     }
   };
 
@@ -1302,11 +1312,7 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
                       <span className="text-slate-200">Show Freelance Tab</span>
                    </div>
                    <button 
-                     onClick={() => {
-                       const newValue = !showFreelanceTab;
-                       setShowFreelanceTab(newValue);
-                       updatePreferences({ showFreelanceTab: newValue });
-                     }}
+                     onClick={() => setShowFreelanceTab(!showFreelanceTab)}
                      disabled={loadingPrefs}
                      className={`w-12 h-6 rounded-full transition-colors relative ${showFreelanceTab ? 'bg-primary' : 'bg-slate-700'} ${loadingPrefs ? 'opacity-50 cursor-not-allowed' : ''}`}
                    >
@@ -1319,17 +1325,30 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
                       <span className="text-slate-200">Show Personal Tab</span>
                    </div>
                    <button 
-                     onClick={() => {
-                       const newValue = !showPersonalTab;
-                       setShowPersonalTab(newValue);
-                       updatePreferences({ showPersonalTab: newValue });
-                     }}
+                     onClick={() => setShowPersonalTab(!showPersonalTab)}
                      disabled={loadingPrefs}
                      className={`w-12 h-6 rounded-full transition-colors relative ${showPersonalTab ? 'bg-primary' : 'bg-slate-700'} ${loadingPrefs ? 'opacity-50 cursor-not-allowed' : ''}`}
                    >
                       <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${showPersonalTab ? 'translate-x-6' : ''}`} />
                    </button>
                 </div>
+                <button
+                  onClick={saveWorkspacePreferences}
+                  disabled={savingPrefs || loadingPrefs}
+                  className="w-full px-4 py-2 rounded-lg bg-primary text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium mt-4"
+                >
+                  {savingPrefs ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Save Workspace Preferences
+                    </>
+                  )}
+                </button>
               </div>
            </div>
 

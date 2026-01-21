@@ -21,7 +21,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [editDescription, setEditDescription] = useState(task.description || '');
   const [showReply, setShowReply] = useState(false);
   const [replyMessage, setReplyMessage] = useState('');
-  const [polishInstructions, setPolishInstructions] = useState('');
   const [polishedMessage, setPolishedMessage] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
   const [selectedTone, setSelectedTone] = useState('professional');
@@ -373,7 +372,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                       onClick={() => {
                         setShowReply(false);
                         setReplyMessage('');
-                        setPolishInstructions('');
                         setPolishedMessage('');
                         setSelectedTone('professional');
                         setCustomToneInstructions('');
@@ -490,57 +488,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     </div>
                   </div>
 
-                  {/* AI Polish/Rewrite Section */}
-                  {(replyMessage || polishedMessage) && (
-                    <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Sparkles className="w-4 h-4 text-purple-400" />
-                        <h4 className="text-sm font-semibold text-white">Polish / Rewrite with AI</h4>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-2">Instructions (optional)</label>
-                          <textarea
-                            value={polishInstructions}
-                            onChange={(e) => setPolishInstructions(e.target.value)}
-                            rows={2}
-                            className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-purple-500 focus:outline-none resize-y text-sm"
-                            placeholder="e.g., 'Make it more formal', 'Add more detail', 'Shorten it', 'Make it friendlier'"
-                          />
-                        </div>
-
-                        <button
-                          onClick={async () => {
-                            try {
-                              const { api } = await import('../services/apiService');
-                              const token = localStorage.getItem('taskflow_token');
-                              if (!token) throw new Error('Not authenticated');
-                              
-                              const messageToPolish = polishedMessage || replyMessage;
-                              if (!messageToPolish) return;
-                              
-                              const result = await api.gmail.polishReply(token, {
-                                message: messageToPolish,
-                                instructions: polishInstructions || undefined,
-                              });
-                              
-                              setPolishedMessage(result.polishedMessage);
-                            } catch (error) {
-                              console.error('Error polishing reply:', error);
-                              alert('Failed to polish reply: ' + (error as Error).message);
-                            }
-                          }}
-                          disabled={!replyMessage && !polishedMessage}
-                          className="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
-                        >
-                          <Sparkles className="w-4 h-4" />
-                          Polish / Rewrite Message
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
                   {/* Action Buttons */}
                   <div className="flex gap-3 pt-2">
                     <button
@@ -549,19 +496,18 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         setSendingReply(true);
                         try {
                           const { api } = await import('../services/apiService');
-                          const token = localStorage.getItem('tf_token');
+                          const token = localStorage.getItem('taskflow_token');
                           if (!token) throw new Error('Not authenticated');
                           
                           await api.gmail.reply(token, {
                             taskId: task.id,
                             message: polishedMessage || replyMessage,
-                            polishWithAI: false, // No longer using this flag
-                            polishInstructions: undefined,
+                            polishWithAI: false,
+                            polishInstructions: '',
                           });
                           
                           setShowReply(false);
                           setReplyMessage('');
-                          setPolishInstructions('');
                           setPolishedMessage('');
                           setSelectedTone('professional');
                           setCustomToneInstructions('');
