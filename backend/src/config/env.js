@@ -36,5 +36,17 @@ export const config = {
   cors: {
     origin: process.env.CORS_ORIGIN || '*',
   },
+  smtp: {
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASSWORD,
+    from: process.env.SMTP_FROM,
+    fromName: process.env.SMTP_FROM_NAME || 'TaskFlow.AI',
+  },
+  frontend: {
+    url: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:5173',
+  },
   nodeEnv: process.env.NODE_ENV || 'development',
 };

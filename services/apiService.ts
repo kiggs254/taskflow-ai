@@ -82,6 +82,12 @@ export const api = {
   login: async (email: string, password: string) => {
     return request('login', 'POST', { email, password });
   },
+  forgotPassword: async (email: string) => {
+    return request('forgot_password', 'POST', { email });
+  },
+  resetPassword: async (token: string, password: string) => {
+    return request('reset_password', 'POST', { token, password });
+  },
 
   register: async (username: string, email: string, password: string) => {
     return request('register', 'POST', { username, email, password });

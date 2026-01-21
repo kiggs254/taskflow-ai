@@ -1,6 +1,9 @@
 import { query } from '../config/database.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { generateToken } from '../utils/token.js';
+import crypto from 'crypto';
+import { sendPasswordResetEmail } from './emailService.js';
+import { config } from '../config/env.js';
 
 /**
  * Register a new user
@@ -217,4 +220,110 @@ export const updateUserPreferences = async (userId, preferences) => {
   );
 
   return { success: true };
+};
+
+/**
+ * Request password reset - generates token and sends email
+ */
+export const requestPasswordReset = async (email) => {
+  // Find user by email
+  const userResult = await query(
+    'SELECT id, username FROM users WHERE email = $1',
+    [email]
+  );
+
+  if (userResult.rows.length === 0) {
+    // Don't reveal if user exists or not (security best practice)
+    return { success: true, message: 'If an account exists with this email, a password reset link has been sent.' };
+  }
+
+  const user = userResult.rows[0];
+
+  // Generate secure random token
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + 1); // Token expires in 1 hour
+
+  // Store token in database
+  await query(
+    `INSERT INTO password_reset_tokens (user_id, token, expires_at)
+     VALUES ($1, $2, $3)`,
+    [user.id, resetToken, expiresAt]
+  );
+
+  // Build reset URL
+  const frontendUrl = config.frontend.url;
+  const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
+
+  // Send email
+  try {
+    await sendPasswordResetEmail(email, resetToken, resetUrl);
+    return { success: true, message: 'Password reset email sent successfully.' };
+  } catch (error) {
+    console.error('Failed to send password reset email:', error);
+    // Delete token if email fails
+    await query('DELETE FROM password_reset_tokens WHERE token = $1', [resetToken]);
+    throw new Error('Failed to send password reset email. Please try again later.');
+  }
+};
+
+/**
+ * Reset password using token
+ */
+export const resetPassword = async (token, newPassword) => {
+  if (!token || !newPassword) {
+    throw new Error('Token and new password are required');
+  }
+
+  if (newPassword.length < 6) {
+    throw new Error('Password must be at least 6 characters long');
+  }
+
+  // Find valid token
+  const tokenResult = await query(
+    `SELECT prt.user_id, prt.expires_at, prt.used, u.email
+     FROM password_reset_tokens prt
+     JOIN users u ON prt.user_id = u.id
+     WHERE prt.token = $1`,
+    [token]
+  );
+
+  if (tokenResult.rows.length === 0) {
+    throw new Error('Invalid or expired reset token');
+  }
+
+  const tokenData = tokenResult.rows[0];
+
+  // Check if token is expired
+  if (new Date() > new Date(tokenData.expires_at)) {
+    throw new Error('Reset token has expired. Please request a new password reset.');
+  }
+
+  // Check if token has already been used
+  if (tokenData.used) {
+    throw new Error('This reset token has already been used. Please request a new password reset.');
+  }
+
+  // Hash new password
+  const passwordHash = await hashPassword(newPassword);
+
+  // Update user password
+  await query(
+    'UPDATE users SET password_hash = $1 WHERE id = $2',
+    [passwordHash, tokenData.user_id]
+  );
+
+  // Mark token as used
+  await query(
+    'UPDATE password_reset_tokens SET used = true WHERE token = $1',
+    [token]
+  );
+
+  // Delete all other reset tokens for this user (security best practice)
+  await query(
+    'DELETE FROM password_reset_tokens WHERE user_id = $1 AND token != $2',
+    [tokenData.user_id, token]
+  );
+
+  return { success: true, message: 'Password reset successfully.' };
 };

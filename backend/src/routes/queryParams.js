@@ -7,7 +7,7 @@ import {
   completeTask,
   uncompleteTask,
 } from '../services/taskService.js';
-import { updateUserXP, updateDailyReset, getUserPreferences, updateUserPreferences } from '../services/userService.js';
+import { updateUserXP, updateDailyReset, getUserPreferences, updateUserPreferences, requestPasswordReset, resetPassword } from '../services/userService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 
@@ -72,6 +72,33 @@ router.post('/', asyncHandler(async (req, res, next) => {
       }
       console.error('Unexpected login error:', error);
       return res.status(500).json({ error: 'Login failed. Please try again.' });
+    }
+  } else if (action === 'forgot_password') {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    try {
+      const result = await requestPasswordReset(email);
+      return res.json(result);
+    } catch (error) {
+      console.error('Forgot password error:', error.message);
+      return res.status(500).json({ error: error.message || 'Failed to process password reset request' });
+    }
+  } else if (action === 'reset_password') {
+    const { token, password } = req.body;
+    if (!token || !password) {
+      return res.status(400).json({ error: 'Token and password are required' });
+    }
+    try {
+      const result = await resetPassword(token, password);
+      return res.json(result);
+    } catch (error) {
+      console.error('Reset password error:', error.message);
+      if (error.message.includes('Invalid') || error.message.includes('expired') || error.message.includes('used')) {
+        return res.status(400).json({ error: error.message });
+      }
+      return res.status(500).json({ error: error.message || 'Failed to reset password' });
     }
   }
   
