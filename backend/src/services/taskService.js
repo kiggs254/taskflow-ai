@@ -110,11 +110,44 @@ export const deleteTask = async (userId, taskId) => {
 export const completeTask = async (userId, taskId) => {
   const now = Date.now();
 
+  // Get task details before updating (to check if it's a Slack task)
+  const taskResult = await query(
+    'SELECT title, description, tags FROM tasks WHERE id = $1 AND user_id = $2',
+    [taskId, userId]
+  );
+
+  if (taskResult.rows.length === 0) {
+    throw new Error('Task not found');
+  }
+
+  const task = taskResult.rows[0];
+  // Tags are stored as JSONB, parse if needed
+  let tags = task.tags || [];
+  if (typeof tags === 'string') {
+    try {
+      tags = JSON.parse(tags);
+    } catch (e) {
+      tags = [];
+    }
+  }
+  const isSlackTask = Array.isArray(tags) && tags.includes('slack');
+
   // Update task status
   await query(
     'UPDATE tasks SET status = $1, completed_at = $2 WHERE id = $3 AND user_id = $4',
     ['done', now, taskId, userId]
   );
+
+  // If it's a Slack task, reply to the original message
+  if (isSlackTask && task.description) {
+    try {
+      const { replyToSlackTask } = await import('./slackService.js');
+      await replyToSlackTask(userId, task.title, task.description);
+    } catch (error) {
+      console.error('Error replying to Slack task:', error);
+      // Don't fail task completion if Slack reply fails
+    }
+  }
 
   return { success: true };
 };

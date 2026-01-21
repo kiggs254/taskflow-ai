@@ -8,10 +8,8 @@ import { sendNotification } from '../services/telegramService.js';
  * Runs every 15 minutes by default (more frequent than email since mentions are time-sensitive)
  */
 export const startSlackScanner = () => {
-  // Run every 15 minutes
-  cron.schedule('*/15 * * * *', async () => {
-    console.log('Running scheduled Slack mention scan...');
-    
+  // Run every minute to check scan frequency for each user
+  cron.schedule('* * * * *', async () => {
     try {
       // Get all enabled Slack integrations
       const result = await query(
@@ -62,5 +60,5 @@ export const startSlackScanner = () => {
     }
   });
 
-  console.log('Slack scanner job scheduled (runs every 15 minutes)');
+  console.log('Slack scanner job scheduled (runs every minute, checks scan frequency per user)');
 };

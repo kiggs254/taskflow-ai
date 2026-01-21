@@ -1,7 +1,7 @@
 import { WebClient } from '@slack/web-api';
 import { query } from '../config/database.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
-import { parseTask } from './aiService.js';
+import { parseTask, generateCompletionMessage } from './aiService.js';
 import { syncTask } from './taskService.js';
 import crypto from 'crypto';
 
@@ -256,10 +256,19 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
             
             if (aiResult && aiResult.title) {
               // Create approved task directly (no draft step)
+              // Store Slack metadata in description for later reply
+              const slackMetadata = {
+                channelId: channel.id,
+                channelName: channelName,
+                messageTs: message.ts,
+                threadTs: message.thread_ts || message.ts, // Use thread_ts if exists, else message_ts
+                permalink: permalink,
+              };
+              
               const newTask = {
                 id: crypto.randomUUID(),
                 title: aiResult.title,
-                description: `From Slack #${channelName}\n\n${messageText}${permalink ? `\n\nLink: ${permalink}` : ''}`,
+                description: `From Slack #${channelName}\n\n${messageText}${permalink ? `\n\nLink: ${permalink}` : ''}\n\n<!-- Slack metadata: ${JSON.stringify(slackMetadata)} -->`,
                 workspace: 'job', // All Slack tasks go to Job workspace
                 energy: aiResult.energy || 'medium',
                 estimatedTime: aiResult.estimatedTime || 15,
@@ -489,6 +498,48 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => 
   } catch (error) {
     console.error('Slack daily summary error:', error);
     throw error;
+  }
+};
+
+/**
+ * Reply to Slack message when task is completed
+ */
+export const replyToSlackTask = async (userId, taskTitle, taskDescription) => {
+  try {
+    // Extract Slack metadata from description
+    const metadataMatch = taskDescription?.match(/<!-- Slack metadata: ({.*?}) -->/);
+    if (!metadataMatch) {
+      return { success: false, reason: 'no_slack_metadata' };
+    }
+
+    let slackMetadata;
+    try {
+      slackMetadata = JSON.parse(metadataMatch[1]);
+    } catch (e) {
+      return { success: false, reason: 'invalid_metadata' };
+    }
+
+    const { channelId, messageTs, threadTs } = slackMetadata;
+    if (!channelId || !messageTs) {
+      return { success: false, reason: 'missing_metadata' };
+    }
+
+    const client = await getSlackClient(userId);
+    
+    // Generate AI response
+    const aiMessage = await generateCompletionMessage(taskTitle, 'openai');
+
+    // Post reply to Slack thread
+    await client.chat.postMessage({
+      channel: channelId,
+      text: aiMessage,
+      thread_ts: threadTs || messageTs, // Reply in thread
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error replying to Slack task:', error);
+    return { success: false, error: error.message };
   }
 };
 

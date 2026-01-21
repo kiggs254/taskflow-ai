@@ -194,3 +194,38 @@ Keep it under 280 characters. Casual but professional tone.`,
     return 'Hey, just checking in on this.';
   }
 };
+
+/**
+ * Generate completion message for Slack task
+ */
+export const generateCompletionMessage = async (
+  taskTitle,
+  provider = 'openai'
+) => {
+  if (!taskTitle || typeof taskTitle !== 'string') {
+    throw new Error('Invalid input: taskTitle must be a string');
+  }
+
+  const client = getClient(provider);
+  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+
+  try {
+    const response = await client.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'user',
+          content: `Generate a short, friendly Slack message to inform someone that the task "${taskTitle}" has been completed. 
+Keep it under 200 characters. Be casual and professional. Start with something like "Done!" or "Completed!"`,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 100,
+    });
+
+    return response.choices[0]?.message?.content || `✅ Done! "${taskTitle}" has been completed.`;
+  } catch (error) {
+    console.error('AI generateCompletionMessage error:', error);
+    return `✅ Done! "${taskTitle}" has been completed.`;
+  }
+};
