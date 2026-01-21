@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Task } from '../types';
-import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users } from 'lucide-react';
+import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users, Sparkles, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -25,6 +25,9 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [polishInstructions, setPolishInstructions] = useState('');
   const [polishedMessage, setPolishedMessage] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
+  const [selectedTone, setSelectedTone] = useState('professional');
+  const [generatingDraft, setGeneratingDraft] = useState(false);
+  const [customToneInstructions, setCustomToneInstructions] = useState('');
 
   // Extract email metadata if this is a Gmail task
   const isGmailTask = task.tags?.includes('gmail');
@@ -351,18 +354,21 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
           {/* Reply Section (for Gmail tasks) */}
           {isGmailTask && emailMetadata && (
-            <div className="border border-slate-700 rounded-lg p-4 bg-slate-800/50">
+            <div className="border border-slate-700 rounded-lg p-6 bg-gradient-to-br from-slate-800/50 to-slate-900/50">
               {!showReply ? (
                 <button
                   onClick={() => setShowReply(true)}
-                  className="w-full px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors flex items-center justify-center gap-2"
+                  className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-500 hover:to-blue-400 transition-all flex items-center justify-center gap-2 font-medium shadow-lg shadow-blue-500/20"
                 >
                   <Mail className="w-4 h-4" /> Reply All
                 </button>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-white">Reply to Email</h3>
+                    <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                      <Mail className="w-5 h-5" />
+                      Compose Reply
+                    </h3>
                     <button
                       onClick={() => {
                         setShowReply(false);
@@ -370,15 +376,103 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         setPolishWithAI(false);
                         setPolishInstructions('');
                         setPolishedMessage('');
+                        setSelectedTone('professional');
+                        setCustomToneInstructions('');
                       }}
-                      className="text-slate-400 hover:text-white"
+                      className="text-slate-400 hover:text-white transition-colors p-1 rounded hover:bg-slate-700"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-5 h-5" />
                     </button>
                   </div>
-                  
+
+                  {/* AI Draft Generation Section */}
+                  <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Sparkles className="w-4 h-4 text-yellow-400" />
+                      <h4 className="text-sm font-semibold text-white">Generate AI Draft</h4>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs text-slate-400 mb-2">Tone</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { value: 'professional', label: 'Professional' },
+                            { value: 'casual', label: 'Casual' },
+                            { value: 'friendly', label: 'Friendly' },
+                            { value: 'concise', label: 'Concise' },
+                            { value: 'urgent', label: 'Urgent' },
+                          ].map((tone) => (
+                            <button
+                              key={tone.value}
+                              onClick={() => setSelectedTone(tone.value)}
+                              className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                                selectedTone === tone.value
+                                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                              }`}
+                            >
+                              {tone.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-slate-400 mb-2">Custom Instructions (optional)</label>
+                        <textarea
+                          value={customToneInstructions}
+                          onChange={(e) => setCustomToneInstructions(e.target.value)}
+                          rows={2}
+                          className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-blue-500 focus:outline-none resize-y text-sm"
+                          placeholder="e.g., 'Include a call to action', 'Mention the deadline', 'Keep it under 100 words'"
+                        />
+                      </div>
+
+                      <button
+                        onClick={async () => {
+                          setGeneratingDraft(true);
+                          try {
+                            const { api } = await import('../services/apiService');
+                            const token = localStorage.getItem('tf_token');
+                            if (!token) throw new Error('Not authenticated');
+                            
+                            const result = await api.gmail.generateDraft(token, {
+                              taskId: task.id,
+                              tone: selectedTone,
+                              customInstructions: customToneInstructions || undefined,
+                            });
+                            
+                            setReplyMessage(result.draft);
+                            setPolishedMessage(''); // Clear polished message if exists
+                          } catch (error) {
+                            console.error('Error generating draft:', error);
+                            alert('Failed to generate draft: ' + (error as Error).message);
+                          } finally {
+                            setGeneratingDraft(false);
+                          }
+                        }}
+                        disabled={generatingDraft}
+                        className="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
+                      >
+                        {generatingDraft ? (
+                          <>
+                            <Brain className="w-4 h-4 animate-pulse" />
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            Generate Draft
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Message Editor */}
                   <div>
-                    <label className="block text-xs text-slate-400 mb-2">Message</label>
+                    <label className="block text-xs uppercase tracking-wider text-slate-400 mb-2">Your Message</label>
                     <textarea
                       value={polishedMessage || replyMessage}
                       onChange={(e) => {
@@ -388,21 +482,25 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           setReplyMessage(e.target.value);
                         }
                       }}
-                      rows={4}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none resize-y"
-                      placeholder="Type your reply..."
+                      rows={8}
+                      className="w-full px-4 py-3 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-blue-500 focus:outline-none resize-y font-mono text-sm"
+                      placeholder="Type your reply or generate an AI draft above..."
                     />
+                    <div className="mt-2 text-xs text-slate-500">
+                      {(polishedMessage || replyMessage).length} characters
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
+                  {/* Polish Options */}
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 cursor-pointer group">
                       <input
                         type="checkbox"
                         checked={polishWithAI}
                         onChange={(e) => setPolishWithAI(e.target.checked)}
-                        className="w-4 h-4 rounded bg-slate-800 border-slate-700"
+                        className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500"
                       />
-                      <span className="text-sm text-slate-300">Polish with AI</span>
+                      <span className="text-sm text-slate-300 group-hover:text-white transition-colors">Polish with AI</span>
                     </label>
                     
                     {polishWithAI && (
@@ -412,14 +510,15 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           value={polishInstructions}
                           onChange={(e) => setPolishInstructions(e.target.value)}
                           rows={2}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none resize-y text-sm"
-                          placeholder="e.g., 'Make it more professional', 'Keep it casual', 'Add urgency'"
+                          className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-blue-500 focus:outline-none resize-y text-sm"
+                          placeholder="e.g., 'Make it more formal', 'Add more detail', 'Shorten it'"
                         />
                       </div>
                     )}
                   </div>
 
-                  <div className="flex gap-2">
+                  {/* Action Buttons */}
+                  <div className="flex gap-3 pt-2">
                     <button
                       onClick={async () => {
                         if (!replyMessage && !polishedMessage) return;
@@ -441,7 +540,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           setPolishWithAI(false);
                           setPolishInstructions('');
                           setPolishedMessage('');
-                          // Show success - could use toast here
+                          setSelectedTone('professional');
+                          setCustomToneInstructions('');
                           alert('Reply sent successfully!');
                         } catch (error) {
                           console.error('Error sending reply:', error);
@@ -451,9 +551,19 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         }
                       }}
                       disabled={sendingReply || (!replyMessage && !polishedMessage)}
-                      className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 px-4 py-3 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-500 hover:to-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium shadow-lg shadow-blue-500/20"
                     >
-                      {sendingReply ? 'Sending...' : 'Send Reply'}
+                      {sendingReply ? (
+                        <>
+                          <Brain className="w-4 h-4 animate-pulse" />
+                          Sending...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4" />
+                          Send Reply
+                        </>
+                      )}
                     </button>
                     {polishWithAI && replyMessage && !polishedMessage && (
                       <button
@@ -474,8 +584,9 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                             alert('Failed to polish reply: ' + (error as Error).message);
                           }
                         }}
-                        className="px-4 py-2 rounded-lg bg-slate-700 text-white hover:bg-slate-600 transition-colors"
+                        className="px-4 py-3 rounded-lg bg-slate-700 text-white hover:bg-slate-600 transition-colors flex items-center gap-2"
                       >
+                        <Sparkles className="w-4 h-4" />
                         Polish
                       </button>
                     )}

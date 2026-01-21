@@ -299,6 +299,73 @@ Return valid JSON with: { title: string, description: string (markdown), todos: 
 };
 
 /**
+ * Generate email draft reply with AI based on task context and tone
+ */
+export const generateEmailDraft = async (
+  taskTitle,
+  taskDescription,
+  emailSubject,
+  tone = 'professional',
+  provider = 'openai',
+  customInstructions = ''
+) => {
+  if (!taskTitle || typeof taskTitle !== 'string') {
+    throw new Error('Invalid input: taskTitle must be a string');
+  }
+
+  const client = getClient(provider);
+  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+
+  // Define tone instructions
+  const toneInstructions = {
+    professional: 'Write in a professional, formal business tone. Use proper salutations and closings.',
+    casual: 'Write in a friendly, casual tone. Keep it conversational and relaxed.',
+    friendly: 'Write in a warm, friendly tone. Be approachable and personable.',
+    concise: 'Write in a brief, to-the-point tone. Keep it short and direct.',
+    urgent: 'Write in an urgent but professional tone. Convey importance without being pushy.',
+  };
+
+  const tonePrompt = toneInstructions[tone] || toneInstructions.professional;
+  const customPrompt = customInstructions
+    ? `\n\nAdditional instructions: ${customInstructions}`
+    : '';
+
+  // Extract context from description (remove metadata comments)
+  const cleanDescription = taskDescription
+    ? taskDescription.replace(/<!-- Email metadata:.*?-->/, '').replace(/<!-- Slack metadata:.*?-->/, '').trim()
+    : '';
+
+  try {
+    const response = await client.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an email writing assistant. Generate a well-written email reply based on the task context. ${tonePrompt}${customPrompt}`,
+        },
+        {
+          role: 'user',
+          content: `Generate an email reply for the following task:
+          
+Task: ${taskTitle}
+${cleanDescription ? `Context: ${cleanDescription.substring(0, 1000)}` : ''}
+Email Subject: ${emailSubject || 'No subject'}
+
+Write an appropriate email reply that addresses the task. Keep it relevant to the context and appropriate for the tone requested.`,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 500,
+    });
+
+    return response.choices[0]?.message?.content || 'Thank you for your email. I will look into this.';
+  } catch (error) {
+    console.error('AI generateEmailDraft error:', error);
+    throw error;
+  }
+};
+
+/**
  * Polish email reply with AI
  */
 export const polishEmailReply = async (

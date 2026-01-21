@@ -170,6 +170,18 @@ export const api = {
       if (!res.ok) throw new Error('Failed to polish email reply');
       return res.json();
     },
+    generateDraft: async (token: string, data: { taskId: string; tone?: string; customInstructions?: string }) => {
+      const res = await fetch(`${API_BASE}/gmail/generate-draft`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to generate email draft');
+      return res.json();
+    },
   },
 
   // Slack Integration

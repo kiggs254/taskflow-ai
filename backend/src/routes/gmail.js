@@ -8,7 +8,7 @@ import {
   updateGmailSettings,
   replyToEmail,
 } from '../services/gmailService.js';
-import { polishEmailReply } from '../services/aiService.js';
+import { polishEmailReply, generateEmailDraft } from '../services/aiService.js';
 import { sendNotification } from '../services/telegramService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
@@ -183,6 +183,54 @@ router.post('/polish-reply', authenticate, asyncHandler(async (req, res) => {
   const polishedMessage = await polishEmailReply(message, 'openai', instructions || '');
   
   res.json({ polishedMessage });
+}));
+
+/**
+ * POST /api/gmail/generate-draft
+ * Generate AI email draft based on task context
+ */
+router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
+  const { taskId, tone, customInstructions } = req.body;
+  
+  if (!taskId) {
+    return res.status(400).json({ error: 'taskId is required' });
+  }
+
+  // Get task details
+  const { query } = await import('../config/database.js');
+  const taskResult = await query(
+    'SELECT title, description FROM tasks WHERE id = $1 AND user_id = $2',
+    [taskId, req.user.id]
+  );
+
+  if (taskResult.rows.length === 0) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+
+  const task = taskResult.rows[0];
+  
+  // Extract email metadata to get subject
+  const emailMetadataMatch = task.description?.match(/<!-- Email metadata: ({.*?}) -->/);
+  let emailSubject = '';
+  if (emailMetadataMatch) {
+    try {
+      const metadata = JSON.parse(emailMetadataMatch[1]);
+      emailSubject = metadata.subject || '';
+    } catch (e) {
+      // Ignore parse errors
+    }
+  }
+
+  const draft = await generateEmailDraft(
+    task.title,
+    task.description || '',
+    emailSubject,
+    tone || 'professional',
+    'openai',
+    customInstructions || ''
+  );
+  
+  res.json({ draft });
 }));
 
 export default router;
