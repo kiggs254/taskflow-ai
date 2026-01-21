@@ -106,18 +106,6 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stat
       setShowResetPassword(true);
       setShowForgotPassword(false);
       setIsRegister(false);
-    }
-  }, []);
-
-  // Check for reset token in URL
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
-    if (token) {
-      setResetToken(token);
-      setShowResetPassword(true);
-      setShowForgotPassword(false);
-      setIsRegister(false);
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
     }
@@ -228,104 +216,85 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stat
     }
   };
 
-  return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 shadow-xl shadow-primary/20 mb-4">
-            <Brain className="w-8 h-8 text-white" />
+  // Reset Password Screen (check first)
+  if (showResetPassword) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 shadow-xl shadow-primary/20 mb-4">
+              <Lock className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-white tracking-tight">TASKFLOW.AI</h1>
+            <p className="text-slate-400 mt-2">Set your new password</p>
           </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">TASKFLOW.AI</h1>
-          <p className="text-slate-400 mt-2">Neuro-friendly task management for devs.</p>
-        </div>
 
-        <div className="bg-surface border border-slate-700 p-8 rounded-2xl shadow-2xl">
-          <h2 className="text-xl font-semibold text-white mb-6">
-            {isRegister ? 'Create Account' : 'Welcome Back'}
-          </h2>
+          <div className="bg-surface border border-slate-700 p-8 rounded-2xl shadow-2xl">
+            <h2 className="text-xl font-semibold text-white mb-6">Reset Password</h2>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {isRegister && (
+            <form onSubmit={handleResetPassword} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Username</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">New Password</label>
                 <input 
-                  type="text" 
+                  type="password" 
                   required
+                  minLength={6}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
-                  value={formData.username}
-                  onChange={e => setFormData({...formData, username: e.target.value})}
+                  value={resetPasswordData.password}
+                  onChange={e => setResetPasswordData({...resetPasswordData, password: e.target.value})}
+                  placeholder="At least 6 characters"
                 />
               </div>
-            )}
-            
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
-              <input 
-                type="email" 
-                required
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
-                value={formData.email}
-                onChange={e => setFormData({...formData, email: e.target.value})}
-              />
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Confirm Password</label>
+                <input 
+                  type="password" 
+                  required
+                  minLength={6}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
+                  value={resetPasswordData.confirmPassword}
+                  onChange={e => setResetPasswordData({...resetPasswordData, confirmPassword: e.target.value})}
+                  placeholder="Confirm your new password"
+                />
+              </div>
+
+              {error && (
+                <div className="p-3 bg-red-900/20 border border-red-900/50 rounded-lg text-red-400 text-sm">
+                  {error}
+                </div>
+              )}
+
+              {successMessage && (
+                <div className="p-3 bg-emerald-900/20 border border-emerald-900/50 rounded-lg text-emerald-400 text-sm flex items-start gap-2">
+                  <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>{successMessage}</div>
+                </div>
+              )}
+
+              <button 
+                type="submit" 
+                disabled={loading || !!successMessage}
+                className="w-full py-3 bg-primary hover:bg-blue-600 text-white font-bold rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                {successMessage ? 'Redirecting...' : 'Reset Password'}
+              </button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <button 
+                onClick={() => { setShowResetPassword(false); setResetToken(null); setError(''); setSuccessMessage(''); }}
+                className="text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Back to login
+              </button>
             </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Password</label>
-              <input 
-                type="password" 
-                required
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white focus:outline-none focus:border-primary transition-colors"
-                value={formData.password}
-                onChange={e => setFormData({...formData, password: e.target.value})}
-              />
-            </div>
-
-            {!isRegister && (
-              <div className="text-right">
-                <button
-                  type="button"
-                  onClick={() => { setShowForgotPassword(true); setError(''); }}
-                  className="text-xs text-slate-400 hover:text-primary transition-colors"
-                >
-                  Forgot password?
-                </button>
-              </div>
-            )}
-
-            {error && (
-              <div className="p-3 bg-red-900/20 border border-red-900/50 rounded-lg text-red-400 text-sm">
-                {error}
-              </div>
-            )}
-
-            {successMessage && (
-              <div className="p-3 bg-emerald-900/20 border border-emerald-900/50 rounded-lg text-emerald-400 text-sm">
-                {successMessage}
-              </div>
-            )}
-
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full py-3 bg-primary hover:bg-blue-600 text-white font-bold rounded-lg transition-all flex items-center justify-center gap-2"
-            >
-              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {isRegister ? 'Start Flowing' : 'Sign In'}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <button 
-              onClick={() => { setIsRegister(!isRegister); setError(''); setSuccessMessage(''); }}
-              className="text-sm text-slate-400 hover:text-white transition-colors"
-            >
-              {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
-            </button>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   // Forgot Password Screen
   if (showForgotPassword) {
@@ -817,7 +786,7 @@ const TaskCard: React.FC<{
   return (
     <div 
       className={`group relative p-4 rounded-xl bg-surface border transition-all border-l-4 mb-3 shadow-sm cursor-pointer
-        ${energyColors[task.energy]} 
+      ${energyColors[task.energy]} 
         ${isBlocked || task.status === 'waiting' ? 'opacity-60 border-slate-700 bg-slate-800/50' : 'border-slate-700/50 hover:border-slate-600'}`}
       onClick={() => onViewDetails(task)}
     >
@@ -1035,7 +1004,7 @@ const WorkspaceTab = ({
     }`}
   >
     <span className={`transition-transform ${active ? 'scale-110' : ''}`}>
-      {icon}
+    {icon}
     </span>
     <span className="capitalize">{type}</span>
     {active && (
@@ -1189,9 +1158,9 @@ const DailyReset = ({
   useEffect(() => {
     if (token) {
       generateDailyPlan(pendingTasks, token).then(plan => {
-        setAiPlan(plan);
-        setLoading(false);
-      });
+      setAiPlan(plan);
+      setLoading(false);
+    });
     } else {
       setLoading(false);
     }
@@ -1350,7 +1319,7 @@ const QuickCapture = ({
               className="w-full bg-transparent text-xl px-6 pt-4 pb-3 text-white placeholder-slate-500 focus:outline-none"
               disabled={isAnalyzing}
             />
-          </div>
+            </div>
           <div className="px-6">
             <textarea
               value={description}
@@ -1363,8 +1332,8 @@ const QuickCapture = ({
           </div>
           <div className="px-6 pb-3 flex items-center justify-between gap-4 text-xs text-slate-500">
             <div className="flex gap-4">
-              <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> AI Auto-tagging</span>
-              <span className="flex items-center gap-1"><Layout className="w-3 h-3" /> Smart Sort</span>
+            <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> AI Auto-tagging</span>
+            <span className="flex items-center gap-1"><Layout className="w-3 h-3" /> Smart Sort</span>
             </div>
             <button 
               type="submit"
@@ -1575,7 +1544,7 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
 
   const toggleNotifications = () => {
     // Browser notifications are disabled - using toast notifications instead
-    setNotifications(!notifications);
+      setNotifications(!notifications);
   };
 
   useEffect(() => {
@@ -2528,7 +2497,7 @@ export default function App() {
         tags: aiResult.tags,
         // Respect the current tab for Personal/Freelance; allow AI to shift only from default Work
         workspace: activeWorkspace === 'job' && aiResult.workspaceSuggestions
-          ? aiResult.workspaceSuggestions
+          ? aiResult.workspaceSuggestions 
           : activeWorkspace,
       };
     }
@@ -3101,20 +3070,20 @@ export default function App() {
                       icon={<Briefcase className="w-3.5 h-3.5" />} 
                     />
                     {showFreelanceTab && (
-                      <WorkspaceTab 
-                        active={activeWorkspace === 'freelance'} 
-                        type="freelance" 
-                        onClick={() => setActiveWorkspace('freelance')} 
+                    <WorkspaceTab 
+                      active={activeWorkspace === 'freelance'} 
+                      type="freelance" 
+                      onClick={() => setActiveWorkspace('freelance')} 
                         icon={<Laptop className="w-3.5 h-3.5" />} 
-                      />
+                    />
                     )}
                     {showPersonalTab && (
-                      <WorkspaceTab 
-                        active={activeWorkspace === 'personal'} 
-                        type="personal" 
-                        onClick={() => setActiveWorkspace('personal')} 
+                    <WorkspaceTab 
+                      active={activeWorkspace === 'personal'} 
+                      type="personal" 
+                      onClick={() => setActiveWorkspace('personal')} 
                         icon={<User className="w-3.5 h-3.5" />} 
-                      />
+                    />
                     )}
                   </div>
                   <div className="md:hidden flex gap-2">
@@ -3190,17 +3159,17 @@ export default function App() {
 
                     {/* Sort Dropdown */}
                     <div className="relative group">
-                      <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+                        <select
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
                         className="appearance-none bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-lg py-2 pl-3 pr-9 text-[10px] font-semibold text-slate-300 hover:text-white focus:outline-none focus:border-blue-500/50 focus:ring-1.5 focus:ring-blue-500/20 transition-all cursor-pointer shadow-lg"
-                      >
-                        <option value="energy">By Energy</option>
-                        <option value="dueDate">By Due Date</option>
-                        <option value="newest">By Newest</option>
-                      </select>
+                        >
+                          <option value="energy">By Energy</option>
+                          <option value="dueDate">By Due Date</option>
+                          <option value="newest">By Newest</option>
+                        </select>
                       <ArrowUpDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none group-hover:text-slate-400 transition-colors" />
-                    </div>
+                      </div>
                     
                     {/* Sync All Sources button */}
                     {token && (
