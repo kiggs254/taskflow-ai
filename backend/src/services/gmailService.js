@@ -207,7 +207,10 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     const integrationSettings = integrationResult.rows[0] || {};
     const lastScanAt = integrationSettings.last_scan_at;
     const promptInstructions = integrationSettings.prompt_instructions || '';
-    let queryString = 'is:unread category:primary';
+
+    // Scan the Primary inbox. We rely on last_scan_at to avoid reprocessing
+    // instead of restricting to only unread emails (which can cause 0 matches).
+    let queryString = 'category:primary';
     
     if (lastScanAt) {
       // Only get emails after last scan
@@ -223,6 +226,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     });
 
     const messages = messagesResponse.data.messages || [];
+    console.log(`Gmail scan: found ${messages.length} message(s) for user ${userId} with query "${queryString}"`);
     const draftTasks = [];
 
     // Process each email
