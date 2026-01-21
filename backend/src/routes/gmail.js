@@ -7,6 +7,7 @@ import {
   disconnectGmail,
   updateGmailSettings,
 } from '../services/gmailService.js';
+import { sendNotification } from '../services/telegramService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 
@@ -85,6 +86,28 @@ router.get('/status', authenticate, asyncHandler(async (req, res) => {
 router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
   const { maxEmails = 50 } = req.body;
   const result = await scanEmails(req.user.id, maxEmails);
+  
+  // Send Telegram notification if tasks were created
+  if (result && (result.draftsCreated > 0 || result.tasksCreated > 0)) {
+    try {
+      let message = '';
+      if (result.tasksCreated > 0 && result.draftsCreated > 0) {
+        message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail\n📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail`;
+      } else if (result.tasksCreated > 0) {
+        message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail`;
+      } else if (result.draftsCreated > 0) {
+        message = `📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail`;
+      }
+      
+      if (message) {
+        await sendNotification(req.user.id, message);
+      }
+    } catch (notifError) {
+      console.error(`Error sending Telegram notification for user ${req.user.id}:`, notifError);
+      // Don't fail the scan if notification fails
+    }
+  }
+  
   res.json(result);
 }));
 

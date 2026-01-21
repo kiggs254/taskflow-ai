@@ -91,6 +91,18 @@ router.get('/status', authenticate, asyncHandler(async (req, res) => {
 router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
   const { maxMentions = 50 } = req.body;
   const result = await scanSlackMentions(req.user.id, maxMentions);
+  
+  // Send Telegram notification if tasks were created
+  if (result && result.tasksCreated > 0) {
+    try {
+      const message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Slack`;
+      await sendNotification(req.user.id, message);
+    } catch (notifError) {
+      console.error(`Error sending Telegram notification for user ${req.user.id}:`, notifError);
+      // Don't fail the scan if notification fails
+    }
+  }
+  
   res.json(result);
 }));
 

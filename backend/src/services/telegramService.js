@@ -827,7 +827,7 @@ export const getUserIdFromTelegram = async (telegramUserId) => {
  */
 export const sendNotification = async (userId, message, options = {}) => {
   if (!bot) {
-    console.warn('Telegram bot not initialized');
+    console.warn('Telegram bot not initialized - cannot send notification');
     return false;
   }
 
@@ -837,15 +837,27 @@ export const sendNotification = async (userId, message, options = {}) => {
       [userId]
     );
 
-    if (result.rows.length === 0 || !result.rows[0].notifications_enabled) {
+    if (result.rows.length === 0) {
+      console.log(`Telegram notification skipped for user ${userId}: Telegram not connected`);
+      return false;
+    }
+
+    if (!result.rows[0].notifications_enabled) {
+      console.log(`Telegram notification skipped for user ${userId}: notifications disabled`);
       return false;
     }
 
     const chatId = result.rows[0].chat_id;
+    if (!chatId) {
+      console.log(`Telegram notification skipped for user ${userId}: no chat_id`);
+      return false;
+    }
+
     await bot.sendMessage(chatId, message, options);
+    console.log(`Telegram notification sent to user ${userId} (chat: ${chatId})`);
     return true;
   } catch (error) {
-    console.error('Send notification error:', error);
+    console.error(`Send Telegram notification error for user ${userId}:`, error);
     return false;
   }
 };
