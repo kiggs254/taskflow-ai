@@ -21,7 +21,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [editDescription, setEditDescription] = useState(task.description || '');
   const [showReply, setShowReply] = useState(false);
   const [replyMessage, setReplyMessage] = useState('');
-  const [polishWithAI, setPolishWithAI] = useState(false);
   const [polishInstructions, setPolishInstructions] = useState('');
   const [polishedMessage, setPolishedMessage] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
@@ -373,7 +372,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                       onClick={() => {
                         setShowReply(false);
                         setReplyMessage('');
-                        setPolishWithAI(false);
                         setPolishInstructions('');
                         setPolishedMessage('');
                         setSelectedTone('professional');
@@ -383,6 +381,27 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     >
                       <X className="w-5 h-5" />
                     </button>
+                  </div>
+
+                  {/* Message Editor */}
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider text-slate-400 mb-2">Your Message</label>
+                    <textarea
+                      value={polishedMessage || replyMessage}
+                      onChange={(e) => {
+                        if (polishedMessage) {
+                          setPolishedMessage(e.target.value);
+                        } else {
+                          setReplyMessage(e.target.value);
+                        }
+                      }}
+                      rows={8}
+                      className="w-full px-4 py-3 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-blue-500 focus:outline-none resize-y font-mono text-sm"
+                      placeholder="Type your reply or generate an AI draft below..."
+                    />
+                    <div className="mt-2 text-xs text-slate-500">
+                      {(polishedMessage || replyMessage).length} characters
+                    </div>
                   </div>
 
                   {/* AI Draft Generation Section */}
@@ -470,52 +489,56 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Message Editor */}
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-slate-400 mb-2">Your Message</label>
-                    <textarea
-                      value={polishedMessage || replyMessage}
-                      onChange={(e) => {
-                        if (polishedMessage) {
-                          setPolishedMessage(e.target.value);
-                        } else {
-                          setReplyMessage(e.target.value);
-                        }
-                      }}
-                      rows={8}
-                      className="w-full px-4 py-3 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-blue-500 focus:outline-none resize-y font-mono text-sm"
-                      placeholder="Type your reply or generate an AI draft above..."
-                    />
-                    <div className="mt-2 text-xs text-slate-500">
-                      {(polishedMessage || replyMessage).length} characters
-                    </div>
-                  </div>
-
-                  {/* Polish Options */}
-                  <div className="space-y-3">
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        checked={polishWithAI}
-                        onChange={(e) => setPolishWithAI(e.target.checked)}
-                        className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-slate-300 group-hover:text-white transition-colors">Polish with AI</span>
-                    </label>
-                    
-                    {polishWithAI && (
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-2">Polish Instructions (optional)</label>
-                        <textarea
-                          value={polishInstructions}
-                          onChange={(e) => setPolishInstructions(e.target.value)}
-                          rows={2}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-blue-500 focus:outline-none resize-y text-sm"
-                          placeholder="e.g., 'Make it more formal', 'Add more detail', 'Shorten it'"
-                        />
+                  {/* AI Polish/Rewrite Section */}
+                  {(replyMessage || polishedMessage) && (
+                    <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Sparkles className="w-4 h-4 text-purple-400" />
+                        <h4 className="text-sm font-semibold text-white">Polish / Rewrite with AI</h4>
                       </div>
-                    )}
-                  </div>
+                      
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-2">Instructions (optional)</label>
+                          <textarea
+                            value={polishInstructions}
+                            onChange={(e) => setPolishInstructions(e.target.value)}
+                            rows={2}
+                            className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-purple-500 focus:outline-none resize-y text-sm"
+                            placeholder="e.g., 'Make it more formal', 'Add more detail', 'Shorten it', 'Make it friendlier'"
+                          />
+                        </div>
+
+                        <button
+                          onClick={async () => {
+                            try {
+                              const { api } = await import('../services/apiService');
+                              const token = localStorage.getItem('tf_token');
+                              if (!token) throw new Error('Not authenticated');
+                              
+                              const messageToPolish = polishedMessage || replyMessage;
+                              if (!messageToPolish) return;
+                              
+                              const result = await api.gmail.polishReply(token, {
+                                message: messageToPolish,
+                                instructions: polishInstructions || undefined,
+                              });
+                              
+                              setPolishedMessage(result.polishedMessage);
+                            } catch (error) {
+                              console.error('Error polishing reply:', error);
+                              alert('Failed to polish reply: ' + (error as Error).message);
+                            }
+                          }}
+                          disabled={!replyMessage && !polishedMessage}
+                          className="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          Polish / Rewrite Message
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Action Buttons */}
                   <div className="flex gap-3 pt-2">
@@ -531,13 +554,12 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           await api.gmail.reply(token, {
                             taskId: task.id,
                             message: polishedMessage || replyMessage,
-                            polishWithAI,
-                            polishInstructions: polishInstructions || undefined,
+                            polishWithAI: false, // No longer using this flag
+                            polishInstructions: undefined,
                           });
                           
                           setShowReply(false);
                           setReplyMessage('');
-                          setPolishWithAI(false);
                           setPolishInstructions('');
                           setPolishedMessage('');
                           setSelectedTone('professional');
@@ -565,31 +587,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         </>
                       )}
                     </button>
-                    {polishWithAI && replyMessage && !polishedMessage && (
-                      <button
-                        onClick={async () => {
-                          try {
-                            const { api } = await import('../services/apiService');
-                            const token = localStorage.getItem('tf_token');
-                            if (!token) throw new Error('Not authenticated');
-                            
-                            const result = await api.gmail.polishReply(token, {
-                              message: replyMessage,
-                              instructions: polishInstructions || undefined,
-                            });
-                            
-                            setPolishedMessage(result.polishedMessage);
-                          } catch (error) {
-                            console.error('Error polishing reply:', error);
-                            alert('Failed to polish reply: ' + (error as Error).message);
-                          }
-                        }}
-                        className="px-4 py-3 rounded-lg bg-slate-700 text-white hover:bg-slate-600 transition-colors flex items-center gap-2"
-                      >
-                        <Sparkles className="w-4 h-4" />
-                        Polish
-                      </button>
-                    )}
                   </div>
                 </div>
               )}
