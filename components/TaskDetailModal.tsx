@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { Task } from '../types';
 import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users, Sparkles, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { AlertModal } from './AlertModal';
 
 interface TaskDetailModalProps {
   task: Task;
@@ -27,6 +28,10 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [customToneInstructions, setCustomToneInstructions] = useState('');
   const [sendEmailReplyOnComplete, setSendEmailReplyOnComplete] = useState(false);
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ 
+    isOpen: false, title: '', message: '', type: 'info' 
+  });
+  const messageEditorRef = useRef<HTMLTextAreaElement>(null);
 
   // Extract email metadata if this is a Gmail task
   const isGmailTask = task.tags?.includes('gmail');
@@ -359,7 +364,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   onClick={() => setShowReply(true)}
                   className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-500 hover:to-blue-400 transition-all flex items-center justify-center gap-2 font-medium shadow-lg shadow-blue-500/20"
                 >
-                  <Mail className="w-4 h-4" /> Reply All
+                  <Mail className="w-4 h-4" /> Send an Update
                 </button>
               ) : (
                 <div className="space-y-5">
@@ -382,10 +387,24 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     </button>
                   </div>
 
+                  {/* Email Subject */}
+                  {emailMetadata?.subject && (
+                    <div>
+                      <label className="block text-xs uppercase tracking-wider text-slate-400 mb-2">Subject</label>
+                      <input
+                        type="text"
+                        value={`Re: ${emailMetadata.subject}`}
+                        readOnly
+                        className="w-full px-4 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-blue-500 focus:outline-none text-sm"
+                      />
+                    </div>
+                  )}
+
                   {/* Message Editor */}
                   <div>
                     <label className="block text-xs uppercase tracking-wider text-slate-400 mb-2">Your Message</label>
                     <textarea
+                      ref={messageEditorRef}
                       value={polishedMessage || replyMessage}
                       onChange={(e) => {
                         if (polishedMessage) {
@@ -463,9 +482,13 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                             
                             setReplyMessage(result.draft);
                             setPolishedMessage(''); // Clear polished message if exists
+                            // Scroll message editor into view
+                            setTimeout(() => {
+                              messageEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
                           } catch (error) {
                             console.error('Error generating draft:', error);
-                            alert('Failed to generate draft: ' + (error as Error).message);
+                            setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to generate draft: ' + (error as Error).message, type: 'error' });
                           } finally {
                             setGeneratingDraft(false);
                           }
@@ -511,10 +534,10 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           setPolishedMessage('');
                           setSelectedTone('professional');
                           setCustomToneInstructions('');
-                          alert('Reply sent successfully!');
+                          setAlertModal({ isOpen: true, title: 'Success', message: 'Reply sent successfully!', type: 'success' });
                         } catch (error) {
                           console.error('Error sending reply:', error);
-                          alert('Failed to send reply: ' + (error as Error).message);
+                          setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to send reply: ' + (error as Error).message, type: 'error' });
                         } finally {
                           setSendingReply(false);
                         }
@@ -593,6 +616,14 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           </div>
         )}
       </div>
+      
+      <AlertModal 
+        isOpen={alertModal.isOpen}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ isOpen: false, title: '', message: '', type: 'info' })}
+      />
     </div>
   );
 };

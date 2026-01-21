@@ -1199,6 +1199,9 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
   const [showPersonalTab, setShowPersonalTab] = useState(false);
   const [loadingPrefs, setLoadingPrefs] = useState(true);
   const [savingPrefs, setSavingPrefs] = useState(false);
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ 
+    isOpen: false, title: '', message: '', type: 'info' 
+  });
 
   const toggleNotifications = () => {
     // Browser notifications are disabled - using toast notifications instead
@@ -1236,11 +1239,15 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
         showFreelanceTab,
         showPersonalTab,
       });
-      // Show success message
-      alert('Workspace tab preferences saved!');
+      // Reload preferences after save
+      const updatedPrefs = await api.getUserPreferences(token);
+      setShowFreelanceTab(updatedPrefs.showFreelanceTab || false);
+      setShowPersonalTab(updatedPrefs.showPersonalTab || false);
+      // Show success modal instead of alert
+      setAlertModal({ isOpen: true, title: 'Success', message: 'Workspace tab preferences saved!', type: 'success' });
     } catch (error) {
       console.error('Failed to update preferences:', error);
-      alert('Failed to save preferences: ' + (error as Error).message);
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to save preferences: ' + (error as Error).message, type: 'error' });
     } finally {
       setSavingPrefs(false);
     }
@@ -1384,6 +1391,14 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
            </div>
         </div>
       </div>
+      
+      <AlertModal 
+        isOpen={alertModal.isOpen}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ isOpen: false, title: '', message: '', type: 'info' })}
+      />
       
       <div className="text-center text-xs text-slate-600 pt-8">
         TASKFLOW.AI v1.3.0 • Build 2024.11
