@@ -20,7 +20,6 @@ const router = express.Router();
 // Auth routes (NO authentication required)
 router.post('/', asyncHandler(async (req, res, next) => {
   // #region agent log
-  const fs = require('fs');
   const logPath = '/Users/mac/Desktop/Projects/taskflow.ai (5)/.cursor/debug.log';
   const logEntry = JSON.stringify({location:'queryParams.js:20',message:'queryParams POST route entered',data:{action:req.query.action,hasAuthHeader:!!req.headers.authorization,method:req.method,path:req.path},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})+'\n';
   fs.appendFileSync(logPath, logEntry);
