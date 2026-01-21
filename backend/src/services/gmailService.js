@@ -232,6 +232,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     const messages = messagesResponse.data.messages || [];
     console.log(`Gmail scan: found ${messages.length} message(s) for user ${userId} with query "${queryString}"`);
     const draftTasks = [];
+    const createdTasks = [];
     let tasksCreated = 0;
 
     // Process each email
@@ -298,7 +299,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
             const meetingTags = [...baseTaskData.tags, 'meeting'];
             const meetingDueDate = date ? new Date(date).getTime() : undefined;
 
-            await syncTask(userId, {
+            const newTask = {
               id: crypto.randomUUID(),
               ...baseTaskData,
               tags: meetingTags,
@@ -306,7 +307,10 @@ export const scanEmails = async (userId, maxEmails = 50) => {
               dependencies: [],
               createdAt: Date.now(),
               dueDate: meetingDueDate || null,
-            });
+            };
+
+            await syncTask(userId, newTask);
+            createdTasks.push(newTask);
             tasksCreated++;
           } else {
             // Create draft task
@@ -342,7 +346,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
       [userId]
     );
 
-    return { success: true, draftsCreated: draftTasks.length, tasksCreated, drafts: draftTasks };
+    return { success: true, draftsCreated: draftTasks.length, tasksCreated, tasks: createdTasks, drafts: draftTasks };
   } catch (error) {
     console.error('Email scanning error:', error);
     throw error;

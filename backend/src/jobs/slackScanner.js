@@ -44,7 +44,8 @@ export const startSlackScanner = () => {
           // Send Telegram notification if tasks were created
           if (result && result.tasksCreated > 0) {
             try {
-              const message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Slack`;
+              const taskTitles = result.tasks?.map(t => `• ${t.title}`).join('\n') || '';
+              const message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Slack:\n${taskTitles}`;
               await sendNotification(integration.user_id, message);
             } catch (notifError) {
               console.error(`Error sending Telegram notification for user ${integration.user_id}:`, notifError);

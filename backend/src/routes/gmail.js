@@ -91,12 +91,15 @@ router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
   if (result && (result.draftsCreated > 0 || result.tasksCreated > 0)) {
     try {
       let message = '';
+      const taskTitles = result.tasks?.map(t => `• ${t.title}`).join('\n') || '';
+      const draftTitles = result.drafts?.map(d => `• ${d.title}`).join('\n') || '';
+      
       if (result.tasksCreated > 0 && result.draftsCreated > 0) {
-        message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail\n📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail`;
+        message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}\n\n📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
       } else if (result.tasksCreated > 0) {
-        message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail`;
+        message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}`;
       } else if (result.draftsCreated > 0) {
-        message = `📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail`;
+        message = `📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
       }
       
       if (message) {
