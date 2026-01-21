@@ -224,10 +224,10 @@ export const scanEmails = async (userId, maxEmails = 50) => {
       maxResults: maxEmails,
     };
     if (queryString.trim()) {
-      (listParams as any).q = queryString.trim();
+      listParams.q = queryString.trim();
     }
 
-    const messagesResponse = await gmail.users.messages.list(listParams as any);
+    const messagesResponse = await gmail.users.messages.list(listParams);
 
     const messages = messagesResponse.data.messages || [];
     console.log(`Gmail scan: found ${messages.length} message(s) for user ${userId} with query "${queryString}"`);
