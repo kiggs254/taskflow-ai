@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS gmail_integrations (
     token_expires_at TIMESTAMP WITH TIME ZONE,
     last_scan_at TIMESTAMP WITH TIME ZONE,
     scan_frequency INTEGER DEFAULT 60,
+    filter_prompt TEXT,
     enabled BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, email)

@@ -126,7 +126,7 @@ export const api = {
       if (!res.ok) throw new Error('Failed to scan emails');
       return res.json();
     },
-    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean }) => {
+    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean; filterPrompt?: string | null }) => {
       const res = await fetch(`${API_BASE}/gmail/settings`, {
         method: 'PUT',
         headers: {
