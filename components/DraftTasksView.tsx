@@ -5,6 +5,7 @@ import { DraftTaskCard } from './DraftTaskCard';
 import { Mail, MessageSquare, CheckCircle2, X, Hash } from 'lucide-react';
 import { ConfirmationModal } from './ConfirmationModal';
 import { AlertModal } from './AlertModal';
+import { DraftTaskDetailModal } from './DraftTaskDetailModal';
 
 interface DraftTasksViewProps {
   token: string;
@@ -15,6 +16,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
   const [drafts, setDrafts] = useState<DraftTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStatus, setSelectedStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [selectedDraft, setSelectedDraft] = useState<DraftTask | null>(null);
   const [rejectConfirm, setRejectConfirm] = useState<{ isOpen: boolean; draftId: number | null }>({ isOpen: false, draftId: null });
   const [bulkApproveConfirm, setBulkApproveConfirm] = useState<{ isOpen: boolean; count: number }>({ isOpen: false, count: 0 });
   const [bulkRejectConfirm, setBulkRejectConfirm] = useState<{ isOpen: boolean; count: number }>({ isOpen: false, count: 0 });
@@ -93,6 +95,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
     try {
       await api.draftTasks.approve(token, id, edits);
       await loadDrafts();
+      setSelectedDraft(null);
       // Notify parent to refresh tasks and update count
       if (onDraftCountChange) {
         const updatedDrafts = await api.draftTasks.getAll(token, 'pending');
@@ -116,6 +119,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
     try {
       await api.draftTasks.reject(token, id);
       await loadDrafts();
+      setSelectedDraft(null);
       // Update count
       if (onDraftCountChange && selectedStatus === 'pending') {
         onDraftCountChange(drafts.length - 1);
@@ -290,10 +294,22 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
                 onReject={handleReject}
                 onEdit={handleEdit}
                 token={token}
+                onViewDetails={setSelectedDraft}
               />
             ))}
           </div>
         </>
+      )}
+
+      {/* Draft Detail Modal */}
+      {selectedDraft && (
+        <DraftTaskDetailModal
+          draft={selectedDraft}
+          onClose={() => setSelectedDraft(null)}
+          onSave={handleEdit}
+          onApprove={handleApprove}
+          onReject={handleReject}
+        />
       )}
 
       {/* Reject Confirmation Modal */}

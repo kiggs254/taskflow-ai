@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Task } from '../types';
-import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat } from 'lucide-react';
+import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save } from 'lucide-react';
 
 interface TaskDetailModalProps {
   task: Task;
@@ -15,6 +15,16 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onComplete,
   onUpdate,
 }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editDescription, setEditDescription] = useState(task.description || '');
+
+  // Keep local state in sync when switching tasks
+  useMemo(() => {
+    setIsEditing(false);
+    setEditDescription(task.description || '');
+    return null;
+  }, [task.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const energyIcons = {
     high: <Zap className="w-5 h-5 text-accent" />,
     medium: <Brain className="w-5 h-5 text-warning" />,
@@ -71,12 +81,23 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">{task.title}</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onUpdate && (
+              <button
+                onClick={() => setIsEditing((v) => !v)}
+                className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                title={isEditing ? 'Stop editing' : 'Edit'}
+              >
+                <Pencil className="w-5 h-5" />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -88,12 +109,36 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           </div>
 
           {/* Description */}
-          {task.description && (
-            <div>
-              <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Description</h3>
-              <p className="text-slate-300 whitespace-pre-wrap">{task.description}</p>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs uppercase tracking-wider text-slate-500">Description</h3>
+              {isEditing && onUpdate && (
+                <button
+                  onClick={() => {
+                    onUpdate({ ...task, description: editDescription });
+                    setIsEditing(false);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors flex items-center gap-2 text-xs"
+                >
+                  <Save className="w-3 h-3" /> Save
+                </button>
+              )}
             </div>
-          )}
+
+            {isEditing ? (
+              <textarea
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                rows={6}
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none resize-y"
+                placeholder="Add details, notes, links, acceptance criteria..."
+              />
+            ) : (
+              <p className="text-slate-300 whitespace-pre-wrap">
+                {task.description && task.description.trim().length > 0 ? task.description : 'No description.'}
+              </p>
+            )}
+          </div>
 
           {/* Dates */}
           <div className="grid grid-cols-2 gap-4">

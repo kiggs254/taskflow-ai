@@ -8,6 +8,7 @@ interface DraftTaskCardProps {
   onReject: (id: number) => void;
   onEdit: (id: number, edits: Partial<DraftTask>) => void;
   token: string;
+  onViewDetails?: (draft: DraftTask) => void;
 }
 
 export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
@@ -16,6 +17,7 @@ export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
   onReject,
   onEdit,
   token,
+  onViewDetails,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(draft.title);
@@ -182,9 +184,12 @@ export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
   }
 
   return (
-    <div className={`p-4 rounded-xl bg-surface border border-slate-700 border-l-4 mb-3 ${
-      energyColors[draft.energy || 'medium']
-    }`}>
+    <div
+      className={`p-4 rounded-xl bg-surface border border-slate-700 border-l-4 mb-3 cursor-pointer ${
+        energyColors[draft.energy || 'medium']
+      }`}
+      onClick={() => onViewDetails?.(draft)}
+    >
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2">
           <SourceIcon className="w-4 h-4 text-slate-400" />
@@ -228,20 +233,20 @@ export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
 
       <div className="flex gap-2">
         <button
-          onClick={() => onApprove(draft.id)}
+          onClick={(e) => { e.stopPropagation(); onApprove(draft.id); }}
           className="flex-1 px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 flex items-center justify-center gap-2"
         >
           <CheckCircle2 className="w-4 h-4" />
           Approve
         </button>
         <button
-          onClick={() => setIsEditing(true)}
+          onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
           className="px-3 py-2 rounded-lg bg-slate-700 text-white hover:bg-slate-600 flex items-center gap-2"
         >
           <Pencil className="w-4 h-4" />
         </button>
         <button
-          onClick={() => onReject(draft.id)}
+          onClick={(e) => { e.stopPropagation(); onReject(draft.id); }}
           className="px-3 py-2 rounded-lg bg-red-600 text-white hover:bg-red-500 flex items-center gap-2"
         >
           <X className="w-4 h-4" />
