@@ -348,31 +348,32 @@ const setupBotHandlers = () => {
       // Use AI to parse task (pass full multi-line text)
       const aiResult = await parseTask(taskText, 'openai');
       
-      // Create draft task (user can approve/edit in app)
+      // Create a fully approved task directly (no draft step)
       // Use first line or AI title for title, full text for description
       const title = aiResult?.title || taskText.split('\n')[0].substring(0, 100) || taskText.substring(0, 100);
-      const draftTask = await createDraftTask(userId, {
-        source: 'telegram',
-        sourceId: msg.message_id.toString(),
-        title: title,
-        description: taskText, // Store full multi-line text in description
-        // All integration-sourced tasks should default to Job
-        workspace: 'job',
+      const newTask = {
+        id: crypto.randomUUID(),
+        title,
+        description: taskText,
+        workspace: 'job', // All Telegram tasks go to Job workspace
         energy: aiResult?.energy || 'medium',
         estimatedTime: aiResult?.estimatedTime || 15,
         tags: [...(aiResult?.tags || []), 'telegram'],
-        aiConfidence: 0.8,
-      });
+        status: 'todo',
+        dependencies: [],
+        createdAt: Date.now(),
+      };
+
+      await syncTask(userId, newTask);
       
       try {
         await bot.sendMessage(
           chatId,
-          `📝 Draft task created!\n\n` +
-          `📋 ${draftTask.title}\n` +
-          `⚡ Energy: ${draftTask.energy || 'medium'}\n` +
-          `🏢 Workspace: ${draftTask.workspace || 'personal'}\n` +
-          `⏱️ Estimated: ${draftTask.estimatedTime || 15} min\n\n` +
-          `Go to your TaskFlow app to approve or edit it.`
+          `✅ Task created in your Job list!\n\n` +
+          `📋 ${newTask.title}\n` +
+          `⚡ Energy: ${newTask.energy}\n` +
+          `🏢 Workspace: Job\n` +
+          `⏱️ Estimated: ${newTask.estimatedTime} min`
         );
       } catch (sendError) {
         console.error('Error sending /add success message:', sendError.message || sendError);
