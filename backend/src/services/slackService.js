@@ -17,8 +17,10 @@ export const getAuthUrl = (userId) => {
 
   const scopes = [
     'app_mentions:read',      // Read mentions of the app
-    'channels:history',        // Read channel messages
-    'groups:history',          // Read private channel messages
+    'channels:read',          // List public channels (required for conversations.list)
+    'channels:history',       // Read channel messages
+    'groups:read',            // List private channels (required for conversations.list)
+    'groups:history',         // Read private channel messages
     'im:history',             // Read direct messages
     'users:read',             // Read user info
   ].join(',');
@@ -156,7 +158,11 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
     });
 
     if (!channelsResponse.ok) {
-      throw new Error('Failed to get Slack channels');
+      const errorMsg = channelsResponse.error || 'Unknown error';
+      if (errorMsg === 'missing_scope') {
+        throw new Error('Missing required Slack permissions. Please disconnect and reconnect Slack with updated permissions.');
+      }
+      throw new Error(`Failed to get Slack channels: ${errorMsg}`);
     }
 
     const channels = channelsResponse.channels || [];
@@ -178,7 +184,15 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
 
         const historyResponse = await client.conversations.history(historyParams);
 
-        if (!historyResponse.ok || !historyResponse.messages) {
+        if (!historyResponse.ok) {
+          const errorMsg = historyResponse.error || 'Unknown error';
+          if (errorMsg === 'missing_scope') {
+            console.error(`Missing scope for channel ${channel.name}: ${errorMsg}`);
+          }
+          continue;
+        }
+
+        if (!historyResponse.messages) {
           continue;
         }
 
@@ -254,6 +268,16 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
     return { success: true, draftsCreated: draftTasks.length, drafts: draftTasks };
   } catch (error) {
     console.error('Slack mention scanning error:', error);
+    
+    // Provide user-friendly error messages for common issues
+    if (error.message && error.message.includes('missing_scope')) {
+      throw new Error('Missing required Slack permissions. Please disconnect and reconnect Slack to grant updated permissions.');
+    }
+    
+    if (error.message && error.message.includes('not_authed')) {
+      throw new Error('Slack authentication expired. Please disconnect and reconnect Slack.');
+    }
+    
     throw error;
   }
 };

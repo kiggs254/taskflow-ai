@@ -26,11 +26,13 @@ This guide will walk you through setting up Slack integration to monitor mention
    - For development: `http://localhost:3000/api/slack/callback`
 4. Scroll to "Scopes" → "Bot Token Scopes"
 5. Add the following scopes:
+   - `app_mentions:read` - Read mentions of the app
+   - `channels:read` - List public channels (required to find channels)
    - `channels:history` - Read messages in public channels
+   - `groups:read` - List private channels (required to find channels)
    - `groups:history` - Read messages in private channels
    - `im:history` - Read direct messages
    - `users:read` - Read user information
-   - `search:read` - Search messages (optional, for better mention detection)
 6. Scroll to "User Token Scopes" (if needed)
    - Usually not required for this integration
 
