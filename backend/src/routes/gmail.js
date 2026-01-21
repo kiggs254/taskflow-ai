@@ -6,7 +6,9 @@ import {
   getGmailStatus,
   disconnectGmail,
   updateGmailSettings,
+  replyToEmail,
 } from '../services/gmailService.js';
+import { polishEmailReply } from '../services/aiService.js';
 import { sendNotification } from '../services/telegramService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
@@ -143,6 +145,44 @@ router.put('/settings', authenticate, asyncHandler(async (req, res) => {
 router.post('/disconnect', authenticate, asyncHandler(async (req, res) => {
   const result = await disconnectGmail(req.user.id);
   res.json(result);
+}));
+
+/**
+ * POST /api/gmail/reply
+ * Reply to email thread (Reply All)
+ */
+router.post('/reply', authenticate, asyncHandler(async (req, res) => {
+  const { taskId, message, polishWithAI, polishInstructions } = req.body;
+  
+  if (!taskId || !message) {
+    return res.status(400).json({ error: 'taskId and message are required' });
+  }
+
+  const result = await replyToEmail(
+    req.user.id,
+    taskId,
+    message,
+    polishWithAI || false,
+    polishInstructions || ''
+  );
+  
+  res.json(result);
+}));
+
+/**
+ * POST /api/gmail/polish-reply
+ * Polish email reply with AI
+ */
+router.post('/polish-reply', authenticate, asyncHandler(async (req, res) => {
+  const { message, instructions } = req.body;
+  
+  if (!message) {
+    return res.status(400).json({ error: 'message is required' });
+  }
+
+  const polishedMessage = await polishEmailReply(message, 'openai', instructions || '');
+  
+  res.json({ polishedMessage });
 }));
 
 export default router;

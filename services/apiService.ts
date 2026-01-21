@@ -146,6 +146,30 @@ export const api = {
       if (!res.ok) throw new Error('Failed to disconnect Gmail');
       return res.json();
     },
+    reply: async (token: string, data: { taskId: string; message: string; polishWithAI?: boolean; polishInstructions?: string }) => {
+      const res = await fetch(`${API_BASE}/gmail/reply`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to send email reply');
+      return res.json();
+    },
+    polishReply: async (token: string, data: { message: string; instructions?: string }) => {
+      const res = await fetch(`${API_BASE}/gmail/polish-reply`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to polish email reply');
+      return res.json();
+    },
   },
 
   // Slack Integration

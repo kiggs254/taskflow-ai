@@ -229,3 +229,114 @@ Keep it under 200 characters. Be casual and professional. Start with something l
     return `✅ Done! "${taskTitle}" has been completed.`;
   }
 };
+
+/**
+ * Parse full email thread and extract title, todos, and formatted description
+ */
+export const parseEmailThread = async (fullThreadContent, provider = 'openai', promptInstructions = '') => {
+  if (!fullThreadContent || typeof fullThreadContent !== 'string') {
+    throw new Error('Invalid input: fullThreadContent must be a string');
+  }
+
+  const client = getClient(provider);
+  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+
+  const customInstructions = promptInstructions
+    ? `\n\nAdditional instructions: ${promptInstructions}`
+    : '';
+
+  try {
+    const response = await client.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an email thread analyzer. Analyze the full email thread and extract:
+1. A clear, concise task title (max 100 characters)
+2. All action items/todos mentioned in the thread (as a markdown checklist)
+3. Key information and context
+4. Important dates or deadlines
+
+Format the output as markdown with:
+- A summary section
+- Action items as checkboxes (- [ ] item)
+- Key participants and their roles
+- Important dates/deadlines
+
+Return valid JSON with: { title: string, description: string (markdown), todos: string[] }`,
+        },
+        {
+          role: 'user',
+          content: `Analyze this email thread and extract the task title, todos, and create a well-formatted markdown description:\n\n${fullThreadContent.substring(0, 8000)}${customInstructions}`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.3,
+      max_tokens: 2000,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response from AI');
+    }
+
+    const parsed = JSON.parse(content);
+    
+    return {
+      title: parsed.title || null,
+      description: parsed.description || fullThreadContent.substring(0, 2000),
+      todos: parsed.todos || [],
+    };
+  } catch (error) {
+    console.error('AI parseEmailThread error:', error);
+    // Fallback
+    return {
+      title: null,
+      description: fullThreadContent.substring(0, 2000),
+      todos: [],
+    };
+  }
+};
+
+/**
+ * Polish email reply with AI
+ */
+export const polishEmailReply = async (
+  message,
+  provider = 'openai',
+  instructions = ''
+) => {
+  if (!message || typeof message !== 'string') {
+    throw new Error('Invalid input: message must be a string');
+  }
+
+  const client = getClient(provider);
+  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+
+  const customInstructions = instructions
+    ? `\n\nCustom instructions: ${instructions}`
+    : '';
+
+  try {
+    const response = await client.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an email writing assistant. Polish and improve email messages to be professional, clear, and appropriate for business communication.${customInstructions}`,
+        },
+        {
+          role: 'user',
+          content: `Polish and improve this email message:\n\n${message}`,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 500,
+    });
+
+    return response.choices[0]?.message?.content || message;
+  } catch (error) {
+    console.error('AI polishEmailReply error:', error);
+    return message; // Return original if polish fails
+  }
+};
