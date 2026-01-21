@@ -584,7 +584,7 @@ const TaskCard: React.FC<{
             )}
 
             <button
-               onClick={() => onAddDependency(task.id)}
+               onClick={(e) => { e.stopPropagation(); onAddDependency(task.id); }}
                className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-500 text-xs border border-slate-700 hover:bg-slate-700 hover:text-slate-300 flex items-center gap-1 transition-colors opacity-0 group-hover:opacity-100"
                title="Add Dependency"
             >
@@ -1029,7 +1029,7 @@ const DependencyModal = ({
   onClose: () => void;
 }) => {
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-surface border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
         <div className="p-4 border-b border-slate-700 flex justify-between items-center">
           <h3 className="font-bold text-lg text-white">Add Dependency</h3>
