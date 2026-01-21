@@ -472,22 +472,54 @@ const TaskCard: React.FC<{
            </button>
            {showActions && (
              <div className="absolute top-full right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 py-1">
-               <button onClick={() => onSetWaiting(task.id)} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
-                 <Hourglass className="w-4 h-4" /> Mark as Waiting
+               <button 
+                 onClick={(e) => { 
+                   e.stopPropagation(); 
+                   setShowActions(false); 
+                   onSetWaiting(task.id);
+                 }} 
+                 className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2"
+               >
+                 <Hourglass className="w-4 h-4" /> {task.status === 'waiting' ? 'Clear Waiting' : 'Mark as Waiting'}
                </button>
                <div className="px-3 py-1 text-xs text-slate-500">Snooze...</div>
-               <button onClick={() => onSnooze(task.id, 'hour')} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
+               <button 
+                 onClick={(e) => { 
+                   e.stopPropagation(); 
+                   setShowActions(false); 
+                   onSnooze(task.id, 'hour'); 
+                 }} 
+                 className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2"
+               >
                  <AlarmClockOff className="w-4 h-4" /> For 1 Hour
                </button>
-                <button onClick={() => onSnooze(task.id, 'day')} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
+                <button 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setShowActions(false); 
+                    onSnooze(task.id, 'day'); 
+                  }} 
+                  className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2"
+                >
                  <Sun className="w-4 h-4" /> Until Tomorrow
                </button>
-                <button onClick={() => onSnooze(task.id, 'week')} className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
+                <button 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    setShowActions(false); 
+                    onSnooze(task.id, 'week'); 
+                  }} 
+                  className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2"
+                >
                  <Calendar className="w-4 h-4" /> Until Next Week
                </button>
                <div className="h-px bg-slate-700 my-1" />
                <button 
-                 onClick={() => onDelete(task.id)}
+                 onClick={(e) => { 
+                   e.stopPropagation(); 
+                   setShowActions(false); 
+                   onDelete(task.id); 
+                 }}
                  className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-slate-700 flex items-center gap-2"
                >
                  <X className="w-4 h-4" /> Delete Task
