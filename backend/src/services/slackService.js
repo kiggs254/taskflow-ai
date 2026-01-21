@@ -349,3 +349,54 @@ export const updateSlackSettings = async (userId, settings) => {
 
   return { success: true };
 };
+
+/**
+ * Post a daily summary of completed tasks to a Slack channel.
+ * Targets #tech-team-daily-tasks in the user's workspace.
+ */
+export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => {
+  if (!tasks || tasks.length === 0) {
+    return { success: true, posted: false, reason: 'no_tasks' };
+  }
+
+  try {
+    const client = await getSlackClient(userId);
+
+    // Find the #tech-team-daily-tasks channel
+    const channelsResponse = await client.conversations.list({
+      types: 'public_channel,private_channel',
+      exclude_archived: true,
+      limit: 1000,
+    });
+
+    if (!channelsResponse.ok || !channelsResponse.channels) {
+      throw new Error('Failed to list Slack channels');
+    }
+
+    const channel = channelsResponse.channels.find((ch) => ch.name === 'tech-team-daily-tasks');
+
+    if (!channel) {
+      throw new Error('Slack channel #tech-team-daily-tasks not found or app not invited');
+    }
+
+    const dateText = dateLabel || new Date().toLocaleDateString();
+
+    const lines = tasks.map((t, index) => {
+      const workspace = t.workspace ? ` [${t.workspace}]` : '';
+      return `${index + 1}.${workspace} ${t.title}`;
+    });
+
+    const text = `*Daily summary for ${dateText}*\n${lines.join('\n')}`;
+
+    await client.chat.postMessage({
+      channel: channel.id,
+      text,
+      mrkdwn: true,
+    });
+
+    return { success: true, posted: true };
+  } catch (error) {
+    console.error('Slack daily summary error:', error);
+    throw error;
+  }
+};

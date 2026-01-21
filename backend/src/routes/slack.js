@@ -6,6 +6,7 @@ import {
   getSlackStatus,
   disconnectSlack,
   updateSlackSettings,
+  postDailySummaryToSlack,
 } from '../services/slackService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
@@ -117,6 +118,16 @@ router.put('/settings', authenticate, asyncHandler(async (req, res) => {
  */
 router.post('/disconnect', authenticate, asyncHandler(async (req, res) => {
   const result = await disconnectSlack(req.user.id);
+  res.json(result);
+}));
+
+/**
+ * POST /api/slack/daily-summary
+ * Post a daily summary of completed tasks to Slack
+ */
+router.post('/daily-summary', authenticate, asyncHandler(async (req, res) => {
+  const { tasks, dateLabel } = req.body;
+  const result = await postDailySummaryToSlack(req.user.id, tasks || [], dateLabel);
   res.json(result);
 }));
 

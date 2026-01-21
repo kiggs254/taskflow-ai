@@ -200,6 +200,18 @@ export const api = {
       if (!res.ok) throw new Error('Failed to disconnect Slack');
       return res.json();
     },
+    dailySummary: async (token: string, tasks: Task[], dateLabel: string) => {
+      const res = await fetch(`${API_BASE}/slack/daily-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tasks, dateLabel }),
+      });
+      if (!res.ok) throw new Error('Failed to post Slack daily summary');
+      return res.json();
+    },
   },
 
   // Telegram Integration

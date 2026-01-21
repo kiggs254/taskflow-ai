@@ -875,6 +875,10 @@ const DailyReset = ({
           )}
         </div>
 
+        <p className="text-xs text-amber-300/80 text-center">
+          Note: All unfinished tasks will be rolled over to tomorrow. A summary of today&apos;s Job tasks will be posted to <span className="font-semibold">#tech-team-daily-tasks</span>.
+        </p>
+
         <button 
           onClick={onClose}
           className="w-full py-4 rounded-xl bg-gradient-to-r from-primary to-blue-600 text-white font-bold text-lg hover:scale-[1.02] transition-transform shadow-xl shadow-primary/20 flex items-center justify-center gap-2"
@@ -894,9 +898,10 @@ const QuickCapture = ({
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
-  onAdd: (raw: string) => Promise<void>; 
+  onAdd: (title: string, description?: string) => Promise<void>; 
 }) => {
-  const [input, setInput] = useState('');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -908,12 +913,13 @@ const QuickCapture = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!title.trim()) return;
     
     setIsAnalyzing(true);
-    await onAdd(input);
+    await onAdd(title, description || undefined);
     setIsAnalyzing(false);
-    setInput('');
+    setTitle('');
+    setDescription('');
     onClose();
   };
 
@@ -922,33 +928,50 @@ const QuickCapture = ({
   return (
     <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="w-full max-w-lg bg-surface border border-slate-700 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-        <form onSubmit={handleSubmit} className="p-2">
+        <form onSubmit={handleSubmit} className="p-4 space-y-3">
           <div className="relative">
             <input
               ref={inputRef}
               type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="E.g., Fix navbar bug 30m..."
-              className="w-full bg-transparent text-xl p-6 text-white placeholder-slate-500 focus:outline-none"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Task title (e.g., Fix navbar bug)"
+              className="w-full bg-transparent text-xl px-6 pt-4 pb-3 text-white placeholder-slate-500 focus:outline-none"
               disabled={isAnalyzing}
             />
-            <div className="absolute right-4 top-1/2 -translate-y-1/2">
-              {isAnalyzing ? (
-                <Sparkles className="w-6 h-6 text-primary animate-spin" />
-              ) : (
-                <button 
-                  type="submit"
-                  className="p-2 bg-primary rounded-lg text-white hover:bg-blue-600 transition-colors"
-                >
-                  <ArrowRight className="w-5 h-5" />
-                </button>
-              )}
-            </div>
           </div>
-          <div className="px-6 pb-4 flex gap-4 text-xs text-slate-500">
-            <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> AI Auto-tagging</span>
-            <span className="flex items-center gap-1"><Layout className="w-3 h-3" /> Smart Sort</span>
+          <div className="px-6">
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional details / notes for this task"
+              rows={3}
+              className="w-full bg-slate-900/40 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-primary resize-y"
+              disabled={isAnalyzing}
+            />
+          </div>
+          <div className="px-6 pb-3 flex items-center justify-between gap-4 text-xs text-slate-500">
+            <div className="flex gap-4">
+              <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> AI Auto-tagging</span>
+              <span className="flex items-center gap-1"><Layout className="w-3 h-3" /> Smart Sort</span>
+            </div>
+            <button 
+              type="submit"
+              disabled={isAnalyzing}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-white text-sm hover:bg-blue-600 disabled:opacity-60"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Sparkles className="w-4 h-4 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <ArrowRight className="w-4 h-4" />
+                  Add Task
+                </>
+              )}
+            </button>
           </div>
         </form>
       </div>
@@ -1781,12 +1804,17 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const addTask = async (rawInput: string) => {
+  const addTask = async (title: string, description?: string) => {
     if (!token) return;
+
+    const combinedInput = description 
+      ? `${title}\n\n${description}`
+      : title;
 
     let newTask: Task = {
       id: crypto.randomUUID(),
-      title: rawInput,
+      title,
+      description: description || undefined,
       workspace: activeWorkspace,
       energy: 'medium',
       status: 'todo',
@@ -1796,18 +1824,20 @@ export default function App() {
       estimatedTime: 15,
     };
 
-    const aiResult = await parseTaskWithGemini(rawInput, token);
+    const aiResult = await parseTaskWithGemini(combinedInput, token);
     
     if (aiResult) {
       newTask = {
         ...newTask,
-        title: aiResult.title,
+        // Keep the user's title/description, only enrich metadata
+        title,
         energy: aiResult.energy,
         estimatedTime: aiResult.estimatedTime,
         tags: aiResult.tags,
-        workspace: aiResult.workspaceSuggestions && aiResult.workspaceSuggestions !== activeWorkspace 
-          ? aiResult.workspaceSuggestions 
-          : activeWorkspace
+        // Respect the current tab for Personal/Freelance; allow AI to shift only from default Work
+        workspace: activeWorkspace === 'job' && aiResult.workspaceSuggestions
+          ? aiResult.workspaceSuggestions
+          : activeWorkspace,
       };
     }
 
@@ -2011,6 +2041,52 @@ export default function App() {
     }
 
     try {
+      // 1) Roll over pending tasks to tomorrow (for overdue or undated tasks)
+      const nowDate = new Date();
+      const tomorrow = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1);
+      const tomorrowTs = tomorrow.getTime();
+
+      const updatedTasks: Task[] = [];
+      const nextTasksState = tasks.map((t) => {
+        if (t.status !== 'done' && (!t.dueDate || t.dueDate <= nowDate.getTime())) {
+          const updated: Task = { ...t, dueDate: tomorrowTs };
+          updatedTasks.push(updated);
+          return updated;
+        }
+        return t;
+      });
+
+      if (updatedTasks.length > 0) {
+        setTasks(nextTasksState);
+        // Fire-and-forget sync of updated tasks
+        for (const task of updatedTasks) {
+          try {
+            await api.syncTask(token, task);
+          } catch (err) {
+            console.error('Failed to roll over task', task.id, err);
+          }
+        }
+      }
+
+      // 2) Send Slack summary of today's completed Job tasks
+      const todayLabel = nowDate.toLocaleDateString();
+      const todayStr = nowDate.toDateString();
+      const completedTodayJob = completedTasksAll.filter(
+        (t) =>
+          t.workspace === 'job' &&
+          t.completedAt &&
+          new Date(t.completedAt).toDateString() === todayStr
+      );
+
+      if (completedTodayJob.length > 0) {
+        try {
+          await api.slack.dailySummary(token, completedTodayJob, todayLabel);
+        } catch (err) {
+          console.error('Failed to post Slack daily summary', err);
+        }
+      }
+
+      // 3) Tell backend we've reset the day
       const res = await api.dailyReset(token);
       
       // Strict check: Only reset if the server confirms success and returns a timestamp
