@@ -2499,7 +2499,7 @@ export default function App() {
                       </button>
                     </div>
 
-                     <div className="relative">
+                     <div className="relative flex items-center gap-2">
                         <select
                           value={sortBy}
                           onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
@@ -2510,6 +2510,30 @@ export default function App() {
                           <option value="newest">By Newest</option>
                         </select>
                         <ArrowUpDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" />
+                        
+                        {/* Manual integration fetch button */}
+                        {token && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await Promise.all([
+                                  api.gmail.scanNow(token, 50).catch((e) => console.error('Gmail scan error', e)),
+                                  api.slack.scanNow(token, 50).catch((e) => console.error('Slack scan error', e)),
+                                ]);
+                                addToast('🔄 Fetched tasks from integrations (Gmail & Slack)', 'info');
+                                // Refresh drafts count after manual sync
+                                fetchDraftTasksCount();
+                              } catch (err) {
+                                console.error('Manual integration fetch failed', err);
+                                addToast('Failed to fetch from integrations', 'error');
+                              }
+                            }}
+                            className="hidden md:inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:bg-slate-700"
+                          >
+                            <RefreshCw className="w-3 h-3" /> Fetch Integrations
+                          </button>
+                        )}
                       </div>
                   </div>
                   
