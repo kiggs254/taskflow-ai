@@ -6,7 +6,7 @@ import {
   LogOut, Loader2, Link as LinkIcon, BarChart2, Settings as SettingsIcon,
   PieChart, Bell, Volume2, Shield, Palette, ArrowLeft, Pencil, Save, Filter,
   Search, Command, MoreVertical, Hourglass, AlarmClockOff,
-  Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare
+  Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw
 } from 'lucide-react';
 import { 
   Task, WorkspaceType, UserStats, AppView, User as UserType, EnergyLevel, RecurrenceRule

@@ -23,6 +23,7 @@ export const getAuthUrl = (userId) => {
     'groups:history',         // Read private channel messages
     'im:history',             // Read direct messages
     'users:read',             // Read user info
+    'chat:write',             // Post messages as the app (daily summaries, notifications)
   ].join(',');
 
   const state = userId.toString();

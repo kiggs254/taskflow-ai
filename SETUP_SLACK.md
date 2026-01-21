@@ -33,6 +33,7 @@ This guide will walk you through setting up Slack integration to monitor mention
    - `groups:history` - Read messages in private channels
    - `im:history` - Read direct messages
    - `users:read` - Read user information
+   - `chat:write` - Allow the app to post messages (needed for daily summaries to #tech-team-daily-tasks)
 6. Scroll to "User Token Scopes" (if needed)
    - Usually not required for this integration
 
