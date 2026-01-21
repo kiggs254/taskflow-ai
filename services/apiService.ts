@@ -14,12 +14,18 @@ if (!API_BASE.endsWith('/api')) {
 
 // Helper to handle requests
 const request = async (action: string, method: 'GET' | 'POST', body?: any, token?: string) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:16',message:'request function entry',data:{action,method,hasToken:!!token,hasBody:!!body,apiBase:API_BASE},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  // #region agent log
+  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:22',message:'headers after token check',data:{hasAuthHeader:!!headers['Authorization'],action},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
 
   const config: RequestInit = {
     method,
@@ -32,8 +38,15 @@ const request = async (action: string, method: 'GET' | 'POST', body?: any, token
   }
 
   try {
-    const res = await fetch(`${API_BASE}?action=${action}`, config);
+    const url = `${API_BASE}?action=${action}`;
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:35',message:'about to fetch',data:{url,action,headers:Object.keys(headers)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    const res = await fetch(url, config);
     const text = await res.text();
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:37',message:'fetch response received',data:{status:res.status,statusText:res.statusText,action,textPreview:text.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
     
     // Handle non-JSON responses (like 404 HTML pages or 500 errors)
     const contentType = res.headers.get("content-type");
@@ -55,6 +68,9 @@ const request = async (action: string, method: 'GET' | 'POST', body?: any, token
     }
     
     if (!res.ok) {
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:57',message:'request failed',data:{status:res.status,action,error:data?.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
       // Extract error message from response
       const errorMessage = data?.error || `Request failed with status ${res.status}`;
       console.error(`API Error (${action}):`, {
@@ -83,6 +99,9 @@ export const api = {
     return request('login', 'POST', { email, password });
   },
   forgotPassword: async (email: string) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:85',message:'forgotPassword called',data:{email,apiBase:API_BASE},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     return request('forgot_password', 'POST', { email });
   },
   resetPassword: async (token: string, password: string) => {

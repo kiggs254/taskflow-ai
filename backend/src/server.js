@@ -49,13 +49,14 @@ app.use('/api/draft-tasks', authenticate, draftTasksRoutes);
 // Auth routes (no authentication required)
 app.use('/api', authRoutes);
 
-// Task routes (already has authenticate middleware in the router)
-app.use('/api', taskRoutes);
-
-// Handle query parameter routing LAST (for backward compatibility with PHP backend)
-// This must come after specific routes to avoid intercepting callbacks/webhooks
+// Handle query parameter routing BEFORE task routes (for auth routes like forgot_password)
+// This ensures auth routes (register, login, forgot_password, reset_password) are handled first
 // The queryParamRoutes will check for action parameter and call next() if not found
 app.use('/api', queryParamRoutes);
+
+// Task routes (already has authenticate middleware in the router)
+// Must come AFTER queryParamRoutes so auth routes can be handled first
+app.use('/api', taskRoutes);
 
 // 404 handler for unmatched routes
 app.use('/api', (req, res) => {
