@@ -208,9 +208,9 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     const lastScanAt = integrationSettings.last_scan_at;
     const promptInstructions = integrationSettings.prompt_instructions || '';
 
-    // Scan the Primary inbox. We rely on last_scan_at to avoid reprocessing
-    // instead of restricting to only unread emails (which can cause 0 matches).
-    let queryString = 'category:primary';
+    // Scan all mail. We rely on last_scan_at to avoid reprocessing instead of
+    // filtering by label/category, so the user can control relevance via prompt instructions.
+    let queryString = '';
     
     if (lastScanAt) {
       // Only get emails after last scan
@@ -219,11 +219,15 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     }
 
     // List messages
-    const messagesResponse = await gmail.users.messages.list({
+    const listParams = {
       userId: 'me',
-      q: queryString,
       maxResults: maxEmails,
-    });
+    };
+    if (queryString.trim()) {
+      (listParams as any).q = queryString.trim();
+    }
+
+    const messagesResponse = await gmail.users.messages.list(listParams as any);
 
     const messages = messagesResponse.data.messages || [];
     console.log(`Gmail scan: found ${messages.length} message(s) for user ${userId} with query "${queryString}"`);
