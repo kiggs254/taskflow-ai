@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, CheckCircle2, X, Copy, Bell } from 'lucide-react';
 import { api } from '../services/apiService';
+import { ConfirmationModal } from './ConfirmationModal';
+import { AlertModal } from './AlertModal';
 
 interface TelegramSettingsProps {
   token: string;
@@ -11,6 +13,8 @@ export const TelegramSettings: React.FC<TelegramSettingsProps> = ({ token }) => 
   const [linkCode, setLinkCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [unlinkConfirm, setUnlinkConfirm] = useState(false);
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
   useEffect(() => {
     loadStatus();
@@ -35,7 +39,7 @@ export const TelegramSettings: React.FC<TelegramSettingsProps> = ({ token }) => 
       setLinkCode(result.code);
     } catch (error) {
       console.error('Failed to get link code:', error);
-      alert('Failed to get link code. Please try again.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to get link code. Please try again.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -44,21 +48,25 @@ export const TelegramSettings: React.FC<TelegramSettingsProps> = ({ token }) => 
   const handleCopyCode = () => {
     if (linkCode) {
       navigator.clipboard.writeText(linkCode);
-      alert('Link code copied! Send /link ' + linkCode + ' to the bot on Telegram.');
+      setAlertModal({ isOpen: true, title: 'Code Copied', message: `Link code copied! Send /link ${linkCode} to the bot on Telegram.`, type: 'success' });
     }
   };
 
-  const handleUnlink = async () => {
-    if (!confirm('Are you sure you want to unlink Telegram?')) return;
-    
+  const handleUnlink = () => {
+    setUnlinkConfirm(true);
+  };
+
+  const confirmUnlink = async () => {
+    setUnlinkConfirm(false);
     setLoading(true);
     try {
       await api.telegram.unlink(token);
       setStatus({ connected: false });
       setLinkCode(null);
+      setAlertModal({ isOpen: true, title: 'Success', message: 'Telegram unlinked successfully.', type: 'success' });
     } catch (error) {
       console.error('Failed to unlink Telegram:', error);
-      alert('Failed to unlink Telegram.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to unlink Telegram.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -68,11 +76,11 @@ export const TelegramSettings: React.FC<TelegramSettingsProps> = ({ token }) => 
     setLoading(true);
     try {
       await api.telegram.updateSettings(token, { notificationsEnabled });
-      alert('Settings updated successfully!');
+      setAlertModal({ isOpen: true, title: 'Success', message: 'Settings updated successfully!', type: 'success' });
       loadStatus();
     } catch (error) {
       console.error('Failed to update settings:', error);
-      alert('Failed to update settings.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to update settings.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -174,6 +182,27 @@ export const TelegramSettings: React.FC<TelegramSettingsProps> = ({ token }) => 
           )}
         </div>
       )}
+
+      {/* Unlink Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={unlinkConfirm}
+        title="Unlink Telegram"
+        message="Are you sure you want to unlink Telegram? You will need to link again to use Telegram features."
+        confirmText="Unlink"
+        cancelText="Cancel"
+        variant="warning"
+        onConfirm={confirmUnlink}
+        onCancel={() => setUnlinkConfirm(false)}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ isOpen: false, title: '', message: '', type: 'info' })}
+      />
     </div>
   );
 };

@@ -13,6 +13,9 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
   const [drafts, setDrafts] = useState<DraftTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStatus, setSelectedStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [rejectConfirm, setRejectConfirm] = useState<{ isOpen: boolean; draftId: number | null }>({ isOpen: false, draftId: null });
+  const [bulkApproveConfirm, setBulkApproveConfirm] = useState<{ isOpen: boolean; count: number }>({ isOpen: false, count: 0 });
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
   useEffect(() => {
     loadDrafts();
@@ -94,12 +97,18 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
       }
     } catch (error) {
       console.error('Failed to approve draft:', error);
-      alert('Failed to approve draft task.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to approve draft task.', type: 'error' });
     }
   };
 
   const handleReject = async (id: number) => {
-    if (!confirm('Are you sure you want to reject this draft task?')) return;
+    setRejectConfirm({ isOpen: true, draftId: id });
+  };
+
+  const confirmReject = async () => {
+    if (!rejectConfirm.draftId) return;
+    const id = rejectConfirm.draftId;
+    setRejectConfirm({ isOpen: false, draftId: null });
     
     try {
       await api.draftTasks.reject(token, id);
@@ -110,7 +119,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
       }
     } catch (error) {
       console.error('Failed to reject draft:', error);
-      alert('Failed to reject draft task.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to reject draft task.', type: 'error' });
     }
   };
 
@@ -120,7 +129,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
       await loadDrafts();
     } catch (error) {
       console.error('Failed to edit draft:', error);
-      alert('Failed to edit draft task.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to edit draft task.', type: 'error' });
     }
   };
 
@@ -128,14 +137,19 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
     const pendingDrafts = drafts.filter(d => d.status === 'pending');
     if (pendingDrafts.length === 0) return;
     
-    if (!confirm(`Approve all ${pendingDrafts.length} pending drafts?`)) return;
+    setBulkApproveConfirm({ isOpen: true, count: pendingDrafts.length });
+  };
+
+  const confirmBulkApprove = async () => {
+    const pendingDrafts = drafts.filter(d => d.status === 'pending');
+    setBulkApproveConfirm({ isOpen: false, count: 0 });
     
     try {
       await api.draftTasks.bulkApprove(token, pendingDrafts.map(d => d.id));
       await loadDrafts();
     } catch (error) {
       console.error('Failed to bulk approve:', error);
-      alert('Failed to bulk approve drafts.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to bulk approve drafts.', type: 'error' });
     }
   };
 
@@ -248,6 +262,39 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
           </div>
         </>
       )}
+
+      {/* Reject Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={rejectConfirm.isOpen}
+        title="Reject Draft Task"
+        message="Are you sure you want to reject this draft task? This action cannot be undone."
+        confirmText="Reject"
+        cancelText="Cancel"
+        variant="warning"
+        onConfirm={confirmReject}
+        onCancel={() => setRejectConfirm({ isOpen: false, draftId: null })}
+      />
+
+      {/* Bulk Approve Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={bulkApproveConfirm.isOpen}
+        title="Approve All Drafts"
+        message={`Are you sure you want to approve all ${bulkApproveConfirm.count} pending drafts?`}
+        confirmText="Approve All"
+        cancelText="Cancel"
+        variant="info"
+        onConfirm={confirmBulkApprove}
+        onCancel={() => setBulkApproveConfirm({ isOpen: false, count: 0 })}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ isOpen: false, title: '', message: '', type: 'info' })}
+      />
     </div>
   );
 };

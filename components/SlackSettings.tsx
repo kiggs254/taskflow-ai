@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, CheckCircle2, X, RefreshCw, Settings } from 'lucide-react';
 import { api } from '../services/apiService';
+import { ConfirmationModal } from './ConfirmationModal';
+import { AlertModal } from './AlertModal';
 
 interface SlackSettingsProps {
   token: string;
@@ -11,6 +13,8 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanFrequency, setScanFrequency] = useState(15);
+  const [disconnectConfirm, setDisconnectConfirm] = useState(false);
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
   useEffect(() => {
     loadStatus();
@@ -35,22 +39,26 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
       window.location.href = result.authUrl;
     } catch (error) {
       console.error('Failed to connect Slack:', error);
-      alert('Failed to connect Slack. Please try again.');
+      setAlertModal({ isOpen: true, title: 'Connection Error', message: 'Failed to connect Slack. Please try again.', type: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDisconnect = async () => {
-    if (!confirm('Are you sure you want to disconnect Slack?')) return;
-    
+  const handleDisconnect = () => {
+    setDisconnectConfirm(true);
+  };
+
+  const confirmDisconnect = async () => {
+    setDisconnectConfirm(false);
     setLoading(true);
     try {
       await api.slack.disconnect(token);
       setStatus({ connected: false });
+      setAlertModal({ isOpen: true, title: 'Success', message: 'Slack disconnected successfully.', type: 'success' });
     } catch (error) {
       console.error('Failed to disconnect Slack:', error);
-      alert('Failed to disconnect Slack.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to disconnect Slack.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -60,11 +68,11 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
     setScanning(true);
     try {
       const result = await api.slack.scanNow(token);
-      alert(`Scan complete! Found ${result.draftsCreated} potential tasks from mentions.`);
+      setAlertModal({ isOpen: true, title: 'Scan Complete', message: `Found ${result.draftsCreated} potential tasks from mentions.`, type: 'success' });
       loadStatus();
     } catch (error) {
       console.error('Failed to scan Slack mentions:', error);
-      alert('Failed to scan Slack mentions. Please try again.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to scan Slack mentions. Please try again.', type: 'error' });
     } finally {
       setScanning(false);
     }
@@ -74,11 +82,11 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
     setLoading(true);
     try {
       await api.slack.updateSettings(token, { scanFrequency });
-      alert('Settings updated successfully!');
+      setAlertModal({ isOpen: true, title: 'Success', message: 'Settings updated successfully!', type: 'success' });
       loadStatus();
     } catch (error) {
       console.error('Failed to update settings:', error);
-      alert('Failed to update settings.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to update settings.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -168,6 +176,27 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
           </button>
         </div>
       )}
+
+      {/* Disconnect Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={disconnectConfirm}
+        title="Disconnect Slack"
+        message="Are you sure you want to disconnect Slack? You will need to reconnect to continue monitoring mentions."
+        confirmText="Disconnect"
+        cancelText="Cancel"
+        variant="warning"
+        onConfirm={confirmDisconnect}
+        onCancel={() => setDisconnectConfirm(false)}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ isOpen: false, title: '', message: '', type: 'info' })}
+      />
     </div>
   );
 };

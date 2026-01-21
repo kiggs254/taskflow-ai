@@ -17,6 +17,8 @@ import { TelegramSettings } from './components/TelegramSettings';
 import { SlackSettings } from './components/SlackSettings';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { ToastContainer, Toast, ToastType } from './components/ToastNotification';
+import { ConfirmationModal } from './components/ConfirmationModal';
+import { AlertModal } from './components/AlertModal';
 import { 
   parseTaskWithGemini, 
   getDailyMotivation, 
@@ -1420,9 +1422,10 @@ export default function App() {
   const [energyFilter, setEnergyFilter] = useState<'all' | 'focus' | 'chill'>('all');
   const [sortBy, setSortBy] = useState<'energy' | 'dueDate' | 'newest'>('energy');
 
-
-  // Dependency Modal State
+  // Modal States
   const [linkingTask, setLinkingTask] = useState<Task | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string | null; taskTitle: string }>({ isOpen: false, taskId: null, taskTitle: '' });
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
   // Snooze background checker
   useEffect(() => {
@@ -1841,12 +1844,26 @@ export default function App() {
   const deleteTask = async (id: string) => {
     if (!token) return;
     
-    setTasks(prev => prev.filter(t => t.id !== id));
+    const task = tasks.find(t => t.id === id);
+    if (task) {
+      setDeleteConfirm({ isOpen: true, taskId: id, taskTitle: task.title });
+    }
+  };
+
+  const confirmDeleteTask = async () => {
+    if (!token || !deleteConfirm.taskId) return;
+    
+    const taskId = deleteConfirm.taskId;
+    setDeleteConfirm({ isOpen: false, taskId: null, taskTitle: '' });
+    
+    setTasks(prev => prev.filter(t => t.id !== taskId));
     try {
-      await api.deleteTask(token, id);
+      await api.deleteTask(token, taskId);
+      addToast('Task deleted successfully', 'success');
     } catch (e) {
       console.error("Failed to delete", e);
       fetchData();
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to delete task. Please try again.', type: 'error' });
     }
   };
 
@@ -2013,11 +2030,11 @@ export default function App() {
           setView(AppView.DASHBOARD);
       } else {
           console.error("Daily reset failed: Server did not return a valid timestamp.", res);
-          alert("Failed to save Daily Reset. Please ensure your database is updated with the 'last_reset_at' column.");
+          setAlertModal({ isOpen: true, title: 'Error', message: "Failed to save Daily Reset. Please ensure your database is updated with the 'last_reset_at' column.", type: 'error' });
       }
     } catch (e) {
       console.error("Reset sync failed", e);
-      alert("Connection failed during Daily Reset. Please try again.");
+      setAlertModal({ isOpen: true, title: 'Connection Error', message: "Connection failed during Daily Reset. Please try again.", type: 'error' });
     }
   };
 
@@ -2173,6 +2190,27 @@ export default function App() {
           onUpdate={updateTask}
         />
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={deleteConfirm.isOpen}
+        title="Delete Task"
+        message={`Are you sure you want to delete "${deleteConfirm.taskTitle}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={confirmDeleteTask}
+        onCancel={() => setDeleteConfirm({ isOpen: false, taskId: null, taskTitle: '' })}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ isOpen: false, title: '', message: '', type: 'info' })}
+      />
 
       {/* Mobile/Tablet Layout container */}
       <div className="max-w-4xl mx-auto min-h-screen flex flex-col md:flex-row">

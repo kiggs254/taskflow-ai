@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, CheckCircle2, X, RefreshCw, Settings } from 'lucide-react';
 import { api } from '../services/apiService';
+import { ConfirmationModal } from './ConfirmationModal';
+import { AlertModal } from './AlertModal';
 
 interface GmailSettingsProps {
   token: string;
@@ -11,6 +13,8 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanFrequency, setScanFrequency] = useState(60);
+  const [disconnectConfirm, setDisconnectConfirm] = useState(false);
+  const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
   useEffect(() => {
     loadStatus();
@@ -35,22 +39,26 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
       window.location.href = result.authUrl;
     } catch (error) {
       console.error('Failed to connect Gmail:', error);
-      alert('Failed to connect Gmail. Please try again.');
+      setAlertModal({ isOpen: true, title: 'Connection Error', message: 'Failed to connect Gmail. Please try again.', type: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDisconnect = async () => {
-    if (!confirm('Are you sure you want to disconnect Gmail?')) return;
-    
+  const handleDisconnect = () => {
+    setDisconnectConfirm(true);
+  };
+
+  const confirmDisconnect = async () => {
+    setDisconnectConfirm(false);
     setLoading(true);
     try {
       await api.gmail.disconnect(token);
       setStatus({ connected: false });
+      setAlertModal({ isOpen: true, title: 'Success', message: 'Gmail disconnected successfully.', type: 'success' });
     } catch (error) {
       console.error('Failed to disconnect Gmail:', error);
-      alert('Failed to disconnect Gmail.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to disconnect Gmail.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -60,11 +68,11 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
     setScanning(true);
     try {
       const result = await api.gmail.scanNow(token);
-      alert(`Scan complete! Found ${result.draftsCreated} potential tasks.`);
+      setAlertModal({ isOpen: true, title: 'Scan Complete', message: `Found ${result.draftsCreated} potential tasks.`, type: 'success' });
       loadStatus();
     } catch (error) {
       console.error('Failed to scan emails:', error);
-      alert('Failed to scan emails. Please try again.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to scan emails. Please try again.', type: 'error' });
     } finally {
       setScanning(false);
     }
@@ -74,11 +82,11 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
     setLoading(true);
     try {
       await api.gmail.updateSettings(token, { scanFrequency });
-      alert('Settings updated successfully!');
+      setAlertModal({ isOpen: true, title: 'Success', message: 'Settings updated successfully!', type: 'success' });
       loadStatus();
     } catch (error) {
       console.error('Failed to update settings:', error);
-      alert('Failed to update settings.');
+      setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to update settings.', type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -164,6 +172,27 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
           </button>
         </div>
       )}
+
+      {/* Disconnect Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={disconnectConfirm}
+        title="Disconnect Gmail"
+        message="Are you sure you want to disconnect Gmail? You will need to reconnect to continue scanning emails."
+        confirmText="Disconnect"
+        cancelText="Cancel"
+        variant="warning"
+        onConfirm={confirmDisconnect}
+        onCancel={() => setDisconnectConfirm(false)}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        title={alertModal.title}
+        message={alertModal.message}
+        type={alertModal.type}
+        onClose={() => setAlertModal({ isOpen: false, title: '', message: '', type: 'info' })}
+      />
     </div>
   );
 };
