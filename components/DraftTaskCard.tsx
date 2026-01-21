@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { DraftTask, WorkspaceType, EnergyLevel } from '../types';
-import { CheckCircle2, X, Pencil, Mail, MessageSquare, Hash } from 'lucide-react';
+import { CheckCircle2, X, Pencil, Mail, MessageSquare, Hash, Calendar, Clock, Tag } from 'lucide-react';
 
 interface DraftTaskCardProps {
   draft: DraftTask;
@@ -19,15 +19,39 @@ export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(draft.title);
+  const [editDescription, setEditDescription] = useState(draft.description || '');
   const [editWorkspace, setEditWorkspace] = useState<WorkspaceType>(draft.workspace || 'personal');
   const [editEnergy, setEditEnergy] = useState<EnergyLevel>(draft.energy || 'medium');
+  const [editEstimatedTime, setEditEstimatedTime] = useState(draft.estimatedTime?.toString() || '');
+  const [editTags, setEditTags] = useState(draft.tags.join(', ') || '');
+  const [editDueDate, setEditDueDate] = useState(
+    draft.dueDate ? new Date(draft.dueDate).toISOString().split('T')[0] : ''
+  );
 
   const handleSave = () => {
+    const tagsArray = editTags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    const dueDateTimestamp = editDueDate ? new Date(`${editDueDate}T12:00:00Z`).getTime() : undefined;
+    
     onEdit(draft.id, {
       title: editTitle,
+      description: editDescription || undefined,
       workspace: editWorkspace,
       energy: editEnergy,
+      estimatedTime: editEstimatedTime ? parseInt(editEstimatedTime, 10) : undefined,
+      tags: tagsArray,
+      dueDate: dueDateTimestamp,
     });
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditTitle(draft.title);
+    setEditDescription(draft.description || '');
+    setEditWorkspace(draft.workspace || 'personal');
+    setEditEnergy(draft.energy || 'medium');
+    setEditEstimatedTime(draft.estimatedTime?.toString() || '');
+    setEditTags(draft.tags.join(', ') || '');
+    setEditDueDate(draft.dueDate ? new Date(draft.dueDate).toISOString().split('T')[0] : '');
     setIsEditing(false);
   };
 
@@ -42,47 +66,116 @@ export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
 
   if (isEditing) {
     return (
-      <div className="p-4 rounded-xl bg-surface border border-slate-700 border-l-4 mb-3">
-        <input
-          type="text"
-          value={editTitle}
-          onChange={(e) => setEditTitle(e.target.value)}
-          className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 mb-3"
-          placeholder="Task title"
-        />
-        <div className="flex gap-2 mb-3">
-          <select
-            value={editWorkspace}
-            onChange={(e) => setEditWorkspace(e.target.value as WorkspaceType)}
-            className="px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700"
-          >
-            <option value="personal">Personal</option>
-            <option value="job">Job</option>
-            <option value="freelance">Freelance</option>
-          </select>
-          <select
-            value={editEnergy}
-            onChange={(e) => setEditEnergy(e.target.value as EnergyLevel)}
-            className="px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700"
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setIsEditing(false)}
-            className="px-3 py-1 rounded text-sm text-slate-400 hover:bg-slate-800"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-3 py-1 rounded text-sm bg-primary text-white"
-          >
-            Save
-          </button>
+      <div className="p-4 rounded-xl bg-surface border border-primary border-l-4 mb-3 shadow-lg">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Title</label>
+            <input
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none"
+              placeholder="Task title"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Description</label>
+            <textarea
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none resize-y"
+              placeholder="Task description (optional)"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Workspace</label>
+              <select
+                value={editWorkspace}
+                onChange={(e) => setEditWorkspace(e.target.value as WorkspaceType)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none"
+              >
+                <option value="personal">Personal</option>
+                <option value="job">Job</option>
+                <option value="freelance">Freelance</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Energy</label>
+              <select
+                value={editEnergy}
+                onChange={(e) => setEditEnergy(e.target.value as EnergyLevel)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                Estimated Time (minutes)
+              </label>
+              <input
+                type="number"
+                value={editEstimatedTime}
+                onChange={(e) => setEditEstimatedTime(e.target.value)}
+                min="1"
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none"
+                placeholder="15"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1">
+                <Calendar className="w-3 h-3" />
+                Due Date
+              </label>
+              <input
+                type="date"
+                value={editDueDate}
+                onChange={(e) => setEditDueDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none"
+                style={{ colorScheme: 'dark' }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1">
+              <Tag className="w-3 h-3" />
+              Tags (comma-separated)
+            </label>
+            <input
+              type="text"
+              value={editTags}
+              onChange={(e) => setEditTags(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none"
+              placeholder="tag1, tag2, tag3"
+            />
+            <p className="text-xs text-slate-500 mt-1">Separate tags with commas</p>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={handleCancel}
+              className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              className="px-4 py-2 rounded-lg text-sm bg-primary text-white hover:bg-blue-600 transition-colors flex-1"
+            >
+              Save Changes
+            </button>
+          </div>
         </div>
       </div>
     );
