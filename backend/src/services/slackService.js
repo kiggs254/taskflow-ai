@@ -204,6 +204,11 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
 
         if (!historyResponse.ok) {
           const errorMsg = historyResponse.error || 'Unknown error';
+          // Skip channels where bot is not a member (this is normal)
+          if (errorMsg === 'not_in_channel') {
+            // Silently skip - bot is not in this channel
+            continue;
+          }
           if (errorMsg === 'missing_scope') {
             console.error(`Missing scope for channel ${channel.name}: ${errorMsg}`);
           }
@@ -274,7 +279,13 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
           }
         }
       } catch (error) {
-        console.error(`Error processing channel ${channel.name}:`, error);
+        // Handle specific Slack API errors gracefully
+        if (error.code === 'slack_webapi_platform_error' && error.data?.error === 'not_in_channel') {
+          // Bot is not in this channel - skip silently (this is normal)
+          continue;
+        }
+        // Log other errors
+        console.error(`Error processing channel ${channel.name}:`, error.message || error);
         // Continue with next channel
       }
     }
