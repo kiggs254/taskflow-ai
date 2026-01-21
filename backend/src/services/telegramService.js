@@ -356,10 +356,11 @@ const setupBotHandlers = () => {
         sourceId: msg.message_id.toString(),
         title: title,
         description: taskText, // Store full multi-line text in description
-        workspace: aiResult?.workspaceSuggestions || 'personal',
+        // All integration-sourced tasks should default to Job
+        workspace: 'job',
         energy: aiResult?.energy || 'medium',
         estimatedTime: aiResult?.estimatedTime || 15,
-        tags: aiResult?.tags || [],
+        tags: [...(aiResult?.tags || []), 'telegram'],
         aiConfidence: 0.8,
       });
       

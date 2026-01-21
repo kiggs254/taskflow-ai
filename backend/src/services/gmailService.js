@@ -260,15 +260,16 @@ export const scanEmails = async (userId, maxEmails = 50) => {
 
         // Use AI to extract task
         try {
-          const aiResult = await parseTask(emailContent, 'openai', { promptInstructions });
+          const aiResult = await parseTask(emailContent, 'openai', promptInstructions || '');
           
           const baseTaskData = {
             title: aiResult?.title || subject || 'Email Task',
             description: `From: ${from}\nSubject: ${subject}\n\n${bodyText.substring(0, 1000)}`,
-            workspace: aiResult?.workspaceSuggestions || 'personal',
+            // All integration-sourced tasks should default to Job
+            workspace: 'job',
             energy: aiResult?.energy || 'medium',
             estimatedTime: aiResult?.estimatedTime || 15,
-            tags: aiResult?.tags || [],
+            tags: [...(aiResult?.tags || []), 'gmail'],
             aiConfidence: 0.8,
           };
 
@@ -284,12 +285,18 @@ export const scanEmails = async (userId, maxEmails = 50) => {
             contentLower.includes('teams');
 
           if (looksLikeEvent) {
+            // Treat as meeting: tag and attach a date/time based on email Date header
+            const meetingTags = [...baseTaskData.tags, 'meeting'];
+            const meetingDueDate = date ? new Date(date).getTime() : undefined;
+
             await syncTask(userId, {
               id: crypto.randomUUID(),
               ...baseTaskData,
+              tags: meetingTags,
               status: 'todo',
               dependencies: [],
               createdAt: Date.now(),
+              dueDate: meetingDueDate || null,
             });
           } else {
             // Create draft task

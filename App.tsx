@@ -540,6 +540,11 @@ const TaskCard: React.FC<{
               </span>
             )}
             <DueDateDisplay dueDate={task.dueDate} />
+            {task.tags.includes('meeting') && task.dueDate && (
+              <span className="text-xs text-violet-300 flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-900/40 border border-violet-500/40">
+                <Calendar className="w-3 h-3" /> Meeting {new Date(task.dueDate).toLocaleString()}
+              </span>
+            )}
             {task.recurrence && (
               <span className="text-xs text-slate-500 flex items-center gap-1">
                 <Repeat className="w-3 h-3" /> Repeats
