@@ -60,9 +60,21 @@ export const loginUser = async (email, password) => {
 
   const user = result.rows[0];
 
+  // Check if password_hash exists
+  if (!user.password_hash) {
+    console.error(`User ${user.id} (${email}) has no password hash`);
+    throw new Error('Invalid credentials');
+  }
+
   // Verify password
-  const isValid = await verifyPassword(password, user.password_hash);
-  if (!isValid) {
+  try {
+    const isValid = await verifyPassword(password, user.password_hash);
+    if (!isValid) {
+      throw new Error('Invalid credentials');
+    }
+  } catch (error) {
+    // If password verification fails, log the error but don't expose details
+    console.error(`Password verification failed for user ${user.id} (${email}):`, error.message);
     throw new Error('Invalid credentials');
   }
 

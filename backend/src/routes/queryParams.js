@@ -43,13 +43,15 @@ router.post('/', asyncHandler(async (req, res, next) => {
       const result = await loginUser(email, password);
       return res.json(result);
     } catch (error) {
+      console.error('Login error:', error.message, 'for email:', email);
       if (error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
       if (error.message === 'Invalid credentials') {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
-      throw error;
+      console.error('Unexpected login error:', error);
+      return res.status(500).json({ error: 'Login failed. Please try again.' });
     }
   }
   
