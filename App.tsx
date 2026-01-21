@@ -111,12 +111,21 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stat
       }
     } catch (err: any) {
       let msg = err.message || 'Authentication failed';
-      if (msg === 'Failed to fetch') {
-        msg = 'Connection failed. Check your internet or API URL.';
+      console.error('Login error details:', err);
+      
+      // Handle specific error messages from backend
+      if (msg === 'Invalid credentials') {
+        msg = 'Invalid email or password. Please check your credentials and try again.';
+      } else if (msg === 'User not found') {
+        msg = 'No account found with this email. Please register or check your email address.';
+      } else if (msg === 'Failed to fetch') {
+        msg = 'Connection failed. Check your internet connection or API URL.';
       } else if (msg.includes('Server Error')) {
         msg = 'Server Error. Is the backend URL correct?';
-      } else if (msg.includes('Unexpected token')) {
+      } else if (msg.includes('Unexpected token') || msg.includes('Invalid response')) {
         msg = 'Invalid response from server. Check API configuration.';
+      } else if (msg === 'Unauthorized' || msg.includes('401')) {
+        msg = 'Invalid email or password. Please check your credentials.';
       }
       setError(msg);
     } finally {

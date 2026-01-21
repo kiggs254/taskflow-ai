@@ -46,10 +46,24 @@ const request = async (action: string, method: 'GET' | 'POST', body?: any, token
         throw new Error('Server returned empty response. Check PHP logs for Fatal Errors.');
     }
 
-    const data = JSON.parse(text);
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseError) {
+      console.error(`Failed to parse JSON response for ${action}:`, text.substring(0, 200));
+      throw new Error(`Invalid response from server: ${text.substring(0, 100)}`);
+    }
     
     if (!res.ok) {
-      throw new Error(data.error || 'API Request Failed');
+      // Extract error message from response
+      const errorMessage = data?.error || `Request failed with status ${res.status}`;
+      console.error(`API Error (${action}):`, {
+        status: res.status,
+        statusText: res.statusText,
+        error: errorMessage,
+        response: data
+      });
+      throw new Error(errorMessage);
     }
     return data;
   } catch (error) {

@@ -43,7 +43,12 @@ router.post('/', asyncHandler(async (req, res, next) => {
       const result = await loginUser(email, password);
       return res.json(result);
     } catch (error) {
-      console.error('Login error:', error.message, 'for email:', email);
+      // Enhanced logging for debugging
+      console.error('=== LOGIN ERROR ===');
+      console.error('Email:', email);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+      
       if (error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
