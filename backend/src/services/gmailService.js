@@ -185,10 +185,24 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     const gmail = await getGmailClient(userId);
     
     // Get integration settings
-    const integrationResult = await query(
-      'SELECT last_scan_at, prompt_instructions FROM gmail_integrations WHERE user_id = $1',
-      [userId]
-    );
+    let integrationResult;
+    try {
+      integrationResult = await query(
+        'SELECT last_scan_at, prompt_instructions FROM gmail_integrations WHERE user_id = $1',
+        [userId]
+      );
+    } catch (error) {
+      // Backwards compatibility if prompt_instructions column isn't present yet
+      if (error?.code === '42703') {
+        integrationResult = await query(
+          'SELECT last_scan_at FROM gmail_integrations WHERE user_id = $1',
+          [userId]
+        );
+        integrationResult.rows = integrationResult.rows.map((row) => ({ ...row, prompt_instructions: '' }));
+      } else {
+        throw error;
+      }
+    }
     
     const integrationSettings = integrationResult.rows[0] || {};
     const lastScanAt = integrationSettings.last_scan_at;
@@ -322,11 +336,27 @@ export const scanEmails = async (userId, maxEmails = 50) => {
  * Get Gmail connection status
  */
 export const getGmailStatus = async (userId) => {
-  const result = await query(
-    `SELECT email, enabled, last_scan_at, scan_frequency, prompt_instructions, created_at
-     FROM gmail_integrations WHERE user_id = $1`,
-    [userId]
-  );
+  let result;
+  try {
+    result = await query(
+      `SELECT email, enabled, last_scan_at, scan_frequency, prompt_instructions, created_at
+       FROM gmail_integrations WHERE user_id = $1`,
+      [userId]
+    );
+  } catch (error) {
+    // Backwards compatibility: older DBs may not have prompt_instructions yet
+    if (error?.code === '42703') {
+      result = await query(
+        `SELECT email, enabled, last_scan_at, scan_frequency, created_at
+         FROM gmail_integrations WHERE user_id = $1`,
+        [userId]
+      );
+      // Normalize shape to include prompt_instructions as null
+      result.rows = result.rows.map((row) => ({ ...row, prompt_instructions: null }));
+    } else {
+      throw error;
+    }
+  }
 
   if (result.rows.length === 0) {
     return { connected: false };
@@ -387,10 +417,20 @@ export const updateGmailSettings = async (userId, settings) => {
 
   values.push(userId);
 
-  await query(
-    `UPDATE gmail_integrations SET ${updates.join(', ')} WHERE user_id = $${paramCount++}`,
-    values
-  );
+  try {
+    await query(
+      `UPDATE gmail_integrations SET ${updates.join(', ')} WHERE user_id = $${paramCount++}`,
+      values
+    );
+  } catch (error) {
+    // If prompt_instructions doesn't exist yet, give a clear message
+    if (error?.code === '42703' && settings.promptInstructions !== undefined) {
+      throw new Error(
+        "Gmail prompt instructions are not available yet because the database column 'prompt_instructions' is missing. Please run the migration to add it."
+      );
+    }
+    throw error;
+  }
 
   return { success: true };
 };
