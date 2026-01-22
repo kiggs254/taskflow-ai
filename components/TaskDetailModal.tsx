@@ -48,6 +48,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [editWorkspace, setEditWorkspace] = useState<WorkspaceType>(task.workspace);
   const [editDueDate, setEditDueDate] = useState(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
   const [editRecurrence, setEditRecurrence] = useState<RecurrenceRule | undefined>(task.recurrence);
+  const [editMeetingLink, setEditMeetingLink] = useState(task.meetingLink || '');
   
   // Subtask state
   const [subtasks, setSubtasks] = useState<Subtask[]>(task.subtasks || []);
@@ -88,6 +89,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     setEditWorkspace(task.workspace);
     setEditDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
     setEditRecurrence(task.recurrence);
+    setEditMeetingLink(task.meetingLink || '');
     setSubtasks(task.subtasks || []);
     setNewSubtaskTitle('');
     return null;
@@ -150,6 +152,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
       workspace: editWorkspace,
       dueDate: newDueDate,
       recurrence: editRecurrence,
+      meetingLink: editMeetingLink || undefined,
       subtasks,
     });
     setIsEditing(false);
@@ -345,6 +348,21 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     </select>
                   </div>
                 )}
+              </div>
+
+              {/* Meeting Link */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  <Video className="w-3 h-3 inline mr-1" />
+                  Meeting Link (Zoom, Meet, Teams, etc.)
+                </label>
+                <input
+                  type="url"
+                  value={editMeetingLink}
+                  onChange={(e) => setEditMeetingLink(e.target.value)}
+                  placeholder="https://zoom.us/j/... or https://meet.google.com/..."
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-primary placeholder:text-slate-600"
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-700">
