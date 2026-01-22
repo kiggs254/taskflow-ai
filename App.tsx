@@ -2662,12 +2662,16 @@ export default function App() {
 
       // 2) Send Slack summary of today's completed Job tasks
       const todayLabel = nowDate.toLocaleDateString();
-      const todayStr = nowDate.toDateString();
+      // Calculate start and end of today for precise filtering
+      const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+      const todayEnd = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1).getTime();
+      
       const completedTodayJob = completedTasksAll.filter(
         (t) =>
           t.workspace === 'job' &&
           t.completedAt &&
-          new Date(t.completedAt).toDateString() === todayStr
+          t.completedAt >= todayStart &&
+          t.completedAt < todayEnd
       );
 
       if (completedTodayJob.length > 0) {
@@ -2804,8 +2808,15 @@ export default function App() {
   }
 
   if (view === AppView.DAILY_RESET) {
-    const today = new Date().toDateString();
-    const completedToday = completedTasksAll.filter(t => t.completedAt && new Date(t.completedAt).toDateString() === today);
+    // Calculate start and end of today for precise filtering
+    const todayDate = new Date();
+    const todayStart = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate()).getTime();
+    const todayEnd = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() + 1).getTime();
+    const completedToday = completedTasksAll.filter(t => 
+      t.completedAt && 
+      t.completedAt >= todayStart && 
+      t.completedAt < todayEnd
+    );
     return <DailyReset completedTasks={completedToday} pendingTasks={pendingTasksAll} token={token!} onClose={finishDailyReset} onExport={handleExport} />;
   }
 
