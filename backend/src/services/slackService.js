@@ -144,6 +144,7 @@ const getSlackClient = async (userId) => {
 
 /**
  * Scan Slack for mentions and extract tasks
+ * Now also scans inside thread replies
  */
 export const scanSlackMentions = async (userId, maxMentions = 50) => {
   try {
@@ -168,6 +169,85 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
 
     const createdTasks = [];
     let processedCount = 0;
+    const processedMessageIds = new Set(); // Track processed messages to avoid duplicates
+
+    // Helper function to process a single message
+    const processMessage = async (message, channel, isThreadReply = false) => {
+      if (processedCount >= maxMentions) return false;
+      
+      // Skip if already processed (by ts which is unique per message)
+      const messageKey = `${channel.id}-${message.ts}`;
+      if (processedMessageIds.has(messageKey)) return false;
+      processedMessageIds.add(messageKey);
+
+      try {
+        // Skip if we've already processed this message
+        const messageTimestamp = parseFloat(message.ts) * 1000;
+        if (lastScanAt && messageTimestamp <= new Date(lastScanAt).getTime()) {
+          return false;
+        }
+
+        const messageText = message.text || '';
+        
+        // Skip if doesn't mention the user
+        if (!messageText.includes(userMention)) {
+          return false;
+        }
+
+        const channelName = channel.name || 'unknown';
+        
+        // Get permalink for the message
+        let permalink = '';
+        try {
+          const permalinkResponse = await client.chat.getPermalink({
+            channel: channel.id,
+            message_ts: message.ts,
+          });
+          if (permalinkResponse.ok) {
+            permalink = permalinkResponse.permalink || '';
+          }
+        } catch (e) {
+          // Permalink might fail, continue anyway
+        }
+        
+        // Use AI to determine if this is a task
+        const aiResult = await parseTask(messageText, 'openai');
+        
+        if (aiResult && aiResult.title) {
+          // Create approved task directly (no draft step)
+          // Store Slack metadata in description for later reply
+          const slackMetadata = {
+            channelId: channel.id,
+            channelName: channelName,
+            messageTs: message.ts,
+            threadTs: message.thread_ts || message.ts, // Use thread_ts if exists, else message_ts
+            permalink: permalink,
+            isThreadReply: isThreadReply,
+          };
+          
+          const newTask = {
+            id: crypto.randomUUID(),
+            title: aiResult.title,
+            description: `From Slack #${channelName}${isThreadReply ? ' (thread reply)' : ''}\n\n${messageText}${permalink ? `\n\nLink: ${permalink}` : ''}\n\n<!-- Slack metadata: ${JSON.stringify(slackMetadata)} -->`,
+            workspace: 'job', // All Slack tasks go to Job workspace
+            energy: aiResult.energy || 'medium',
+            estimatedTime: aiResult.estimatedTime || 15,
+            tags: [...(aiResult.tags || []), 'slack', channelName],
+            status: 'todo',
+            dependencies: [],
+            createdAt: Date.now(),
+          };
+
+          await syncTask(userId, newTask);
+          createdTasks.push(newTask);
+          processedCount++;
+          return true;
+        }
+      } catch (error) {
+        console.error(`Error processing Slack message ${message.ts}:`, error);
+      }
+      return false;
+    };
 
     // Get list of channels the user is a member of
     const channelsResponse = await client.conversations.list({
@@ -219,72 +299,42 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
           continue;
         }
 
-        // Filter messages that mention the user
-        const mentionedMessages = historyResponse.messages.filter(msg => 
-          msg.text && msg.text.includes(userMention)
-        );
-
-        for (const message of mentionedMessages) {
+        // Process top-level messages
+        for (const message of historyResponse.messages) {
           if (processedCount >= maxMentions) break;
 
-          try {
-            // Skip if we've already processed this message
-            const messageTimestamp = parseFloat(message.ts) * 1000;
-            if (lastScanAt && messageTimestamp <= new Date(lastScanAt).getTime()) {
-              continue;
-            }
+          // Process the top-level message itself if it mentions the user
+          await processMessage(message, channel, false);
 
-            const messageText = message.text || '';
-            const channelName = channel.name || 'unknown';
-            
-            // Get permalink for the message
-            let permalink = '';
+          // If message has thread replies, scan them too
+          // reply_count > 0 indicates there are replies in the thread
+          if (message.reply_count && message.reply_count > 0) {
             try {
-              const permalinkResponse = await client.chat.getPermalink({
+              const repliesParams = {
                 channel: channel.id,
-                message_ts: message.ts,
-              });
-              if (permalinkResponse.ok) {
-                permalink = permalinkResponse.permalink || '';
-              }
-            } catch (e) {
-              // Permalink might fail, continue anyway
-            }
-            
-            // Use AI to determine if this is a task
-            const aiResult = await parseTask(messageText, 'openai');
-            
-            if (aiResult && aiResult.title) {
-              // Create approved task directly (no draft step)
-              // Store Slack metadata in description for later reply
-              const slackMetadata = {
-                channelId: channel.id,
-                channelName: channelName,
-                messageTs: message.ts,
-                threadTs: message.thread_ts || message.ts, // Use thread_ts if exists, else message_ts
-                permalink: permalink,
-              };
-              
-              const newTask = {
-                id: crypto.randomUUID(),
-                title: aiResult.title,
-                description: `From Slack #${channelName}\n\n${messageText}${permalink ? `\n\nLink: ${permalink}` : ''}\n\n<!-- Slack metadata: ${JSON.stringify(slackMetadata)} -->`,
-                workspace: 'job', // All Slack tasks go to Job workspace
-                energy: aiResult.energy || 'medium',
-                estimatedTime: aiResult.estimatedTime || 15,
-                tags: [...(aiResult.tags || []), 'slack', channelName],
-                status: 'todo',
-                dependencies: [],
-                createdAt: Date.now(),
+                ts: message.ts, // thread_ts is the ts of the parent message
+                limit: 100,
               };
 
-              await syncTask(userId, newTask);
-              createdTasks.push(newTask);
-              processedCount++;
+              if (oldestTimestamp) {
+                repliesParams.oldest = oldestTimestamp.toString();
+              }
+
+              const repliesResponse = await client.conversations.replies(repliesParams);
+
+              if (repliesResponse.ok && repliesResponse.messages) {
+                // Skip the first message as it's the parent (already processed above)
+                const threadReplies = repliesResponse.messages.slice(1);
+                
+                for (const reply of threadReplies) {
+                  if (processedCount >= maxMentions) break;
+                  await processMessage(reply, channel, true);
+                }
+              }
+            } catch (threadError) {
+              console.error(`Error fetching thread replies for ${message.ts}:`, threadError.message || threadError);
+              // Continue with next message
             }
-          } catch (error) {
-            console.error(`Error processing Slack message ${message.ts}:`, error);
-            // Continue with next message
           }
         }
       } catch (error) {
