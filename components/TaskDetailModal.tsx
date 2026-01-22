@@ -835,6 +835,29 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
             </div>
           )}
 
+          {/* Created At */}
+          {task.createdAt && (
+            <div>
+              <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Created</h3>
+              <p className="text-slate-400 text-sm flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                {new Date(task.createdAt).toLocaleString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  hour12: true
+                })}
+                {(Date.now() - task.createdAt) < 5 * 60 * 1000 && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500 text-white animate-pulse">
+                    NEW
+                  </span>
+                )}
+              </p>
+            </div>
+          )}
+
           {/* Task ID */}
           <div>
             <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Task ID</h3>

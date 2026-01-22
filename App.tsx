@@ -654,6 +654,26 @@ const TaskCard: React.FC<{
     low: <Coffee className="w-4 h-4 text-success" />,
   };
 
+  // Check if task is new (created within last 5 minutes)
+  const isNewTask = task.createdAt && (Date.now() - task.createdAt) < 5 * 60 * 1000;
+  
+  // Format created at timestamp
+  const formatCreatedAt = (timestamp: number | undefined) => {
+    if (!timestamp) return null;
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (actionsRef.current && !actionsRef.current.contains(event.target as Node)) {
@@ -775,6 +795,11 @@ const TaskCard: React.FC<{
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1">
             {energyIcons[task.energy]}
             <span className="text-xs uppercase tracking-wider font-semibold text-slate-400 opacity-75">{task.energy} Energy</span>
+            {isNewTask && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500 text-white animate-pulse">
+                NEW
+              </span>
+            )}
              {task.status === 'waiting' && (
               <span className="text-xs text-amber-400 flex items-center gap-1">
                 <Hourglass className="w-3 h-3" /> Waiting
@@ -784,6 +809,11 @@ const TaskCard: React.FC<{
             {task.recurrence && (
               <span className="text-xs text-slate-500 flex items-center gap-1">
                 <Repeat className="w-3 h-3" /> Repeats
+              </span>
+            )}
+            {task.createdAt && (
+              <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                <Clock className="w-3 h-3" /> {formatCreatedAt(task.createdAt)}
               </span>
             )}
           </div>
