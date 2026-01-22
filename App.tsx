@@ -28,7 +28,7 @@ import {
 import { api } from './services/apiService';
 
 // --- Sound Utils ---
-const playSound = (type: 'complete' | 'levelUp') => {
+const playSound = (type: 'complete' | 'levelUp' | 'newTask') => {
   if (localStorage.getItem('tf_sounds') === 'false') return;
 
   const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -51,6 +51,34 @@ const playSound = (type: 'complete' | 'levelUp') => {
     
     osc.start();
     osc.stop(ctx.currentTime + 0.4);
+  } else if (type === 'newTask') {
+    // Loud attention-grabbing DING for new tasks
+    const now = ctx.currentTime;
+    
+    // First ding - higher pitched
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(1318.51, now); // E6 - high pitch
+    gain1.gain.setValueAtTime(0.4, now); // Louder
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+    osc1.start(now);
+    osc1.stop(now + 0.3);
+    
+    // Second ding - slightly lower, creates pleasant double-ding
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(1046.50, now + 0.15); // C6
+    gain2.gain.setValueAtTime(0, now);
+    gain2.gain.setValueAtTime(0.35, now + 0.15);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+    osc2.start(now + 0.15);
+    osc2.stop(now + 0.5);
   } else if (type === 'levelUp') {
     // Victory Fanfare
     const now = ctx.currentTime;
@@ -1940,6 +1968,7 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
+  const [newTasksCount, setNewTasksCount] = useState<number>(0);
   const previousDraftCountRef = useRef<number>(0);
   const previousTasksCountRef = useRef<number>(0);
   const [syncingSources, setSyncingSources] = useState(false);
@@ -2019,10 +2048,10 @@ export default function App() {
       const drafts = await api.draftTasks.getAll(token, 'pending');
       const newCount = drafts.length;
       
-      // Play sound if new drafts arrived
+      // Play sound if new drafts arrived (louder DING)
       if (newCount > previousDraftCountRef.current && previousDraftCountRef.current > 0) {
         const newDraftsCount = newCount - previousDraftCountRef.current;
-        playSound('complete'); // Use existing sound
+        playSound('newTask'); // Louder DING sound
         // Show toast notification
         addToast(`📧 ${newDraftsCount} new draft task${newDraftsCount > 1 ? 's' : ''} arrived!`, 'success');
       }
@@ -2034,17 +2063,17 @@ export default function App() {
     }
   };
 
-  // Poll for draft tasks count (every 30 seconds)
+  // Poll for draft tasks count (every 15 seconds for more real-time updates)
   useEffect(() => {
     if (!token) return;
     
     // Fetch immediately (but don't play sound on initial load)
     fetchDraftTasksCount();
     
-    // Then poll every 30 seconds
+    // Then poll every 15 seconds for real-time updates
     const interval = setInterval(() => {
       fetchDraftTasksCount();
-    }, 30000);
+    }, 15000);
     
     return () => clearInterval(interval);
   }, [token]);
@@ -2074,9 +2103,9 @@ export default function App() {
     loadPreferences();
   }, [token, activeWorkspace]);
 
-  // Graceful polling for tasks when on tasks view (every 30 seconds)
+  // Graceful polling for tasks (runs always for real-time counter updates)
   useEffect(() => {
-    if (!token || view !== AppView.DASHBOARD) return;
+    if (!token) return;
     
     const pollTasks = async () => {
       try {
@@ -2138,8 +2167,10 @@ export default function App() {
 
           // Notify about new tasks
           if (hasNewTasks && newTasks.length > 0 && previousTasksCountRef.current > 0) {
-            playSound('complete');
+            playSound('newTask'); // Louder DING sound
             addToast(`✨ ${newTasks.length} new task${newTasks.length > 1 ? 's' : ''} added!`, 'success');
+            // Update new tasks counter (will be cleared when viewing tasks page)
+            setNewTasksCount(prev => prev + newTasks.length);
           }
 
           // Update count
@@ -2172,9 +2203,9 @@ export default function App() {
       }
     };
 
-    // Poll immediately, then every 30 seconds
+    // Poll immediately, then every 15 seconds for real-time updates
     pollTasks();
-    const interval = setInterval(pollTasks, 30000);
+    const interval = setInterval(pollTasks, 15000);
     
     return () => clearInterval(interval);
   }, [token, view, user]);
@@ -2862,10 +2893,17 @@ export default function App() {
             {/* Navigation */}
             <nav className="space-y-1 hidden md:block">
                <button 
-                  onClick={() => setView(AppView.DASHBOARD)}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.DASHBOARD ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                  onClick={() => { setView(AppView.DASHBOARD); setNewTasksCount(0); }}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center justify-between gap-3 ${view === AppView.DASHBOARD ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
-                  <Layout className="w-4 h-4" /> Tasks
+                  <div className="flex items-center gap-3">
+                    <Layout className="w-4 h-4" /> Tasks
+                  </div>
+                  {newTasksCount > 0 && view !== AppView.DASHBOARD && (
+                    <span className="px-2 py-0.5 rounded-full bg-blue-500 text-white text-xs font-bold min-w-[20px] text-center animate-pulse">
+                      {newTasksCount > 99 ? '99+' : newTasksCount}
+                    </span>
+                  )}
                 </button>
                  <button 
                   onClick={() => setView(AppView.COMPLETED_TASKS)}

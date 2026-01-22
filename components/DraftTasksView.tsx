@@ -15,7 +15,6 @@ interface DraftTasksViewProps {
 export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCountChange }) => {
   const [drafts, setDrafts] = useState<DraftTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedStatus, setSelectedStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [selectedDraft, setSelectedDraft] = useState<DraftTask | null>(null);
   const [rejectConfirm, setRejectConfirm] = useState<{ isOpen: boolean; draftId: number | null }>({ isOpen: false, draftId: null });
   const [bulkApproveConfirm, setBulkApproveConfirm] = useState<{ isOpen: boolean; count: number }>({ isOpen: false, count: 0 });
@@ -24,13 +23,13 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
 
   useEffect(() => {
     loadDrafts();
-  }, [selectedStatus]);
+  }, []);
 
   // Graceful polling for drafts when viewing this page (every 15 seconds)
   useEffect(() => {
     const pollDrafts = async () => {
       try {
-        const data = await api.draftTasks.getAll(token, selectedStatus);
+        const data = await api.draftTasks.getAll(token, 'pending');
         
         // Update drafts gracefully - merge new drafts and update existing ones
         setDrafts(prevDrafts => {
@@ -52,14 +51,13 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
 
           // Remove drafts that no longer exist
           const fetchedDraftIds = new Set(data.map(d => d.id));
-          const removedDrafts = prevDrafts.filter(d => !fetchedDraftIds.has(d.id));
 
           // Return merged array
           return Array.from(draftMap.values()).concat(newDrafts);
         });
         
         // Update parent component with pending count
-        if (onDraftCountChange && selectedStatus === 'pending') {
+        if (onDraftCountChange) {
           onDraftCountChange(data.length);
         }
       } catch (error) {
@@ -72,16 +70,16 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
     const interval = setInterval(pollDrafts, 15000);
     
     return () => clearInterval(interval);
-  }, [selectedStatus, token, onDraftCountChange]);
+  }, [token, onDraftCountChange]);
 
   const loadDrafts = async () => {
     setLoading(true);
     try {
-      const data = await api.draftTasks.getAll(token, selectedStatus);
+      const data = await api.draftTasks.getAll(token, 'pending');
       setDrafts(data);
       
       // Update parent component with pending count
-      if (onDraftCountChange && selectedStatus === 'pending') {
+      if (onDraftCountChange) {
         onDraftCountChange(data.length);
       }
     } catch (error) {
@@ -121,7 +119,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
       await loadDrafts();
       setSelectedDraft(null);
       // Update count
-      if (onDraftCountChange && selectedStatus === 'pending') {
+      if (onDraftCountChange) {
         onDraftCountChange(drafts.length - 1);
       }
     } catch (error) {
@@ -172,7 +170,7 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
     try {
       await api.draftTasks.bulkReject(token, pendingDrafts.map(d => d.id));
       await loadDrafts();
-      if (onDraftCountChange && selectedStatus === 'pending') {
+      if (onDraftCountChange) {
         onDraftCountChange(0);
       }
     } catch (error) {
@@ -202,63 +200,30 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
             Review and approve tasks extracted from Gmail and Telegram
           </p>
         </div>
-        {selectedStatus === 'pending' && drafts.length > 0 && (
+        {drafts.length > 0 && (
           <div className="flex gap-2">
             <button
               onClick={handleBulkApprove}
-              className="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-2"
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1.5 text-sm"
             >
-              <CheckCircle2 className="w-4 h-4" />
+              <CheckCircle2 className="w-3.5 h-3.5" />
               Approve All ({drafts.length})
             </button>
             <button
               onClick={handleBulkReject}
-              className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-500 flex items-center gap-2"
+              className="px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-500 flex items-center gap-1.5 text-sm"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
               Reject All ({drafts.length})
             </button>
           </div>
         )}
       </div>
 
-      <div className="flex gap-2 border-b border-slate-700">
-        <button
-          onClick={() => setSelectedStatus('pending')}
-          className={`px-4 py-2 rounded-t-lg ${
-            selectedStatus === 'pending'
-              ? 'bg-surface text-white border-t border-l border-r border-slate-700'
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Pending ({drafts.filter(d => d.status === 'pending').length})
-        </button>
-        <button
-          onClick={() => setSelectedStatus('approved')}
-          className={`px-4 py-2 rounded-t-lg ${
-            selectedStatus === 'approved'
-              ? 'bg-surface text-white border-t border-l border-r border-slate-700'
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Approved
-        </button>
-        <button
-          onClick={() => setSelectedStatus('rejected')}
-          className={`px-4 py-2 rounded-t-lg ${
-            selectedStatus === 'rejected'
-              ? 'bg-surface text-white border-t border-l border-r border-slate-700'
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Rejected
-        </button>
-      </div>
-
       {drafts.length === 0 ? (
         <div className="text-center py-12 text-slate-400">
           <Mail className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p>No {selectedStatus} draft tasks</p>
+          <p>No pending draft tasks</p>
         </div>
       ) : (
         <>
