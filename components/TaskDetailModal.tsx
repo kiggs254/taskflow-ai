@@ -4,7 +4,6 @@ import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AlertModal } from './AlertModal';
-import { v4 as uuidv4 } from 'uuid';
 
 interface TaskDetailModalProps {
   task: Task;
@@ -76,7 +75,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const addSubtask = () => {
     if (!newSubtaskTitle.trim()) return;
     const newSubtask: Subtask = {
-      id: uuidv4(),
+      id: crypto.randomUUID(),
       title: newSubtaskTitle.trim(),
       completed: false,
     };
