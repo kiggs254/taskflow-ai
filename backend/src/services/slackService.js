@@ -171,6 +171,7 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
     const createdTasks = [];
     let processedCount = 0;
     const processedMessageIds = new Set(); // Track processed messages to avoid duplicates
+    let newestProcessedTimestamp = lastScanAt ? new Date(lastScanAt).getTime() : 0; // Track newest message we process
 
     // Helper function to process a single message
     const processMessage = async (message, channel, isThreadReply = false) => {
@@ -248,16 +249,22 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
             createdAt: Date.now(),
           };
 
-          await syncTask(userId, newTask);
-          createdTasks.push(newTask);
-          processedCount++;
-          return true;
-        }
-      } catch (error) {
-        console.error(`Error processing Slack message ${message.ts}:`, error);
-      }
-      return false;
-    };
+              await syncTask(userId, newTask);
+              createdTasks.push(newTask);
+              processedCount++;
+              
+              // Update newest processed timestamp
+              if (messageTimestamp > newestProcessedTimestamp) {
+                newestProcessedTimestamp = messageTimestamp;
+              }
+              
+              return true;
+            }
+          } catch (error) {
+            console.error(`Error processing Slack message ${message.ts}:`, error);
+          }
+          return false;
+        };
 
     // Get list of channels the user is a member of
     const channelsResponse = await client.conversations.list({
@@ -367,11 +374,18 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
       }
     }
 
-    // Update last_scan_at
-    await query(
-      'UPDATE slack_integrations SET last_scan_at = CURRENT_TIMESTAMP WHERE user_id = $1',
-      [userId]
-    );
+    // Only update last_scan_at if we actually processed some messages
+    // This prevents skipping messages that were seen but not processed due to errors
+    if (createdTasks.length > 0 && newestProcessedTimestamp > 0) {
+      const newScanTime = new Date(newestProcessedTimestamp).toISOString();
+      console.log(`📌 Updating last_scan_at to ${newScanTime} (based on newest processed message)`);
+      await query(
+        'UPDATE slack_integrations SET last_scan_at = $1 WHERE user_id = $2',
+        [newScanTime, userId]
+      );
+    } else {
+      console.log(`📌 Not updating last_scan_at - no new tasks created`);
+    }
 
     return { success: true, tasksCreated: createdTasks.length, tasks: createdTasks };
   } catch (error) {

@@ -140,6 +140,27 @@ router.post('/disconnect', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * POST /api/slack/reset-scan
+ * Reset the scan timestamp to allow re-scanning older messages
+ */
+router.post('/reset-scan', authenticate, asyncHandler(async (req, res) => {
+  const { daysBack = 7 } = req.body;
+  const resetDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+  
+  const { query } = await import('../config/database.js');
+  await query(
+    'UPDATE slack_integrations SET last_scan_at = $1 WHERE user_id = $2',
+    [resetDate.toISOString(), req.user.id]
+  );
+  
+  res.json({ 
+    success: true, 
+    message: `Scan reset to ${daysBack} days ago. Next scan will pick up older messages.`,
+    resetTo: resetDate.toISOString()
+  });
+}));
+
+/**
  * POST /api/slack/daily-summary
  * Post a daily summary of completed tasks to Slack
  */
