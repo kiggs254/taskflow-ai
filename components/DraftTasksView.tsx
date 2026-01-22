@@ -201,20 +201,20 @@ export const DraftTasksView: React.FC<DraftTasksViewProps> = ({ token, onDraftCo
           </p>
         </div>
         {drafts.length > 0 && (
-          <div className="flex gap-2">
+          <div className="flex gap-2 shrink-0">
             <button
               onClick={handleBulkApprove}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1.5 text-sm"
+              className="px-2.5 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-500 flex items-center gap-1 text-xs whitespace-nowrap"
             >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Approve All ({drafts.length})
+              <CheckCircle2 className="w-3 h-3" />
+              Approve ({drafts.length})
             </button>
             <button
               onClick={handleBulkReject}
-              className="px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-500 flex items-center gap-1.5 text-sm"
+              className="px-2.5 py-1 rounded-md bg-red-600 text-white hover:bg-red-500 flex items-center gap-1 text-xs whitespace-nowrap"
             >
-              <X className="w-3.5 h-3.5" />
-              Reject All ({drafts.length})
+              <X className="w-3 h-3" />
+              Reject ({drafts.length})
             </button>
           </div>
         )}
