@@ -270,15 +270,13 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
       if (processedCount >= maxMentions) break;
 
       try {
-        // Get messages from this channel
+        // Get recent messages from this channel
+        // DON'T filter by oldest here - we need to see parent messages 
+        // that might have NEW thread replies even if parent is old
         const historyParams = {
           channel: channel.id,
           limit: 100,
         };
-
-        if (oldestTimestamp) {
-          historyParams.oldest = oldestTimestamp.toString();
-        }
 
         const historyResponse = await client.conversations.history(historyParams);
 
@@ -304,21 +302,20 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
           if (processedCount >= maxMentions) break;
 
           // Process the top-level message itself if it mentions the user
+          // (processMessage will check timestamp internally)
           await processMessage(message, channel, false);
 
           // If message has thread replies, scan them too
           // reply_count > 0 indicates there are replies in the thread
           if (message.reply_count && message.reply_count > 0) {
             try {
+              // Fetch ALL thread replies (don't filter by oldest here)
+              // We'll check timestamps when processing each reply
               const repliesParams = {
                 channel: channel.id,
                 ts: message.ts, // thread_ts is the ts of the parent message
                 limit: 100,
               };
-
-              if (oldestTimestamp) {
-                repliesParams.oldest = oldestTimestamp.toString();
-              }
 
               const repliesResponse = await client.conversations.replies(repliesParams);
 
@@ -326,8 +323,11 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
                 // Skip the first message as it's the parent (already processed above)
                 const threadReplies = repliesResponse.messages.slice(1);
                 
+                console.log(`Found ${threadReplies.length} thread replies in #${channel.name} for message "${message.text?.substring(0, 50)}..."`);
+                
                 for (const reply of threadReplies) {
                   if (processedCount >= maxMentions) break;
+                  // processMessage will check if this reply is new and mentions user
                   await processMessage(reply, channel, true);
                 }
               }
