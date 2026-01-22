@@ -605,14 +605,6 @@ const TaskCard: React.FC<{
   onSetWaiting,
   onViewDetails
 }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState(task.title);
-  const [editEnergy, setEditEnergy] = useState<EnergyLevel>(task.energy);
-  const [editWorkspace, setEditWorkspace] = useState<WorkspaceType>(task.workspace);
-  const [editDueDate, setEditDueDate] = useState(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
-  const [editRecurrence, setEditRecurrence] = useState<RecurrenceRule | undefined>(task.recurrence);
-
-
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpText, setFollowUpText] = useState('');
   const [loadingFollowUp, setLoadingFollowUp] = useState(false);
@@ -668,121 +660,6 @@ const TaskCard: React.FC<{
     return `mailto:?subject=${subject}&body=${body}`;
   };
 
-  const handleSave = () => {
-    const newDueDate = editDueDate ? new Date(`${editDueDate}T12:00:00Z`).getTime() : undefined;
-    onUpdate({
-      ...task,
-      title: editTitle,
-      energy: editEnergy,
-      workspace: editWorkspace,
-      dueDate: newDueDate,
-      recurrence: editRecurrence
-    });
-    setIsEditing(false);
-  };
-  
-  const handleRecurrenceChange = (key: keyof RecurrenceRule, value: any) => {
-    const newRec: RecurrenceRule = editRecurrence || { frequency: 'weekly', interval: 1 };
-    if (key === 'interval') {
-       newRec.interval = parseInt(value, 10) || 1;
-    } else {
-       (newRec as any)[key] = value;
-    }
-    setEditRecurrence(newRec);
-  }
-
-  if (isEditing) {
-    return (
-      <div className="p-4 rounded-xl bg-surface border border-primary border-l-4 mb-3 shadow-lg">
-        <div className="space-y-3">
-          <input 
-            type="text" 
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white focus:border-primary focus:outline-none"
-            autoFocus
-          />
-          <div className="flex flex-wrap gap-2 items-center">
-            <select 
-              value={editEnergy} 
-              onChange={(e) => setEditEnergy(e.target.value as EnergyLevel)}
-              className="bg-slate-800 border border-slate-700 rounded p-2 text-sm text-slate-300 focus:outline-none"
-            >
-              <option value="high">High Energy</option>
-              <option value="medium">Medium Energy</option>
-              <option value="low">Low Energy</option>
-            </select>
-             <select 
-              value={editWorkspace} 
-              onChange={(e) => setEditWorkspace(e.target.value as WorkspaceType)}
-              className="bg-slate-800 border border-slate-700 rounded p-2 text-sm text-slate-300 focus:outline-none"
-            >
-              <option value="job">Job</option>
-              <option value="freelance">Freelance</option>
-              <option value="personal">Personal</option>
-            </select>
-             <div className="relative">
-                <input 
-                  type="date" 
-                  value={editDueDate} 
-                  onChange={(e) => setEditDueDate(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 rounded p-2 text-sm text-slate-300 focus:outline-none appearance-none"
-                  style={{ colorScheme: 'dark' }}
-                />
-                <Calendar className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
-              </div>
-          </div>
-          {/* Recurrence Editor */}
-           <div className="pt-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={!!editRecurrence}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setEditRecurrence({ frequency: 'weekly', interval: 1 });
-                    } else {
-                      setEditRecurrence(undefined);
-                    }
-                  }}
-                  className="form-checkbox h-4 w-4 rounded bg-slate-700 border-slate-600 text-primary focus:ring-primary"
-                />
-                <span className="text-sm text-slate-300">Repeat task</span>
-              </label>
-            
-              {editRecurrence && (
-                <div className="mt-2 pl-6 flex items-center gap-2 text-sm animate-in fade-in">
-                  <span>Every</span>
-                  <input
-                    type="number"
-                    min="1"
-                    value={editRecurrence.interval}
-                    onChange={(e) => handleRecurrenceChange('interval', e.target.value)}
-                    className="w-16 bg-slate-800 border border-slate-700 rounded p-1 text-center"
-                  />
-                  <select
-                    value={editRecurrence.frequency}
-                    onChange={(e) => handleRecurrenceChange('frequency', e.target.value)}
-                    className="bg-slate-800 border border-slate-700 rounded p-1 text-slate-300 focus:outline-none"
-                  >
-                    <option value="daily">day(s)</option>
-                    <option value="weekly">week(s)</option>
-                    <option value="monthly">month(s)</option>
-                  </select>
-                </div>
-              )}
-            </div>
-          <div className="flex justify-end gap-2 pt-2">
-             <button onClick={() => setIsEditing(false)} className="px-3 py-1 rounded text-sm text-slate-400 hover:bg-slate-800">Cancel</button>
-             <button onClick={handleSave} className="px-3 py-1 rounded text-sm bg-primary text-white flex items-center gap-1">
-               <Save className="w-3 h-3" /> Save
-             </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div 
       className={`group relative p-4 rounded-xl bg-surface border transition-all border-l-4 mb-3 shadow-sm cursor-pointer
@@ -798,13 +675,6 @@ const TaskCard: React.FC<{
       )}
       
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button 
-          onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-          className="text-slate-500 hover:text-white p-1"
-          title="Edit Task"
-        >
-          <Pencil className="w-4 h-4" />
-        </button>
          <div className="relative" ref={actionsRef}>
            <button 
              onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }}

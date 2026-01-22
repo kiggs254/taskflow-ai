@@ -290,7 +290,7 @@ Be strict about following the user's instructions. If they say to ignore certain
 };
 
 /**
- * Parse full email thread and extract title, todos, and formatted description
+ * Parse full email thread and extract title, todos, subtasks, and formatted description
  */
 export const parseEmailThread = async (fullThreadContent, provider = 'openai', promptInstructions = '') => {
   if (!fullThreadContent || typeof fullThreadContent !== 'string') {
@@ -311,22 +311,29 @@ export const parseEmailThread = async (fullThreadContent, provider = 'openai', p
         {
           role: 'system',
           content: `You are an email thread analyzer. Analyze the full email thread and extract:
-1. A clear, concise task title (max 100 characters)
-2. All action items/todos mentioned in the thread (as a markdown checklist)
-3. Key information and context
+1. A clear, concise task title (max 100 characters) - this should be the main deliverable or action requested
+2. Subtasks - individual actionable items that need to be completed as part of this task
+3. Key information and context as a markdown description
 4. Important dates or deadlines
 
-Format the output as markdown with:
-- A summary section
-- Action items as checkboxes (- [ ] item)
-- Key participants and their roles
-- Important dates/deadlines
+Return valid JSON with:
+{
+  "title": string (main task title, max 100 chars),
+  "description": string (markdown formatted context and details),
+  "subtasks": string[] (array of specific action items/subtasks to complete),
+  "deadline": string | null (ISO date if mentioned)
+}
 
-Return valid JSON with: { title: string, description: string (markdown), todos: string[] }`,
+For subtasks:
+- Extract specific, actionable items from the email
+- Each subtask should be completable independently
+- Keep subtasks concise (max 100 chars each)
+- Maximum 10 subtasks
+- Examples: "Review attached proposal", "Schedule meeting with client", "Update project timeline"`,
         },
         {
           role: 'user',
-          content: `Analyze this email thread and extract the task title, todos, and create a well-formatted markdown description:\n\n${fullThreadContent.substring(0, 8000)}${customInstructions}`,
+          content: `Analyze this email thread and extract the task title, subtasks, and create a well-formatted markdown description:\n\n${fullThreadContent.substring(0, 8000)}${customInstructions}`,
         },
       ],
       response_format: { type: 'json_object' },
@@ -341,10 +348,18 @@ Return valid JSON with: { title: string, description: string (markdown), todos: 
 
     const parsed = JSON.parse(content);
     
+    // Convert subtasks array to subtask objects with IDs
+    const subtasks = (parsed.subtasks || []).slice(0, 10).map((title, index) => ({
+      id: `subtask-${Date.now()}-${index}`,
+      title: String(title).substring(0, 100),
+      completed: false,
+    }));
+    
     return {
       title: parsed.title || null,
       description: parsed.description || fullThreadContent.substring(0, 2000),
-      todos: parsed.todos || [],
+      subtasks,
+      deadline: parsed.deadline || null,
     };
   } catch (error) {
     console.error('AI parseEmailThread error:', error);
@@ -352,7 +367,8 @@ Return valid JSON with: { title: string, description: string (markdown), todos: 
     return {
       title: null,
       description: fullThreadContent.substring(0, 2000),
-      todos: [],
+      subtasks: [],
+      deadline: null,
     };
   }
 };

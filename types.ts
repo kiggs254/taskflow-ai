@@ -19,6 +19,13 @@ export interface RecurrenceRule {
   interval: number; // e.g., every 1 week, every 2 days
 }
 
+export interface Subtask {
+  id: string;
+  title: string;
+  completed: boolean;
+  completedAt?: number;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -29,6 +36,7 @@ export interface Task {
   estimatedTime?: number; // in minutes
   tags: string[];
   dependencies?: string[]; // Array of Task IDs
+  subtasks?: Subtask[]; // Array of subtasks
   createdAt: number;
   completedAt?: number;
   dueDate?: number;

@@ -410,6 +410,9 @@ export const scanEmails = async (userId, maxEmails = 50) => {
             ? `${threadResult.description}\n\n<!-- Email metadata: ${JSON.stringify(emailMetadata)} -->`
             : `From: ${from}\nSubject: ${subject}\n\n${bodyText.substring(0, 1000)}\n\n<!-- Email metadata: ${JSON.stringify(emailMetadata)} -->`;
           
+          // Get subtasks from AI extraction (if available)
+          const subtasks = threadResult.subtasks || [];
+          
           const baseTaskData = {
             title: threadResult.title || aiResult?.title || subject || 'Email Task',
             description: description,
@@ -419,6 +422,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
             estimatedTime: aiResult?.estimatedTime || 15,
             tags: [...(aiResult?.tags || []), 'gmail'],
             aiConfidence: 0.8,
+            subtasks, // Include AI-extracted subtasks
           };
 
           const contentLower = `${subject} ${bodyText}`.toLowerCase();
@@ -443,6 +447,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
               tags: meetingTags,
               status: 'todo',
               dependencies: [],
+              subtasks, // Include subtasks in meeting tasks too
               createdAt: Date.now(),
               dueDate: meetingDueDate || null,
             };

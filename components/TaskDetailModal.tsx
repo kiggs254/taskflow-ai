@@ -1,9 +1,10 @@
 import React, { useMemo, useState, useRef } from 'react';
-import { Task } from '../types';
-import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users, Sparkles, Send } from 'lucide-react';
+import { Task, Subtask, EnergyLevel, WorkspaceType, RecurrenceRule } from '../types';
+import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users, Sparkles, Send, Plus, CheckSquare, Square, Trash2, ListTodo } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AlertModal } from './AlertModal';
+import { v4 as uuidv4 } from 'uuid';
 
 interface TaskDetailModalProps {
   task: Task;
@@ -32,6 +33,17 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
     isOpen: false, title: '', message: '', type: 'info' 
   });
   const messageEditorRef = useRef<HTMLTextAreaElement>(null);
+  
+  // Edit form state
+  const [editTitle, setEditTitle] = useState(task.title);
+  const [editEnergy, setEditEnergy] = useState<EnergyLevel>(task.energy);
+  const [editWorkspace, setEditWorkspace] = useState<WorkspaceType>(task.workspace);
+  const [editDueDate, setEditDueDate] = useState(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
+  const [editRecurrence, setEditRecurrence] = useState<RecurrenceRule | undefined>(task.recurrence);
+  
+  // Subtask state
+  const [subtasks, setSubtasks] = useState<Subtask[]>(task.subtasks || []);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
 
   // Extract email metadata if this is a Gmail task
   const isGmailTask = task.tags?.includes('gmail');
@@ -50,8 +62,77 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   useMemo(() => {
     setIsEditing(false);
     setEditDescription(task.description || '');
+    setEditTitle(task.title);
+    setEditEnergy(task.energy);
+    setEditWorkspace(task.workspace);
+    setEditDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : '');
+    setEditRecurrence(task.recurrence);
+    setSubtasks(task.subtasks || []);
+    setNewSubtaskTitle('');
     return null;
   }, [task.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  
+  // Subtask handlers
+  const addSubtask = () => {
+    if (!newSubtaskTitle.trim()) return;
+    const newSubtask: Subtask = {
+      id: uuidv4(),
+      title: newSubtaskTitle.trim(),
+      completed: false,
+    };
+    const updatedSubtasks = [...subtasks, newSubtask];
+    setSubtasks(updatedSubtasks);
+    setNewSubtaskTitle('');
+    if (onUpdate) {
+      onUpdate({ ...task, subtasks: updatedSubtasks });
+    }
+  };
+
+  const toggleSubtask = (subtaskId: string) => {
+    const updatedSubtasks = subtasks.map(st => 
+      st.id === subtaskId 
+        ? { ...st, completed: !st.completed, completedAt: !st.completed ? Date.now() : undefined }
+        : st
+    );
+    setSubtasks(updatedSubtasks);
+    if (onUpdate) {
+      onUpdate({ ...task, subtasks: updatedSubtasks });
+    }
+  };
+
+  const deleteSubtask = (subtaskId: string) => {
+    const updatedSubtasks = subtasks.filter(st => st.id !== subtaskId);
+    setSubtasks(updatedSubtasks);
+    if (onUpdate) {
+      onUpdate({ ...task, subtasks: updatedSubtasks });
+    }
+  };
+  
+  const handleRecurrenceChange = (key: keyof RecurrenceRule, value: any) => {
+    const newRec: RecurrenceRule = editRecurrence || { frequency: 'weekly', interval: 1 };
+    if (key === 'interval') {
+      newRec.interval = parseInt(value, 10) || 1;
+    } else {
+      (newRec as any)[key] = value;
+    }
+    setEditRecurrence(newRec);
+  };
+  
+  const handleSaveEdit = () => {
+    if (!onUpdate) return;
+    const newDueDate = editDueDate ? new Date(`${editDueDate}T12:00:00Z`).getTime() : undefined;
+    onUpdate({
+      ...task,
+      title: editTitle,
+      description: editDescription,
+      energy: editEnergy,
+      workspace: editWorkspace,
+      dueDate: newDueDate,
+      recurrence: editRecurrence,
+      subtasks,
+    });
+    setIsEditing(false);
+  };
 
   const energyIcons = {
     high: <Zap className="w-5 h-5 text-accent" />,
@@ -91,29 +172,49 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         {/* Header */}
         <div className="sticky top-0 bg-surface border-b border-slate-700 p-6 flex items-start justify-between">
           <div className="flex-1">
-            <div className="flex items-center gap-3 mb-3">
-              {energyIcons[task.energy]}
-              <span className={`text-sm uppercase tracking-wider font-semibold ${energyColors[task.energy]}`}>
-                {task.energy} Energy
-              </span>
-              {task.status === 'waiting' && (
-                <span className="text-xs text-amber-400 flex items-center gap-1 px-2 py-1 bg-amber-400/10 rounded">
-                  Waiting
-                </span>
-              )}
-              {task.status === 'done' && (
-                <span className="text-xs text-emerald-400 flex items-center gap-1 px-2 py-1 bg-emerald-400/10 rounded">
-                  Completed
-                </span>
-              )}
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-2">{task.title}</h2>
+            {isEditing ? (
+              <>
+                <div className="flex items-center gap-3 mb-3">
+                  {energyIcons[editEnergy]}
+                  <span className={`text-sm uppercase tracking-wider font-semibold ${energyColors[editEnergy]}`}>
+                    {editEnergy} Energy
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full text-2xl font-bold text-white bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 focus:border-primary focus:outline-none"
+                  autoFocus
+                />
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-3 mb-3">
+                  {energyIcons[task.energy]}
+                  <span className={`text-sm uppercase tracking-wider font-semibold ${energyColors[task.energy]}`}>
+                    {task.energy} Energy
+                  </span>
+                  {task.status === 'waiting' && (
+                    <span className="text-xs text-amber-400 flex items-center gap-1 px-2 py-1 bg-amber-400/10 rounded">
+                      Waiting
+                    </span>
+                  )}
+                  {task.status === 'done' && (
+                    <span className="text-xs text-emerald-400 flex items-center gap-1 px-2 py-1 bg-emerald-400/10 rounded">
+                      Completed
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">{task.title}</h2>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {onUpdate && (
               <button
                 onClick={() => setIsEditing((v) => !v)}
-                className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                className={`p-2 rounded-lg transition-colors ${isEditing ? 'bg-primary text-white' : 'hover:bg-slate-700 text-slate-400 hover:text-white'}`}
                 title={isEditing ? 'Stop editing' : 'Edit'}
               >
                 <Pencil className="w-5 h-5" />
@@ -130,29 +231,116 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
         {/* Content */}
         <div className="p-6 space-y-6">
-          {/* Workspace */}
-          <div>
-            <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Workspace</h3>
-            <p className="text-white capitalize">{task.workspace}</p>
-          </div>
+          {/* Edit Form Section - shown when editing */}
+          {isEditing && (
+            <div className="border border-primary/50 rounded-lg p-4 bg-primary/5 space-y-4">
+              <div className="flex flex-wrap gap-3">
+                <div className="flex-1 min-w-[120px]">
+                  <label className="block text-xs text-slate-400 mb-1">Energy</label>
+                  <select
+                    value={editEnergy}
+                    onChange={(e) => setEditEnergy(e.target.value as EnergyLevel)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-primary"
+                  >
+                    <option value="high">High Energy</option>
+                    <option value="medium">Medium Energy</option>
+                    <option value="low">Low Energy</option>
+                  </select>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <label className="block text-xs text-slate-400 mb-1">Workspace</label>
+                  <select
+                    value={editWorkspace}
+                    onChange={(e) => setEditWorkspace(e.target.value as WorkspaceType)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-primary"
+                  >
+                    <option value="job">Job</option>
+                    <option value="freelance">Freelance</option>
+                    <option value="personal">Personal</option>
+                  </select>
+                </div>
+                <div className="flex-1 min-w-[140px]">
+                  <label className="block text-xs text-slate-400 mb-1">Due Date</label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={editDueDate}
+                      onChange={(e) => setEditDueDate(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-primary"
+                      style={{ colorScheme: 'dark' }}
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Recurrence */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!editRecurrence}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setEditRecurrence({ frequency: 'weekly', interval: 1 });
+                      } else {
+                        setEditRecurrence(undefined);
+                      }
+                    }}
+                    className="form-checkbox h-4 w-4 rounded bg-slate-700 border-slate-600 text-primary focus:ring-primary"
+                  />
+                  <span className="text-sm text-slate-300">Repeat task</span>
+                </label>
+                {editRecurrence && (
+                  <div className="mt-2 pl-6 flex items-center gap-2 text-sm">
+                    <span className="text-slate-400">Every</span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={editRecurrence.interval}
+                      onChange={(e) => handleRecurrenceChange('interval', e.target.value)}
+                      className="w-16 bg-slate-800 border border-slate-700 rounded p-1 text-center text-white"
+                    />
+                    <select
+                      value={editRecurrence.frequency}
+                      onChange={(e) => handleRecurrenceChange('frequency', e.target.value)}
+                      className="bg-slate-800 border border-slate-700 rounded p-1 text-slate-300 focus:outline-none"
+                    >
+                      <option value="daily">day(s)</option>
+                      <option value="weekly">week(s)</option>
+                      <option value="monthly">month(s)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-700">
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  className="px-4 py-2 rounded-lg text-sm bg-primary text-white hover:bg-blue-600 flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> Save Changes
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Workspace - only show when not editing */}
+          {!isEditing && (
+            <div>
+              <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Workspace</h3>
+              <p className="text-white capitalize">{task.workspace}</p>
+            </div>
+          )}
 
           {/* Description */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs uppercase tracking-wider text-slate-500">Description</h3>
-              {isEditing && onUpdate && (
-                <button
-                  onClick={() => {
-                    onUpdate({ ...task, description: editDescription });
-                    setIsEditing(false);
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors flex items-center gap-2 text-xs"
-                >
-                  <Save className="w-3 h-3" /> Save
-                </button>
-              )}
-            </div>
-
+            <h3 className="text-xs uppercase tracking-wider text-slate-500 mb-2">Description</h3>
             {isEditing ? (
               <textarea
                 value={editDescription}
@@ -188,6 +376,82 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 )}
               </div>
             )}
+          </div>
+          
+          {/* Subtasks Section */}
+          <div className="border border-slate-700 rounded-lg p-4 bg-slate-800/30">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <ListTodo className="w-4 h-4 text-primary" />
+                Subtasks
+                {subtasks.length > 0 && (
+                  <span className="text-xs text-slate-400">
+                    ({subtasks.filter(s => s.completed).length}/{subtasks.length} done)
+                  </span>
+                )}
+              </h3>
+            </div>
+            
+            {/* Subtasks List */}
+            {subtasks.length > 0 ? (
+              <div className="space-y-2 mb-4">
+                {subtasks.map((subtask) => (
+                  <div
+                    key={subtask.id}
+                    className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${
+                      subtask.completed ? 'bg-slate-800/50' : 'bg-slate-800 hover:bg-slate-700'
+                    }`}
+                  >
+                    <button
+                      onClick={() => toggleSubtask(subtask.id)}
+                      className="flex-shrink-0"
+                    >
+                      {subtask.completed ? (
+                        <CheckSquare className="w-5 h-5 text-emerald-500" />
+                      ) : (
+                        <Square className="w-5 h-5 text-slate-400 hover:text-primary" />
+                      )}
+                    </button>
+                    <span className={`flex-1 text-sm ${
+                      subtask.completed ? 'text-slate-500 line-through' : 'text-white'
+                    }`}>
+                      {subtask.title}
+                    </span>
+                    <button
+                      onClick={() => deleteSubtask(subtask.id)}
+                      className="text-slate-500 hover:text-red-400 p-1"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-slate-500 text-sm mb-4">No subtasks yet. Add one below.</p>
+            )}
+            
+            {/* Add Subtask */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newSubtaskTitle}
+                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newSubtaskTitle.trim()) {
+                    addSubtask();
+                  }
+                }}
+                placeholder="Add a subtask..."
+                className="flex-1 px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-primary focus:outline-none text-sm"
+              />
+              <button
+                onClick={addSubtask}
+                disabled={!newSubtaskTitle.trim()}
+                className="px-3 py-2 rounded-lg bg-primary text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 text-sm"
+              >
+                <Plus className="w-4 h-4" /> Add
+              </button>
+            </div>
           </div>
 
           {/* Email Participants (for Gmail tasks) */}

@@ -6,7 +6,7 @@ import { query } from '../config/database.js';
 export const getUserTasks = async (userId) => {
   const result = await query(
     `SELECT id, user_id, title, description, workspace, energy, status, estimated_time as "estimatedTime",
-            tags, dependencies, recurrence, created_at as "createdAt",
+            tags, dependencies, subtasks, recurrence, created_at as "createdAt",
             completed_at as "completedAt", due_date as "dueDate",
             snoozed_until as "snoozedUntil", original_recurrence_id as "originalRecurrenceId"
      FROM tasks
@@ -19,6 +19,7 @@ export const getUserTasks = async (userId) => {
     ...task,
     tags: task.tags || [],
     dependencies: task.dependencies || [],
+    subtasks: task.subtasks || [],
   }));
 };
 
@@ -36,6 +37,7 @@ export const syncTask = async (userId, taskData) => {
     estimatedTime,
     tags = [],
     dependencies = [],
+    subtasks = [],
     createdAt,
     completedAt,
     dueDate,
@@ -52,9 +54,9 @@ export const syncTask = async (userId, taskData) => {
   const result = await query(
     `INSERT INTO tasks (
       id, user_id, title, description, workspace, energy, status, estimated_time,
-      tags, dependencies, recurrence, created_at, completed_at,
+      tags, dependencies, subtasks, recurrence, created_at, completed_at,
       due_date, snoozed_until, original_recurrence_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
     ON CONFLICT (id) DO UPDATE SET
       title = EXCLUDED.title,
       description = EXCLUDED.description,
@@ -64,6 +66,7 @@ export const syncTask = async (userId, taskData) => {
       estimated_time = EXCLUDED.estimated_time,
       tags = EXCLUDED.tags,
       dependencies = EXCLUDED.dependencies,
+      subtasks = EXCLUDED.subtasks,
       completed_at = EXCLUDED.completed_at,
       due_date = EXCLUDED.due_date,
       snoozed_until = EXCLUDED.snoozed_until,
@@ -80,6 +83,7 @@ export const syncTask = async (userId, taskData) => {
       estimatedTime || null,
       JSON.stringify(tags),
       JSON.stringify(dependencies),
+      JSON.stringify(subtasks),
       recurrence ? JSON.stringify(recurrence) : null,
       createdAt,
       completedAt || null,
