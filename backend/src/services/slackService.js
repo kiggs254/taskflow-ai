@@ -221,13 +221,29 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
           // Permalink might fail, continue anyway
         }
         
-        // Check if a task already exists for this Slack message (duplicate detection)
+        // Check if this Slack message was already processed (even if task was later deleted)
+        const processedCheck = await query(
+          `SELECT id FROM processed_slack_messages WHERE user_id = $1 AND message_ts = $2 AND channel_id = $3`,
+          [userId, message.ts, channel.id]
+        );
+        
+        if (processedCheck.rows.length > 0) {
+          console.log(`⏭️ Slack message ${message.ts} already processed (task may have been deleted), skipping`);
+          return false;
+        }
+        
+        // Also check if task still exists (fallback for messages processed before this tracking)
         const existingTaskCheck = await query(
           `SELECT id FROM tasks WHERE user_id = $1 AND description LIKE $2`,
           [userId, `%"messageTs":"${message.ts}"%`]
         );
         
         if (existingTaskCheck.rows.length > 0) {
+          // Task exists but wasn't tracked - add to tracking table
+          await query(
+            `INSERT INTO processed_slack_messages (user_id, message_ts, channel_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+            [userId, message.ts, channel.id]
+          );
           console.log(`⏭️ Task already exists for Slack message ${message.ts}, skipping duplicate`);
           return false;
         }
@@ -261,6 +277,13 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
           };
 
               await syncTask(userId, newTask);
+              
+              // Track this message as processed (so it won't be recreated if task is deleted)
+              await query(
+                `INSERT INTO processed_slack_messages (user_id, message_ts, channel_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+                [userId, message.ts, channel.id]
+              );
+              
               createdTasks.push(newTask);
               processedCount++;
               
