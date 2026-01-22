@@ -1,15 +1,19 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { Task, Subtask, EnergyLevel, WorkspaceType, RecurrenceRule } from '../types';
-import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users, Sparkles, Send, Plus, CheckSquare, Square, Trash2, ListTodo } from 'lucide-react';
+import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users, Sparkles, Send, Plus, CheckSquare, Square, Trash2, ListTodo, Hourglass, AlarmClockOff, Sun, MoreHorizontal } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AlertModal } from './AlertModal';
+import { ConfirmationModal } from './ConfirmationModal';
 
 interface TaskDetailModalProps {
   task: Task;
   onClose: () => void;
   onComplete?: (id: string, sendEmailReply?: boolean) => void;
   onUpdate?: (task: Task) => void;
+  onDelete?: (id: string) => void;
+  onSnooze?: (id: string, duration: 'hour' | 'day' | 'week') => void;
+  onSetWaiting?: (id: string) => void;
 }
 
 export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
@@ -17,9 +21,14 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   onClose,
   onComplete,
   onUpdate,
+  onDelete,
+  onSnooze,
+  onSetWaiting,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editDescription, setEditDescription] = useState(task.description || '');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showQuickActions, setShowQuickActions] = useState(false);
   const [showReply, setShowReply] = useState(false);
   const [replyMessage, setReplyMessage] = useState('');
   const [polishedMessage, setPolishedMessage] = useState('');
@@ -849,6 +858,98 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                 </span>
               </label>
             )}
+            
+            {/* Quick Actions */}
+            {(onSnooze || onSetWaiting || onDelete) && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowQuickActions(!showQuickActions)}
+                  className="w-full flex items-center justify-between px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors border border-slate-700"
+                >
+                  <span className="flex items-center gap-2 text-sm">
+                    <MoreHorizontal className="w-4 h-4" />
+                    Quick Actions
+                  </span>
+                  <span className="text-xs text-slate-500">Snooze, Waiting, Delete</span>
+                </button>
+                
+                {showQuickActions && (
+                  <div className="absolute bottom-full left-0 right-0 mb-2 bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden z-50">
+                    {/* Clear Waiting */}
+                    {onSetWaiting && task.status !== 'waiting' && (
+                      <button
+                        onClick={() => {
+                          onSetWaiting(task.id);
+                          setShowQuickActions(false);
+                          onClose();
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-700 transition-colors"
+                      >
+                        <Hourglass className="w-4 h-4 text-amber-400" />
+                        <span className="text-sm text-slate-200">Set as Waiting</span>
+                      </button>
+                    )}
+                    
+                    {/* Snooze Options */}
+                    {onSnooze && (
+                      <>
+                        <div className="px-4 py-2 text-xs text-slate-500 uppercase tracking-wider border-t border-slate-700">
+                          Snooze...
+                        </div>
+                        <button
+                          onClick={() => {
+                            onSnooze(task.id, 'hour');
+                            setShowQuickActions(false);
+                            onClose();
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-700 transition-colors"
+                        >
+                          <AlarmClockOff className="w-4 h-4 text-blue-400" />
+                          <span className="text-sm text-slate-200">For 1 Hour</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            onSnooze(task.id, 'day');
+                            setShowQuickActions(false);
+                            onClose();
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-700 transition-colors"
+                        >
+                          <Sun className="w-4 h-4 text-yellow-400" />
+                          <span className="text-sm text-slate-200">Until Tomorrow</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            onSnooze(task.id, 'week');
+                            setShowQuickActions(false);
+                            onClose();
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-700 transition-colors"
+                        >
+                          <Calendar className="w-4 h-4 text-purple-400" />
+                          <span className="text-sm text-slate-200">Until Next Week</span>
+                        </button>
+                      </>
+                    )}
+                    
+                    {/* Delete */}
+                    {onDelete && (
+                      <button
+                        onClick={() => {
+                          setShowQuickActions(false);
+                          setShowDeleteConfirm(true);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-700 transition-colors border-t border-slate-700"
+                      >
+                        <X className="w-4 h-4 text-red-400" />
+                        <span className="text-sm text-red-400">Delete Task</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            
             <div className="flex gap-3">
               <button
                 onClick={() => {
@@ -886,6 +987,23 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
         message={alertModal.message}
         type={alertModal.type}
         onClose={() => setAlertModal({ isOpen: false, title: '', message: '', type: 'info' })}
+      />
+      
+      {/* Delete Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={showDeleteConfirm}
+        title="Delete Task"
+        message={`Are you sure you want to delete "${task.title}"? This action cannot be undone.`}
+        confirmText="Delete"
+        onConfirm={() => {
+          if (onDelete) {
+            onDelete(task.id);
+            setShowDeleteConfirm(false);
+            onClose();
+          }
+        }}
+        onCancel={() => setShowDeleteConfirm(false)}
+        variant="danger"
       />
     </div>
   );

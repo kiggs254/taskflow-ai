@@ -2795,6 +2795,9 @@ export default function App() {
           onClose={() => setSelectedTask(null)}
           onComplete={completeTask}
           onUpdate={updateTask}
+          onDelete={deleteTask}
+          onSnooze={snoozeTask}
+          onSetWaiting={setWaitingStatus}
         />
       )}
 
