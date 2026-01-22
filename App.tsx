@@ -1702,14 +1702,22 @@ const MeetingsScreen = ({
 }) => {
   const now = Date.now();
   
-  // Filter meetings: must have 'meeting' tag and meeting time hasn't passed
+  // Filter meetings: must have 'meeting' tag OR have a meetingLink
   const upcomingMeetings = tasks.filter(task => {
-    const isMeeting = task.tags && Array.isArray(task.tags) && task.tags.includes('meeting');
-    if (!isMeeting) return false;
-    // Only show meetings that haven't passed
-    if (task.dueDate && task.dueDate < now) return false;
+    const hasMeetingTag = task.tags && Array.isArray(task.tags) && task.tags.includes('meeting');
+    const hasMeetingLink = !!task.meetingLink;
+    
+    // Must be a meeting (has tag or meeting link)
+    if (!hasMeetingTag && !hasMeetingLink) return false;
+    
     // Only show non-completed meetings
-    return task.status !== 'done';
+    if (task.status === 'done') return false;
+    
+    // Show all meetings - past meetings might still need attention
+    // Only filter out meetings that are more than 24 hours old
+    if (task.dueDate && task.dueDate < (now - 24 * 60 * 60 * 1000)) return false;
+    
+    return true;
   });
 
   // Sort by meeting time (dueDate)
