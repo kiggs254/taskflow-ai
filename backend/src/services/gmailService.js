@@ -386,15 +386,18 @@ export const scanEmails = async (userId, maxEmails = 50) => {
         };
 
         // === RELEVANCE CHECK: Use AI to check if email matches user's dos/don'ts ===
-        if (promptInstructions && promptInstructions.trim()) {
+        // Only apply filter if user has provided meaningful instructions
+        if (promptInstructions && promptInstructions.trim().length > 10) {
           const emailSummary = `Subject: ${subject}\nFrom: ${from}\n\n${bodyText.substring(0, 1500)}`;
           const relevanceCheck = await checkEmailRelevance(emailSummary, promptInstructions, 'openai');
           
           if (!relevanceCheck.isRelevant) {
-            console.log(`Skipping email ${message.id}: Not relevant - ${relevanceCheck.reason}`);
+            console.log(`Skipping email ${message.id} (${subject}): Not relevant - ${relevanceCheck.reason}`);
             continue;
           }
-          console.log(`Email ${message.id} is relevant: ${relevanceCheck.reason}`);
+          console.log(`Email ${message.id} (${subject}) approved: ${relevanceCheck.reason}`);
+        } else {
+          console.log(`Processing email ${message.id} (${subject}): No filter instructions`);
         }
 
         // Use AI to extract task (fallback if thread processing didn't provide title)

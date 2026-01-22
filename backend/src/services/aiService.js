@@ -233,6 +233,9 @@ Keep it under 200 characters. Be casual and professional. Start with something l
 /**
  * Check if an email is relevant based on user's prompt instructions (dos and don'ts)
  * Returns { isRelevant: boolean, reason: string }
+ * 
+ * NOTE: This is a LENIENT filter - it only excludes emails that are EXPLICITLY 
+ * mentioned in the user's "don't" instructions. When in doubt, process the email.
  */
 export const checkEmailRelevance = async (emailSummary, promptInstructions, provider = 'openai') => {
   if (!promptInstructions || !promptInstructions.trim()) {
@@ -249,32 +252,33 @@ export const checkEmailRelevance = async (emailSummary, promptInstructions, prov
       messages: [
         {
           role: 'system',
-          content: `You are an email filter assistant. Your job is to determine if an email should be converted into a task based on the user's instructions.
+          content: `You are a lenient email filter assistant. Your DEFAULT behavior is to APPROVE emails for task creation.
 
-The user has provided these filtering rules (dos and don'ts):
+The user has provided these filtering preferences:
 ${promptInstructions}
 
-Based on these rules, determine if the email should be processed as a task.
-Return valid JSON with: { "isRelevant": boolean, "reason": string }
+IMPORTANT RULES:
+1. DEFAULT TO APPROVING - When in doubt, return isRelevant: true
+2. Only return isRelevant: false if the email CLEARLY and EXPLICITLY matches something the user said to IGNORE or SKIP
+3. Newsletters, promotional emails, and automated notifications should generally be skipped
+4. Emails from real people asking for something or providing information should generally be APPROVED
+5. If the user's instructions are vague, lean towards APPROVING the email
 
-- isRelevant: true if the email SHOULD become a task, false if it should be SKIPPED
-- reason: Brief explanation of why (1 sentence)
-
-Be strict about following the user's instructions. If they say to ignore certain types of emails, ignore them.`,
+Return valid JSON with: { "isRelevant": boolean, "reason": string }`,
         },
         {
           role: 'user',
-          content: `Should this email be converted to a task?\n\n${emailSummary.substring(0, 2000)}`,
+          content: `Should this email be converted to a task? Remember: default to YES unless it clearly matches an exclusion rule.\n\n${emailSummary.substring(0, 2000)}`,
         },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.1,
+      temperature: 0.2,
       max_tokens: 200,
     });
 
     const content = response.choices[0]?.message?.content;
     if (!content) {
-      return { isRelevant: true, reason: 'Could not determine relevance' };
+      return { isRelevant: true, reason: 'Could not determine relevance, defaulting to process' };
     }
 
     const parsed = JSON.parse(content);
