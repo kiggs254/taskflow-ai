@@ -1822,12 +1822,24 @@ const MeetingsScreen = ({
                           </div>
                         </div>
                         <div className="flex items-center gap-2 ml-4">
+                          {meeting.meetingLink && (
+                            <a
+                              href={meeting.meetingLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="px-3 py-2 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-500 text-white hover:from-emerald-500 hover:to-teal-400 transition-all shadow-lg shadow-emerald-500/20 text-sm font-semibold flex items-center gap-2"
+                              title="Join Meeting"
+                            >
+                              <Video className="w-4 h-4" /> Join
+                            </a>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               onComplete(meeting.id);
                             }}
-                            className="p-2 rounded-lg bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 transition-colors"
+                            className="p-2 rounded-lg bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-white transition-colors"
                             title="Mark as Done"
                           >
                             <CheckCircle2 className="w-4 h-4" />

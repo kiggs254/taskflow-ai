@@ -5,11 +5,11 @@ import { sendNotification } from '../services/telegramService.js';
 
 /**
  * Scheduled job to scan emails for all users with Gmail connected
- * Runs every hour by default
+ * Runs every minute to check if it's time for each user based on their scan_frequency
  */
 export const startEmailScanner = () => {
-  // Run every hour at minute 0
-  cron.schedule('0 * * * *', async () => {
+  // Run every minute to check scan frequency for each user
+  cron.schedule('* * * * *', async () => {
     console.log('Running scheduled email scan...');
     
     try {
@@ -74,5 +74,5 @@ export const startEmailScanner = () => {
     }
   });
 
-  console.log('Email scanner job scheduled (runs every hour)');
+  console.log('Email scanner job scheduled (runs every minute, checks scan frequency per user)');
 };
