@@ -161,6 +161,7 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
     
     // Get user's Slack user ID to search for mentions
     const userMention = `<@${slackUserId}>`;
+    console.log(`🔎 Scanning for mentions of user: ${userMention} (Slack ID: ${slackUserId})`);
     
     let oldestTimestamp = null;
     if (lastScanAt) {
@@ -181,16 +182,25 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
       processedMessageIds.add(messageKey);
 
       try {
-        // Skip if we've already processed this message
-        const messageTimestamp = parseFloat(message.ts) * 1000;
-        if (lastScanAt && messageTimestamp <= new Date(lastScanAt).getTime()) {
-          return false;
-        }
-
         const messageText = message.text || '';
         
+        // Check if message mentions the user FIRST (before timestamp check)
+        // This helps us debug if mentions are being detected
+        const hasMention = messageText.includes(userMention);
+        
+        if (hasMention) {
+          console.log(`🔍 Found mention of ${userMention} in #${channel.name}${isThreadReply ? ' (thread)' : ''}: "${messageText.substring(0, 100)}..."`);
+        }
+        
         // Skip if doesn't mention the user
-        if (!messageText.includes(userMention)) {
+        if (!hasMention) {
+          return false;
+        }
+        
+        // Skip if we've already processed this message (by timestamp)
+        const messageTimestamp = parseFloat(message.ts) * 1000;
+        if (lastScanAt && messageTimestamp <= new Date(lastScanAt).getTime()) {
+          console.log(`⏭️ Skipping already processed message (${new Date(messageTimestamp).toISOString()} <= ${new Date(lastScanAt).toISOString()})`);
           return false;
         }
 
@@ -324,6 +334,14 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
                 const threadReplies = repliesResponse.messages.slice(1);
                 
                 console.log(`Found ${threadReplies.length} thread replies in #${channel.name} for message "${message.text?.substring(0, 50)}..."`);
+                
+                // Log first few replies to help debug mention detection
+                if (threadReplies.length > 0 && threadReplies.some(r => r.text?.includes('@'))) {
+                  console.log(`📝 Thread reply texts (first 3 with @):`);
+                  threadReplies.filter(r => r.text?.includes('@')).slice(0, 3).forEach((r, i) => {
+                    console.log(`   ${i + 1}. "${r.text?.substring(0, 150)}..."`);
+                  });
+                }
                 
                 for (const reply of threadReplies) {
                   if (processedCount >= maxMentions) break;
