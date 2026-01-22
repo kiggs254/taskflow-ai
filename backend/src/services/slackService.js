@@ -221,6 +221,17 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
           // Permalink might fail, continue anyway
         }
         
+        // Check if a task already exists for this Slack message (duplicate detection)
+        const existingTaskCheck = await query(
+          `SELECT id FROM tasks WHERE user_id = $1 AND description LIKE $2`,
+          [userId, `%"messageTs":"${message.ts}"%`]
+        );
+        
+        if (existingTaskCheck.rows.length > 0) {
+          console.log(`⏭️ Task already exists for Slack message ${message.ts}, skipping duplicate`);
+          return false;
+        }
+        
         // Use AI to determine if this is a task
         const aiResult = await parseTask(messageText, 'openai');
         
