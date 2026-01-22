@@ -146,7 +146,7 @@ const getSlackClient = async (userId) => {
  * Scan Slack for mentions and extract tasks
  * Now also scans inside thread replies
  */
-export const scanSlackMentions = async (userId, maxMentions = 50) => {
+export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = false) => {
   try {
     const client = await getSlackClient(userId);
     
@@ -293,18 +293,28 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
 
     const channels = channelsResponse.channels || [];
 
+    // Calculate timestamp for "today only" filtering (start of today UTC)
+    const todayStart = todayOnly ? Math.floor(new Date().setUTCHours(0, 0, 0, 0) / 1000) : null;
+    
+    if (todayOnly) {
+      console.log(`📅 Manual scan: limiting to messages from today only (since ${new Date(todayStart * 1000).toISOString()})`);
+    }
+
     // Check each channel for mentions
     for (const channel of channels) {
       if (processedCount >= maxMentions) break;
 
       try {
         // Get recent messages from this channel
-        // DON'T filter by oldest here - we need to see parent messages 
-        // that might have NEW thread replies even if parent is old
         const historyParams = {
           channel: channel.id,
-          limit: 100,
+          limit: todayOnly ? 50 : 100, // Fetch fewer messages for manual scans
         };
+        
+        // For manual scans, only look at today's messages to avoid rate limiting
+        if (todayOnly && todayStart) {
+          historyParams.oldest = todayStart.toString();
+        }
 
         const historyResponse = await client.conversations.history(historyParams);
 
@@ -337,13 +347,17 @@ export const scanSlackMentions = async (userId, maxMentions = 50) => {
           // reply_count > 0 indicates there are replies in the thread
           if (message.reply_count && message.reply_count > 0) {
             try {
-              // Fetch ALL thread replies (don't filter by oldest here)
-              // We'll check timestamps when processing each reply
+              // Fetch thread replies
               const repliesParams = {
                 channel: channel.id,
                 ts: message.ts, // thread_ts is the ts of the parent message
-                limit: 100,
+                limit: todayOnly ? 30 : 100, // Fetch fewer replies for manual scans
               };
+              
+              // For manual scans, only look at today's replies to avoid rate limiting
+              if (todayOnly && todayStart) {
+                repliesParams.oldest = todayStart.toString();
+              }
 
               const repliesResponse = await client.conversations.replies(repliesParams);
 

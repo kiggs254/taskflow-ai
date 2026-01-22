@@ -90,8 +90,8 @@ router.get('/status', authenticate, asyncHandler(async (req, res) => {
  * Manually trigger mention scan
  */
 router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
-  const { maxMentions = 50 } = req.body;
-  const result = await scanSlackMentions(req.user.id, maxMentions);
+  const { maxMentions = 50, todayOnly = true } = req.body; // Default to today only for manual scans
+  const result = await scanSlackMentions(req.user.id, maxMentions, todayOnly);
   
   // Send Telegram notification if tasks were created
   if (result && result.tasksCreated > 0) {
