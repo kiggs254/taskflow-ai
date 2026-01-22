@@ -654,8 +654,8 @@ const TaskCard: React.FC<{
     low: <Coffee className="w-4 h-4 text-success" />,
   };
 
-  // Check if task is new (created within last 5 minutes)
-  const isNewTask = task.createdAt && (Date.now() - task.createdAt) < 5 * 60 * 1000;
+  // Check if task is new (created within last 30 minutes)
+  const isNewTask = task.createdAt && (Date.now() - task.createdAt) < 30 * 60 * 1000;
   
   // Format created at timestamp
   const formatCreatedAt = (timestamp: number | undefined) => {

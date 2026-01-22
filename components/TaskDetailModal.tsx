@@ -849,7 +849,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   minute: '2-digit',
                   hour12: true
                 })}
-                {(Date.now() - task.createdAt) < 5 * 60 * 1000 && (
+                {(Date.now() - task.createdAt) < 30 * 60 * 1000 && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500 text-white animate-pulse">
                     NEW
                   </span>
