@@ -169,9 +169,14 @@ router.post('/', asyncHandler(async (req, res, next) => {
 // Task routes (require authentication)
 // Only handle if action parameter exists, otherwise skip
 router.get('/', authenticate, asyncHandler(async (req, res, next) => {
-  if (req.query.action === 'get_tasks') {
+  const action = req.query.action;
+  
+  if (action === 'get_tasks') {
     const tasks = await getUserTasks(req.user.id);
     return res.json(tasks);
+  } else if (action === 'get_user_preferences') {
+    const preferences = await getUserPreferences(req.user.id);
+    return res.json(preferences);
   }
   // If action doesn't match, continue to next middleware
   // This allows other routes to handle the request
