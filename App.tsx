@@ -5,7 +5,7 @@ import {
   Sun, Moon, RotateCcw, MessageSquare, Copy, Check, Mail, Lock, Unlock,
   LogOut, Loader2, Link as LinkIcon, BarChart2, Settings as SettingsIcon,
   PieChart, Bell, Volume2, Shield, Palette, ArrowLeft, Pencil, Save, Filter,
-  Search, Command, MoreVertical, Hourglass, AlarmClockOff,
+  Search, Command, MoreVertical, Hourglass, AlarmClockOff, Video,
   Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw
 } from 'lucide-react';
 import { 
@@ -839,6 +839,19 @@ const TaskCard: React.FC<{
                 <Lock className="w-3 h-3" /> Blocked by: {blocker.title.substring(0, 15)}{blocker.title.length > 15 ? '...' : ''}
               </button>
             ))}
+
+            {task.meetingLink && (
+              <a
+                href={task.meetingLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 text-xs border border-emerald-500/30 hover:bg-emerald-500/30 flex items-center gap-1 transition-colors font-medium"
+                title="Join Meeting"
+              >
+                <Video className="w-3 h-3" /> Join
+              </a>
+            )}
 
             {task.workspace === 'freelance' && (
                <button 

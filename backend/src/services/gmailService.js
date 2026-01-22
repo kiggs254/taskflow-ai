@@ -416,6 +416,25 @@ export const scanEmails = async (userId, maxEmails = 50) => {
           // Get subtasks from AI extraction (if available)
           const subtasks = threadResult.subtasks || [];
           
+          // Get meeting link from AI extraction or extract manually
+          let meetingLink = threadResult.meetingLink || null;
+          if (!meetingLink) {
+            // Fallback: try to extract meeting link from body
+            const meetingPatterns = [
+              /https:\/\/[\w.-]*zoom\.us\/[^\s<>"')]+/i,
+              /https:\/\/meet\.google\.com\/[^\s<>"')]+/i,
+              /https:\/\/teams\.microsoft\.com\/[^\s<>"')]+/i,
+              /https:\/\/[\w.-]*webex\.com\/[^\s<>"')]+/i,
+            ];
+            for (const pattern of meetingPatterns) {
+              const match = bodyText.match(pattern);
+              if (match) {
+                meetingLink = match[0];
+                break;
+              }
+            }
+          }
+          
           const baseTaskData = {
             title: threadResult.title || aiResult?.title || subject || 'Email Task',
             description: description,
@@ -426,6 +445,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
             tags: [...(aiResult?.tags || []), 'gmail'],
             aiConfidence: 0.8,
             subtasks, // Include AI-extracted subtasks
+            meetingLink, // Include meeting link if found
           };
 
           const contentLower = `${subject} ${bodyText}`.toLowerCase();
@@ -451,6 +471,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
               status: 'todo',
               dependencies: [],
               subtasks, // Include subtasks in meeting tasks too
+              meetingLink, // Include meeting link for easy join button
               createdAt: Date.now(),
               dueDate: meetingDueDate || null,
             };

@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { Task, Subtask, EnergyLevel, WorkspaceType, RecurrenceRule } from '../types';
-import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users, Sparkles, Send, Plus, CheckSquare, Square, Trash2, ListTodo, Hourglass, AlarmClockOff, Sun, MoreHorizontal } from 'lucide-react';
+import { X, Calendar, Clock, Tag, Link as LinkIcon, Zap, Brain, Coffee, Repeat, Pencil, Save, Mail, Users, Sparkles, Send, Plus, CheckSquare, Square, Trash2, ListTodo, Hourglass, AlarmClockOff, Sun, MoreHorizontal, Video } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AlertModal } from './AlertModal';
@@ -52,6 +52,19 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   // Subtask state
   const [subtasks, setSubtasks] = useState<Subtask[]>(task.subtasks || []);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+
+  // Helper to get meeting platform name from URL
+  const getMeetingPlatform = (url: string): string => {
+    if (url.includes('zoom.us')) return 'Zoom';
+    if (url.includes('meet.google.com')) return 'Google Meet';
+    if (url.includes('teams.microsoft.com')) return 'Microsoft Teams';
+    if (url.includes('webex.com')) return 'Webex';
+    if (url.includes('gotomeeting.com')) return 'GoToMeeting';
+    if (url.includes('whereby.com')) return 'Whereby';
+    if (url.includes('cal.com')) return 'Cal.com';
+    if (url.includes('calendly.com')) return 'Calendly';
+    return 'Meeting';
+  };
 
   // Extract email metadata if this is a Gmail task
   const isGmailTask = task.tags?.includes('gmail');
@@ -215,6 +228,19 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                   )}
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-2">{task.title}</h2>
+                
+                {/* Meeting Join Button - shown prominently if meeting link exists */}
+                {task.meetingLink && (
+                  <a
+                    href={task.meetingLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-500 text-white hover:from-emerald-500 hover:to-teal-400 transition-all shadow-lg shadow-emerald-500/30 text-sm font-semibold mt-2 animate-pulse hover:animate-none"
+                  >
+                    <Video className="w-5 h-5" />
+                    Join {getMeetingPlatform(task.meetingLink)}
+                  </a>
+                )}
               </>
             )}
           </div>

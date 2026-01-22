@@ -319,13 +319,15 @@ export const parseEmailThread = async (fullThreadContent, provider = 'openai', p
 2. Subtasks - individual actionable items that need to be completed as part of this task
 3. Key information and context as a markdown description
 4. Important dates or deadlines
+5. Meeting links - look for Zoom, Google Meet, Microsoft Teams, Webex, or other video conferencing links
 
 Return valid JSON with:
 {
   "title": string (main task title, max 100 chars),
   "description": string (markdown formatted context and details),
   "subtasks": string[] (array of specific action items/subtasks to complete),
-  "deadline": string | null (ISO date if mentioned)
+  "deadline": string | null (ISO date if mentioned),
+  "meetingLink": string | null (video conference URL if found - Zoom, Meet, Teams, etc.)
 }
 
 For subtasks:
@@ -359,20 +361,62 @@ For subtasks:
       completed: false,
     }));
     
+    // Also try to extract meeting link with regex as backup
+    let meetingLink = parsed.meetingLink || null;
+    if (!meetingLink) {
+      // Regex patterns for common meeting links
+      const meetingPatterns = [
+        /https:\/\/[\w.-]*zoom\.us\/[^\s<>"')]+/i,
+        /https:\/\/meet\.google\.com\/[^\s<>"')]+/i,
+        /https:\/\/teams\.microsoft\.com\/[^\s<>"')]+/i,
+        /https:\/\/[\w.-]*webex\.com\/[^\s<>"')]+/i,
+        /https:\/\/[\w.-]*gotomeeting\.com\/[^\s<>"')]+/i,
+        /https:\/\/[\w.-]*whereby\.com\/[^\s<>"')]+/i,
+        /https:\/\/cal\.com\/[^\s<>"')]+/i,
+        /https:\/\/calendly\.com\/[^\s<>"')]+/i,
+      ];
+      
+      for (const pattern of meetingPatterns) {
+        const match = fullThreadContent.match(pattern);
+        if (match) {
+          meetingLink = match[0];
+          break;
+        }
+      }
+    }
+    
     return {
       title: parsed.title || null,
       description: parsed.description || fullThreadContent.substring(0, 2000),
       subtasks,
       deadline: parsed.deadline || null,
+      meetingLink,
     };
   } catch (error) {
     console.error('AI parseEmailThread error:', error);
-    // Fallback
+    // Fallback - still try to extract meeting link
+    let meetingLink = null;
+    const meetingPatterns = [
+      /https:\/\/[\w.-]*zoom\.us\/[^\s<>"')]+/i,
+      /https:\/\/meet\.google\.com\/[^\s<>"')]+/i,
+      /https:\/\/teams\.microsoft\.com\/[^\s<>"')]+/i,
+      /https:\/\/[\w.-]*webex\.com\/[^\s<>"')]+/i,
+    ];
+    
+    for (const pattern of meetingPatterns) {
+      const match = fullThreadContent.match(pattern);
+      if (match) {
+        meetingLink = match[0];
+        break;
+      }
+    }
+    
     return {
       title: null,
       description: fullThreadContent.substring(0, 2000),
       subtasks: [],
       deadline: null,
+      meetingLink,
     };
   }
 };

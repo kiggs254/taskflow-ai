@@ -1,4 +1,4 @@
--- Migration to add subtasks column to tasks table
+finsi-- Migration to add subtasks column to tasks table
 -- Run this migration to enable subtask functionality
 
 -- Add subtasks column (JSONB array to store subtask objects)

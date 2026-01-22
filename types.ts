@@ -37,6 +37,7 @@ export interface Task {
   tags: string[];
   dependencies?: string[]; // Array of Task IDs
   subtasks?: Subtask[]; // Array of subtasks
+  meetingLink?: string; // Meeting URL (Zoom, Google Meet, Teams, etc.)
   createdAt: number;
   completedAt?: number;
   dueDate?: number;

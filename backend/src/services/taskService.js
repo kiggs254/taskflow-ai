@@ -8,7 +8,8 @@ export const getUserTasks = async (userId) => {
     `SELECT id, user_id, title, description, workspace, energy, status, estimated_time as "estimatedTime",
             tags, dependencies, subtasks, recurrence, created_at as "createdAt",
             completed_at as "completedAt", due_date as "dueDate",
-            snoozed_until as "snoozedUntil", original_recurrence_id as "originalRecurrenceId"
+            snoozed_until as "snoozedUntil", original_recurrence_id as "originalRecurrenceId",
+            meeting_link as "meetingLink"
      FROM tasks
      WHERE user_id = $1
      ORDER BY created_at DESC`,
@@ -44,6 +45,7 @@ export const syncTask = async (userId, taskData) => {
     snoozedUntil,
     recurrence,
     originalRecurrenceId,
+    meetingLink,
   } = taskData;
 
   // Validate required fields
@@ -55,8 +57,8 @@ export const syncTask = async (userId, taskData) => {
     `INSERT INTO tasks (
       id, user_id, title, description, workspace, energy, status, estimated_time,
       tags, dependencies, subtasks, recurrence, created_at, completed_at,
-      due_date, snoozed_until, original_recurrence_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      due_date, snoozed_until, original_recurrence_id, meeting_link
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
     ON CONFLICT (id) DO UPDATE SET
       title = EXCLUDED.title,
       description = EXCLUDED.description,
@@ -70,7 +72,8 @@ export const syncTask = async (userId, taskData) => {
       completed_at = EXCLUDED.completed_at,
       due_date = EXCLUDED.due_date,
       snoozed_until = EXCLUDED.snoozed_until,
-      recurrence = EXCLUDED.recurrence
+      recurrence = EXCLUDED.recurrence,
+      meeting_link = EXCLUDED.meeting_link
     RETURNING id`,
     [
       id,
@@ -90,6 +93,7 @@ export const syncTask = async (userId, taskData) => {
       dueDate || null,
       snoozedUntil || null,
       originalRecurrenceId || null,
+      meetingLink || null,
     ]
   );
 
