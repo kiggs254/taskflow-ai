@@ -2946,6 +2946,7 @@ export default function App() {
 
             {/* Navigation */}
             <nav className="space-y-1 hidden md:block">
+               {/* 1. Tasks */}
                <button 
                   onClick={() => { setView(AppView.DASHBOARD); setNewTasksCount(0); }}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center justify-between gap-3 ${view === AppView.DASHBOARD ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -2959,24 +2960,21 @@ export default function App() {
                     </span>
                   )}
                 </button>
-                 <button 
-                  onClick={() => setView(AppView.COMPLETED_TASKS)}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.COMPLETED_TASKS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-                >
-                  <CheckSquare className="w-4 h-4" /> Completed
-                </button>
+                {/* 2. Meetings */}
                 <button 
                   onClick={() => setView(AppView.MEETINGS)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.MEETINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
                   <Calendar className="w-4 h-4" /> Meetings
                 </button>
+                {/* 3. Analytics */}
                 <button 
                   onClick={() => setView(AppView.ANALYTICS)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.ANALYTICS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
                   <BarChart2 className="w-4 h-4" /> Analytics
                 </button>
+                {/* 4. Draft Tasks */}
                 <button 
                   onClick={() => setView(AppView.DRAFT_TASKS)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center justify-between gap-3 ${view === AppView.DRAFT_TASKS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -2990,6 +2988,14 @@ export default function App() {
                     </span>
                   )}
                 </button>
+                {/* 5. Completed */}
+                <button 
+                  onClick={() => setView(AppView.COMPLETED_TASKS)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.COMPLETED_TASKS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                >
+                  <CheckSquare className="w-4 h-4" /> Completed
+                </button>
+                {/* 6. Settings */}
                 <button 
                   onClick={() => setView(AppView.SETTINGS)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.SETTINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
