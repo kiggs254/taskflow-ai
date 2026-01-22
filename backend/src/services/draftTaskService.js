@@ -48,7 +48,32 @@ export const getDraftTask = async (userId, draftId) => {
 };
 
 /**
- * Create a draft task
+ * Check if a draft task already exists for a given source and sourceId
+ */
+export const draftTaskExists = async (userId, source, sourceId) => {
+  const result = await query(
+    `SELECT id FROM draft_tasks 
+     WHERE user_id = $1 AND source = $2 AND source_id = $3 
+     AND status IN ('pending', 'approved')`,
+    [userId, source, sourceId]
+  );
+  return result.rows.length > 0;
+};
+
+/**
+ * Check if a task already exists for a given sourceId (in description metadata)
+ */
+export const taskExistsForSource = async (userId, sourceId) => {
+  const result = await query(
+    `SELECT id FROM tasks 
+     WHERE user_id = $1 AND description LIKE $2`,
+    [userId, `%"messageId":"${sourceId}"%`]
+  );
+  return result.rows.length > 0;
+};
+
+/**
+ * Create a draft task (with duplicate prevention)
  */
 export const createDraftTask = async (userId, draftData) => {
   const {
@@ -63,6 +88,22 @@ export const createDraftTask = async (userId, draftData) => {
     dueDate,
     aiConfidence,
   } = draftData;
+
+  // Check for existing draft with same sourceId (prevent duplicates)
+  if (sourceId) {
+    const exists = await draftTaskExists(userId, source, sourceId);
+    if (exists) {
+      console.log(`Draft task already exists for sourceId: ${sourceId}, skipping...`);
+      return null; // Return null to indicate skipped
+    }
+    
+    // Also check if a task already exists for this source
+    const taskExists = await taskExistsForSource(userId, sourceId);
+    if (taskExists) {
+      console.log(`Task already exists for sourceId: ${sourceId}, skipping draft creation...`);
+      return null;
+    }
+  }
 
   const result = await query(
     `INSERT INTO draft_tasks (

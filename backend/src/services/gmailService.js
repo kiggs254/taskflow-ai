@@ -2,8 +2,8 @@ import { google } from 'googleapis';
 import { query } from '../config/database.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
-import { parseTask, parseEmailThread } from './aiService.js';
-import { createDraftTask } from './draftTaskService.js';
+import { parseTask, parseEmailThread, checkEmailRelevance } from './aiService.js';
+import { createDraftTask, draftTaskExists, taskExistsForSource } from './draftTaskService.js';
 import { syncTask } from './taskService.js';
 import { config } from '../config/env.js';
 
@@ -256,6 +256,19 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     // Process each email
     for (const message of messages) {
       try {
+        // === DUPLICATE CHECK: Skip if already processed ===
+        const draftExists = await draftTaskExists(userId, 'gmail', message.id);
+        if (draftExists) {
+          console.log(`Skipping email ${message.id}: draft already exists`);
+          continue;
+        }
+        
+        const taskExists = await taskExistsForSource(userId, message.id);
+        if (taskExists) {
+          console.log(`Skipping email ${message.id}: task already exists`);
+          continue;
+        }
+
         // Get full message
         const messageData = await gmail.users.messages.get({
           userId: 'me',
@@ -372,6 +385,18 @@ export const scanEmails = async (userId, maxEmails = 50) => {
           date: date,
         };
 
+        // === RELEVANCE CHECK: Use AI to check if email matches user's dos/don'ts ===
+        if (promptInstructions && promptInstructions.trim()) {
+          const emailSummary = `Subject: ${subject}\nFrom: ${from}\n\n${bodyText.substring(0, 1500)}`;
+          const relevanceCheck = await checkEmailRelevance(emailSummary, promptInstructions, 'openai');
+          
+          if (!relevanceCheck.isRelevant) {
+            console.log(`Skipping email ${message.id}: Not relevant - ${relevanceCheck.reason}`);
+            continue;
+          }
+          console.log(`Email ${message.id} is relevant: ${relevanceCheck.reason}`);
+        }
+
         // Use AI to extract task (fallback if thread processing didn't provide title)
         try {
           const aiResult = await parseTask(
@@ -426,14 +451,17 @@ export const scanEmails = async (userId, maxEmails = 50) => {
             createdTasks.push(newTask);
             tasksCreated++;
           } else {
-            // Create draft task
+            // Create draft task (with built-in duplicate check)
             const draftTask = await createDraftTask(userId, {
               source: 'gmail',
               sourceId: message.id,
               ...baseTaskData,
             });
 
-            draftTasks.push(draftTask);
+            // Only add to array if task was actually created (not skipped as duplicate)
+            if (draftTask) {
+              draftTasks.push(draftTask);
+            }
           }
         } catch (aiError) {
           console.error(`AI parsing error for email ${message.id}:`, aiError);
@@ -459,7 +487,10 @@ export const scanEmails = async (userId, maxEmails = 50) => {
       [userId]
     );
 
-    return { success: true, draftsCreated: draftTasks.length, tasksCreated, tasks: createdTasks, drafts: draftTasks };
+    // Filter out any null drafts (from duplicate skips)
+    const validDrafts = draftTasks.filter(d => d !== null);
+    
+    return { success: true, draftsCreated: validDrafts.length, tasksCreated, tasks: createdTasks, drafts: validDrafts };
   } catch (error) {
     console.error('Email scanning error:', error);
     throw error;

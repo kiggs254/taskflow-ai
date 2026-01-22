@@ -231,6 +231,65 @@ Keep it under 200 characters. Be casual and professional. Start with something l
 };
 
 /**
+ * Check if an email is relevant based on user's prompt instructions (dos and don'ts)
+ * Returns { isRelevant: boolean, reason: string }
+ */
+export const checkEmailRelevance = async (emailSummary, promptInstructions, provider = 'openai') => {
+  if (!promptInstructions || !promptInstructions.trim()) {
+    // No instructions provided, consider all emails relevant
+    return { isRelevant: true, reason: 'No filter instructions provided' };
+  }
+
+  const client = getClient(provider);
+  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+
+  try {
+    const response = await client.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an email filter assistant. Your job is to determine if an email should be converted into a task based on the user's instructions.
+
+The user has provided these filtering rules (dos and don'ts):
+${promptInstructions}
+
+Based on these rules, determine if the email should be processed as a task.
+Return valid JSON with: { "isRelevant": boolean, "reason": string }
+
+- isRelevant: true if the email SHOULD become a task, false if it should be SKIPPED
+- reason: Brief explanation of why (1 sentence)
+
+Be strict about following the user's instructions. If they say to ignore certain types of emails, ignore them.`,
+        },
+        {
+          role: 'user',
+          content: `Should this email be converted to a task?\n\n${emailSummary.substring(0, 2000)}`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
+      max_tokens: 200,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return { isRelevant: true, reason: 'Could not determine relevance' };
+    }
+
+    const parsed = JSON.parse(content);
+    return {
+      isRelevant: parsed.isRelevant !== false, // Default to true if unclear
+      reason: parsed.reason || 'No reason provided',
+    };
+  } catch (error) {
+    console.error('AI checkEmailRelevance error:', error);
+    // On error, default to processing the email
+    return { isRelevant: true, reason: 'Error checking relevance, processing anyway' };
+  }
+};
+
+/**
  * Parse full email thread and extract title, todos, and formatted description
  */
 export const parseEmailThread = async (fullThreadContent, provider = 'openai', promptInstructions = '') => {
@@ -242,7 +301,7 @@ export const parseEmailThread = async (fullThreadContent, provider = 'openai', p
   const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
 
   const customInstructions = promptInstructions
-    ? `\n\nAdditional instructions: ${promptInstructions}`
+    ? `\n\nAdditional user instructions for task extraction: ${promptInstructions}`
     : '';
 
   try {
