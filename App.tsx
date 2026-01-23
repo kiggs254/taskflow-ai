@@ -2775,7 +2775,7 @@ export default function App() {
         }
       }
 
-      // 2) Send Slack summary of today's completed Job tasks
+      // 2) Send Slack summary of today's completed Job tasks (if enabled)
       const todayLabel = nowDate.toLocaleDateString();
       // Calculate start and end of today for precise filtering
       const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
@@ -2791,7 +2791,11 @@ export default function App() {
 
       if (completedTodayJob.length > 0) {
         try {
-          await api.slack.dailySummary(token, completedTodayJob, todayLabel);
+          // Check if daily report is enabled in Slack settings
+          const slackStatus = await api.slack.status(token);
+          if (slackStatus.connected && slackStatus.dailyReportEnabled !== false) {
+            await api.slack.dailySummary(token, completedTodayJob, todayLabel);
+          }
         } catch (err) {
           console.error('Failed to post Slack daily summary', err);
         }
@@ -3533,6 +3537,63 @@ export default function App() {
         onClose={() => setShowQuickAdd(false)} 
         onAdd={addTask} 
       />
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 z-30 safe-area-bottom">
+        <div className="flex items-center justify-around py-2 px-2">
+          <button 
+            onClick={() => { setView(AppView.DASHBOARD); setNewTasksCount(0); }}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.DASHBOARD ? 'text-primary' : 'text-slate-400'}`}
+          >
+            <Layout className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Tasks</span>
+            {newTasksCount > 0 && view !== AppView.DASHBOARD && (
+              <span className="absolute -top-1 right-1 w-4 h-4 rounded-full bg-blue-500 text-white text-[9px] flex items-center justify-center font-bold">
+                {newTasksCount > 9 ? '9+' : newTasksCount}
+              </span>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => setView(AppView.MEETINGS)}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.MEETINGS ? 'text-primary' : 'text-slate-400'}`}
+          >
+            <Calendar className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Meetings</span>
+          </button>
+          
+          <button 
+            onClick={() => setShowQuickAdd(true)}
+            className="flex items-center justify-center w-12 h-12 -mt-4 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg shadow-blue-500/40"
+          >
+            <Plus className="w-6 h-6" />
+          </button>
+          
+          <button 
+            onClick={() => setView(AppView.DRAFT_TASKS)}
+            className={`relative flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.DRAFT_TASKS ? 'text-primary' : 'text-slate-400'}`}
+          >
+            <Mail className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Drafts</span>
+            {draftTasksCount > 0 && (
+              <span className="absolute -top-1 right-1 w-4 h-4 rounded-full bg-accent text-white text-[9px] flex items-center justify-center font-bold">
+                {draftTasksCount > 9 ? '9+' : draftTasksCount}
+              </span>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => setView(AppView.SETTINGS)}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.SETTINGS ? 'text-primary' : 'text-slate-400'}`}
+          >
+            <SettingsIcon className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Settings</span>
+          </button>
+        </div>
+      </nav>
+      
+      {/* Spacer for mobile navigation */}
+      <div className="md:hidden h-16" />
     </div>
   );
 }

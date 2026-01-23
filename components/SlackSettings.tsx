@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, CheckCircle2, X, RefreshCw, Settings, Bell } from 'lucide-react';
+import { MessageSquare, CheckCircle2, X, RefreshCw, Settings, Bell, FileText } from 'lucide-react';
 import { api } from '../services/apiService';
 import { ConfirmationModal } from './ConfirmationModal';
 import { AlertModal } from './AlertModal';
@@ -14,6 +14,7 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
   const [scanning, setScanning] = useState(false);
   const [scanFrequency, setScanFrequency] = useState(15);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [dailyReportEnabled, setDailyReportEnabled] = useState(true);
   const [disconnectConfirm, setDisconnectConfirm] = useState(false);
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
@@ -30,6 +31,9 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
       }
       if (data.connected && data.notificationsEnabled !== undefined) {
         setNotificationsEnabled(data.notificationsEnabled);
+      }
+      if (data.connected && data.dailyReportEnabled !== undefined) {
+        setDailyReportEnabled(data.dailyReportEnabled);
       }
     } catch (error) {
       console.error('Failed to load Slack status:', error);
@@ -86,7 +90,7 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
   const handleUpdateSettings = async () => {
     setLoading(true);
     try {
-      await api.slack.updateSettings(token, { scanFrequency, notificationsEnabled });
+      await api.slack.updateSettings(token, { scanFrequency, notificationsEnabled, dailyReportEnabled });
       setAlertModal({ isOpen: true, title: 'Success', message: 'Settings updated successfully!', type: 'success' });
       loadStatus();
     } catch (error) {
@@ -154,6 +158,24 @@ export const SlackSettings: React.FC<SlackSettingsProps> = ({ token }) => {
               </label>
               <p className="text-xs text-slate-500 ml-6">
                 Receive notifications in Slack when tasks are created from scans
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={dailyReportEnabled}
+                  onChange={(e) => setDailyReportEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded bg-slate-800 border-slate-700"
+                />
+                <span className="text-sm text-slate-300 flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  Send daily completed tasks report
+                </span>
+              </label>
+              <p className="text-xs text-slate-500 ml-6">
+                Post a summary of completed tasks to Slack when you end your day
               </p>
             </div>
 

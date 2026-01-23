@@ -499,19 +499,19 @@ export const getSlackStatus = async (userId) => {
   let result;
   try {
     result = await query(
-      `SELECT slack_user_id, slack_team_id, enabled, last_scan_at, scan_frequency, notifications_enabled, created_at
+      `SELECT slack_user_id, slack_team_id, enabled, last_scan_at, scan_frequency, notifications_enabled, daily_report_enabled, created_at
        FROM slack_integrations WHERE user_id = $1`,
       [userId]
     );
   } catch (error) {
-    // Backwards compatibility if notifications_enabled column doesn't exist yet
+    // Backwards compatibility if columns don't exist yet
     if (error?.code === '42703') {
       result = await query(
         `SELECT slack_user_id, slack_team_id, enabled, last_scan_at, scan_frequency, created_at
          FROM slack_integrations WHERE user_id = $1`,
         [userId]
       );
-      result.rows = result.rows.map((row) => ({ ...row, notifications_enabled: true }));
+      result.rows = result.rows.map((row) => ({ ...row, notifications_enabled: true, daily_report_enabled: true }));
     } else {
       throw error;
     }
@@ -529,6 +529,7 @@ export const getSlackStatus = async (userId) => {
     lastScanAt: result.rows[0].last_scan_at,
     scanFrequency: result.rows[0].scan_frequency,
     notificationsEnabled: result.rows[0].notifications_enabled !== false, // Default to true if null
+    dailyReportEnabled: result.rows[0].daily_report_enabled !== false, // Default to true if null
     createdAt: result.rows[0].created_at,
   };
 };
@@ -564,6 +565,10 @@ export const updateSlackSettings = async (userId, settings) => {
   if (settings.notificationsEnabled !== undefined) {
     updates.push(`notifications_enabled = $${paramCount++}`);
     values.push(settings.notificationsEnabled);
+  }
+  if (settings.dailyReportEnabled !== undefined) {
+    updates.push(`daily_report_enabled = $${paramCount++}`);
+    values.push(settings.dailyReportEnabled);
   }
 
   if (updates.length === 0) {
