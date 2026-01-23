@@ -5,7 +5,7 @@ import {
   Sun, Moon, RotateCcw, MessageSquare, Copy, Check, Mail, Lock, Unlock,
   LogOut, Loader2, Link as LinkIcon, BarChart2, Settings as SettingsIcon,
   PieChart, Bell, Volume2, Shield, Palette, ArrowLeft, Pencil, Save, Filter,
-  Search, Command, MoreVertical, Hourglass, AlarmClockOff, Video,
+  Search, Command, MoreVertical, Hourglass, AlarmClockOff, Video, Trash2,
   Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw
 } from 'lucide-react';
 import { 
@@ -619,6 +619,9 @@ const TaskCard: React.FC<{
   onDelete: (id: string) => void;
   onSnooze: (id: string, duration: 'hour' | 'day' | 'week') => void;
   onSetWaiting: (id: string) => void;
+  isSelected?: boolean;
+  onSelect?: (id: string, selected: boolean) => void;
+  selectionMode?: boolean;
 }> = ({ 
   task, 
   blockingTasks,
@@ -631,7 +634,10 @@ const TaskCard: React.FC<{
   onDelete,
   onSnooze,
   onSetWaiting,
-  onViewDetails
+  onViewDetails,
+  isSelected = false,
+  onSelect,
+  selectionMode = false,
 }) => {
   const [showFollowUp, setShowFollowUp] = useState(false);
   const [followUpText, setFollowUpText] = useState('');
@@ -712,9 +718,28 @@ const TaskCard: React.FC<{
     <div 
       className={`group relative p-4 rounded-xl bg-surface border transition-all border-l-4 mb-3 shadow-sm cursor-pointer
       ${energyColors[task.energy]} 
-        ${isBlocked || task.status === 'waiting' ? 'opacity-60 border-slate-700 bg-slate-800/50' : 'border-slate-700/50 hover:border-slate-600'}`}
-      onClick={() => onViewDetails(task)}
+        ${isBlocked || task.status === 'waiting' ? 'opacity-60 border-slate-700 bg-slate-800/50' : 'border-slate-700/50 hover:border-slate-600'}
+        ${isSelected ? 'ring-2 ring-primary bg-primary/10' : ''}`}
+      onClick={() => {
+        if (selectionMode && onSelect) {
+          onSelect(task.id, !isSelected);
+        } else {
+          onViewDetails(task);
+        }
+      }}
     >
+      
+      {/* Selection Checkbox */}
+      {(selectionMode || isSelected) && onSelect && (
+        <div 
+          className="absolute top-3 left-3 z-10"
+          onClick={(e) => { e.stopPropagation(); onSelect(task.id, !isSelected); }}
+        >
+          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${isSelected ? 'bg-primary border-primary' : 'bg-slate-800 border-slate-600 hover:border-primary'}`}>
+            {isSelected && <Check className="w-3 h-3 text-white" />}
+          </div>
+        </div>
+      )}
       
       {isBlocked && (
         <div className="absolute top-2 right-2 text-slate-500">
@@ -2033,6 +2058,10 @@ export default function App() {
   const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
   const [newTasksCount, setNewTasksCount] = useState<number>(0);
   const previousDraftCountRef = useRef<number>(0);
+  
+  // Bulk selection state
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
   const previousTasksCountRef = useRef<number>(0);
   const [syncingSources, setSyncingSources] = useState(false);
   const [showFreelanceTab, setShowFreelanceTab] = useState(false);
@@ -2520,6 +2549,59 @@ export default function App() {
       fetchData();
       setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to delete task. Please try again.', type: 'error' });
     }
+  };
+
+  // Bulk selection handlers
+  const handleSelectTask = (taskId: string, selected: boolean) => {
+    setSelectedTaskIds(prev => {
+      const newSet = new Set(prev);
+      if (selected) {
+        newSet.add(taskId);
+      } else {
+        newSet.delete(taskId);
+      }
+      // Auto-enable selection mode when first task selected
+      if (newSet.size > 0 && !selectionMode) {
+        setSelectionMode(true);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = (tasksToSelect: Task[]) => {
+    const allIds = tasksToSelect.map(t => t.id);
+    setSelectedTaskIds(new Set(allIds));
+    setSelectionMode(true);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedTaskIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const handleBulkDelete = async () => {
+    if (!token || selectedTaskIds.size === 0) return;
+    
+    const count = selectedTaskIds.size;
+    const confirmed = window.confirm(`Are you sure you want to delete ${count} task${count > 1 ? 's' : ''}? This cannot be undone.`);
+    
+    if (!confirmed) return;
+    
+    // Optimistically update UI
+    setTasks(prev => prev.filter(t => !selectedTaskIds.has(t.id)));
+    
+    // Delete each task
+    const deletePromises = Array.from(selectedTaskIds).map(id => 
+      api.deleteTask(token, id).catch(e => {
+        console.error(`Failed to delete task ${id}:`, e);
+        return { error: true, id };
+      })
+    );
+    
+    await Promise.all(deletePromises);
+    
+    addToast(`${count} task${count > 1 ? 's' : ''} deleted`, 'success');
+    handleClearSelection();
   };
 
   const completeTask = async (id: string, sendEmailReply = false) => {
@@ -3241,6 +3323,53 @@ export default function App() {
                 )}
               </header>
 
+              {/* Bulk Selection Bar */}
+              {(selectionMode || selectedTaskIds.size > 0) && (
+                <div className="sticky top-0 z-20 -mx-3 md:-mx-6 px-3 md:px-6 py-3 mb-4 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700 animate-in slide-in-from-top-2 duration-300">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleClearSelection}
+                        className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                        title="Cancel selection"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                      <span className="text-sm font-medium text-white">
+                        {selectedTaskIds.size} task{selectedTaskIds.size !== 1 ? 's' : ''} selected
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleSelectAll([...currentTasks, ...waitingTasks])}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                      >
+                        Select All ({currentTasks.length + waitingTasks.length})
+                      </button>
+                      <button
+                        onClick={handleBulkDelete}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 text-white hover:bg-red-500 transition-colors flex items-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete ({selectedTaskIds.size})
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Toggle Selection Mode Button */}
+              {!selectionMode && selectedTaskIds.size === 0 && (currentTasks.length > 0 || waitingTasks.length > 0) && (
+                <div className="flex justify-end mb-2">
+                  <button
+                    onClick={() => setSelectionMode(true)}
+                    className="text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" /> Select tasks
+                  </button>
+                </div>
+              )}
+
               {/* Task Lists */}
               <div className="space-y-8">
                  {/* Awaiting Section */}
@@ -3270,6 +3399,9 @@ export default function App() {
                              onSnooze={snoozeTask}
                              onSetWaiting={setWaitingStatus}
                              onViewDetails={setSelectedTask}
+                             isSelected={selectedTaskIds.has(task.id)}
+                             onSelect={handleSelectTask}
+                             selectionMode={selectionMode}
                            />
                          );
                        })}
@@ -3330,6 +3462,9 @@ export default function App() {
                               onSnooze={snoozeTask}
                               onSetWaiting={setWaitingStatus}
                               onViewDetails={setSelectedTask}
+                              isSelected={selectedTaskIds.has(task.id)}
+                              onSelect={handleSelectTask}
+                              selectionMode={selectionMode}
                             />
                           );
                         })}
