@@ -10,8 +10,6 @@ import { sendNotification } from '../services/telegramService.js';
 export const startEmailScanner = () => {
   // Run every minute to check scan frequency for each user
   cron.schedule('* * * * *', async () => {
-    console.log('Running scheduled email scan...');
-    
     try {
       // Get all enabled Gmail integrations
       const result = await query(
@@ -20,10 +18,15 @@ export const startEmailScanner = () => {
          WHERE enabled = true`
       );
 
+      if (result.rows.length === 0) {
+        // No enabled Gmail integrations, skip silently
+        return;
+      }
+
       for (const integration of result.rows) {
         try {
           const lastScanAt = integration.last_scan_at;
-          const scanFrequency = integration.scan_frequency || 60; // minutes
+          const scanFrequency = integration.scan_frequency || 60; // minutes, default 60
           
           // Check if it's time to scan
           if (lastScanAt) {
@@ -32,28 +35,31 @@ export const startEmailScanner = () => {
             const minutesSinceLastScan = (now - lastScan) / (1000 * 60);
             
             if (minutesSinceLastScan < scanFrequency) {
-              // Not time to scan yet
+              // Not time to scan yet - log only occasionally to reduce noise
               continue;
             }
+            console.log(`📧 Gmail scan triggered for user ${integration.user_id} (${minutesSinceLastScan.toFixed(1)} min since last scan, frequency: ${scanFrequency} min)`);
+          } else {
+            console.log(`📧 Gmail scan triggered for user ${integration.user_id} (first scan)`);
           }
 
           // Scan emails for this user
-          const result = await scanEmails(integration.user_id, 50);
-          console.log(`Email scan completed for user ${integration.user_id}`);
+          const scanResult = await scanEmails(integration.user_id, 50);
+          console.log(`📧 Gmail scan completed for user ${integration.user_id}: ${scanResult?.draftsCreated || 0} drafts, ${scanResult?.tasksCreated || 0} tasks`);
           
           // Send Telegram notification if tasks were created
-          if (result && (result.draftsCreated > 0 || result.tasksCreated > 0)) {
+          if (scanResult && (scanResult.draftsCreated > 0 || scanResult.tasksCreated > 0)) {
             try {
               let message = '';
-              const taskTitles = result.tasks?.map(t => `• ${t.title}`).join('\n') || '';
-              const draftTitles = result.drafts?.map(d => `• ${d.title}`).join('\n') || '';
+              const taskTitles = scanResult.tasks?.map(t => `• ${t.title}`).join('\n') || '';
+              const draftTitles = scanResult.drafts?.map(d => `• ${d.title}`).join('\n') || '';
               
-              if (result.tasksCreated > 0 && result.draftsCreated > 0) {
-                message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}\n\n📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
-              } else if (result.tasksCreated > 0) {
-                message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}`;
-              } else if (result.draftsCreated > 0) {
-                message = `📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
+              if (scanResult.tasksCreated > 0 && scanResult.draftsCreated > 0) {
+                message = `✅ ${scanResult.tasksCreated} task${scanResult.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}\n\n📝 ${scanResult.draftsCreated} draft task${scanResult.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
+              } else if (scanResult.tasksCreated > 0) {
+                message = `✅ ${scanResult.tasksCreated} task${scanResult.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}`;
+              } else if (scanResult.draftsCreated > 0) {
+                message = `📝 ${scanResult.draftsCreated} draft task${scanResult.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
               }
               
               if (message) {
