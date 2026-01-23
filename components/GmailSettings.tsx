@@ -128,10 +128,13 @@ export const GmailSettings: React.FC<GmailSettingsProps> = ({ token }) => {
               type="number"
               value={scanFrequency}
               onChange={(e) => setScanFrequency(parseInt(e.target.value, 10))}
-              min="15"
+              min="5"
               max="1440"
               className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700"
             />
+            <p className="text-xs text-slate-500">
+              Minimum: 5 minutes. How often to check for new emails.
+            </p>
             <button
               onClick={handleUpdateSettings}
               disabled={loading}

@@ -26,7 +26,7 @@ export const startEmailScanner = () => {
       for (const integration of result.rows) {
         try {
           const lastScanAt = integration.last_scan_at;
-          const scanFrequency = integration.scan_frequency || 60; // minutes, default 60
+          const scanFrequency = integration.scan_frequency || 15; // minutes, default 15
           
           // Check if it's time to scan
           if (lastScanAt) {
