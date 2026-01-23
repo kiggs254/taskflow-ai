@@ -228,7 +228,7 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
   console.log('Task found:', task.title);
   
   // Extract email metadata to get subject
-  const emailMetadataMatch = task.description?.match(/<!-- Email metadata: ({.*?}) -->/s);
+  const emailMetadataMatch = task.description?.match(/<!-- Email metadata: (\{[^}]+\}) -->/);
   let emailSubject = '';
   if (emailMetadataMatch) {
     try {
@@ -241,18 +241,23 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
 
   console.log('Generating draft with:', { title: task.title, tone, userName, emailSubject });
   
-  const draft = await generateEmailDraft(
-    task.title,
-    task.description || '',
-    emailSubject,
-    tone || 'professional',
-    'openai',
-    customInstructions || '',
-    userName
-  );
-  
-  console.log('Draft generated successfully');
-  res.json({ draft });
+  try {
+    const draft = await generateEmailDraft(
+      task.title,
+      task.description || '',
+      emailSubject,
+      tone || 'professional',
+      'openai',
+      customInstructions || '',
+      userName
+    );
+    
+    console.log('Draft generated successfully');
+    res.json({ draft });
+  } catch (aiError) {
+    console.error('AI Error generating draft:', aiError.message, aiError.stack);
+    return res.status(500).json({ error: 'Failed to generate draft: ' + aiError.message });
+  }
 }));
 
 export default router;
