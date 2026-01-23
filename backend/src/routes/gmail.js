@@ -197,6 +197,8 @@ router.post('/polish-reply', authenticate, asyncHandler(async (req, res) => {
 router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
   const { taskId, tone, customInstructions } = req.body;
   
+  console.log('Generate draft request:', { taskId, tone, userId: req.user.id });
+  
   if (!taskId) {
     return res.status(400).json({ error: 'taskId is required' });
   }
@@ -210,6 +212,7 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
     [req.user.id]
   );
   const userName = userResult.rows[0]?.name || '';
+  console.log('User name for draft:', userName);
   
   const taskResult = await query(
     'SELECT title, description FROM tasks WHERE id = $1 AND user_id = $2',
@@ -217,23 +220,27 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
   );
 
   if (taskResult.rows.length === 0) {
+    console.log('Task not found:', taskId);
     return res.status(404).json({ error: 'Task not found' });
   }
 
   const task = taskResult.rows[0];
+  console.log('Task found:', task.title);
   
   // Extract email metadata to get subject
-  const emailMetadataMatch = task.description?.match(/<!-- Email metadata: ({.*?}) -->/);
+  const emailMetadataMatch = task.description?.match(/<!-- Email metadata: ({.*?}) -->/s);
   let emailSubject = '';
   if (emailMetadataMatch) {
     try {
       const metadata = JSON.parse(emailMetadataMatch[1]);
       emailSubject = metadata.subject || '';
     } catch (e) {
-      // Ignore parse errors
+      console.log('Error parsing email metadata:', e.message);
     }
   }
 
+  console.log('Generating draft with:', { title: task.title, tone, userName, emailSubject });
+  
   const draft = await generateEmailDraft(
     task.title,
     task.description || '',
@@ -244,6 +251,7 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
     userName
   );
   
+  console.log('Draft generated successfully');
   res.json({ draft });
 }));
 
