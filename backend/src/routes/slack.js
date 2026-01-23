@@ -113,7 +113,7 @@ router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
  * Update Slack settings
  */
 router.put('/settings', authenticate, asyncHandler(async (req, res) => {
-  const { scanFrequency, enabled, notificationsEnabled } = req.body;
+  const { scanFrequency, enabled, notificationsEnabled, dailyReportEnabled } = req.body;
   
   const settings = {};
   if (scanFrequency !== undefined) {
@@ -124,6 +124,9 @@ router.put('/settings', authenticate, asyncHandler(async (req, res) => {
   }
   if (notificationsEnabled !== undefined) {
     settings.notificationsEnabled = Boolean(notificationsEnabled);
+  }
+  if (dailyReportEnabled !== undefined) {
+    settings.dailyReportEnabled = Boolean(dailyReportEnabled);
   }
 
   const result = await updateSlackSettings(req.user.id, settings);
