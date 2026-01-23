@@ -180,7 +180,12 @@ router.post('/polish-reply', authenticate, asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'message is required' });
   }
 
-  const polishedMessage = await polishEmailReply(message, 'openai', instructions || '');
+  // Get user's name for sign-off
+  const { query } = await import('../config/database.js');
+  const userResult = await query('SELECT name FROM users WHERE id = $1', [req.user.id]);
+  const userName = userResult.rows[0]?.name || '';
+
+  const polishedMessage = await polishEmailReply(message, 'openai', instructions || '', userName);
   
   res.json({ polishedMessage });
 }));
@@ -196,8 +201,16 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'taskId is required' });
   }
 
-  // Get task details
+  // Get task details and user name
   const { query } = await import('../config/database.js');
+  
+  // Get user's name
+  const userResult = await query(
+    'SELECT name FROM users WHERE id = $1',
+    [req.user.id]
+  );
+  const userName = userResult.rows[0]?.name || '';
+  
   const taskResult = await query(
     'SELECT title, description FROM tasks WHERE id = $1 AND user_id = $2',
     [taskId, req.user.id]
@@ -227,7 +240,8 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
     emailSubject,
     tone || 'professional',
     'openai',
-    customInstructions || ''
+    customInstructions || '',
+    userName
   );
   
   res.json({ draft });

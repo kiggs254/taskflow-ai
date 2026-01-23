@@ -427,7 +427,8 @@ For subtasks:
 export const generateEmailCompletionReply = async (
   taskTitle,
   taskDescription,
-  provider = 'openai'
+  provider = 'openai',
+  userName = ''
 ) => {
   if (!taskTitle || typeof taskTitle !== 'string') {
     throw new Error('Invalid input: taskTitle must be a string');
@@ -441,13 +442,17 @@ export const generateEmailCompletionReply = async (
     ? taskDescription.replace(/<!-- Email metadata:.*?-->/, '').replace(/<!-- Slack metadata:.*?-->/, '').trim()
     : '';
 
+  // Get first name from full name
+  const firstName = userName ? userName.split(' ')[0] : '';
+  const signOff = firstName ? `\n\nKind Regards,\n${firstName}` : '';
+
   try {
     const response = await client.chat.completions.create({
       model: model,
       messages: [
         {
           role: 'system',
-          content: `You are an email assistant. Generate a brief, professional email reply to inform the sender that a task has been completed. Keep it concise (2-3 sentences max) and professional.`,
+          content: `You are an email assistant writing on behalf of ${userName || 'the user'}. Generate a brief, professional email reply to inform the sender that a task has been completed. Keep it concise (2-3 sentences max) and professional. ${firstName ? `Sign off with "Kind Regards,\\n${firstName}" - do NOT use placeholders like {name} or [name].` : 'Do not include a sign-off.'}`,
         },
         {
           role: 'user',
@@ -455,6 +460,7 @@ export const generateEmailCompletionReply = async (
           
 Task: ${taskTitle}
 ${cleanDescription ? `Context: ${cleanDescription.substring(0, 500)}` : ''}
+${firstName ? `\nIMPORTANT: Sign off exactly as "Kind Regards,\\n${firstName}" - no placeholders.` : ''}
 
 Write a brief, professional email reply informing them the task is complete.`,
         },
@@ -479,7 +485,8 @@ export const generateEmailDraft = async (
   emailSubject,
   tone = 'professional',
   provider = 'openai',
-  customInstructions = ''
+  customInstructions = '',
+  userName = ''
 ) => {
   if (!taskTitle || typeof taskTitle !== 'string') {
     throw new Error('Invalid input: taskTitle must be a string');
@@ -488,13 +495,16 @@ export const generateEmailDraft = async (
   const client = getClient(provider);
   const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
 
+  // Get first name from full name
+  const firstName = userName ? userName.split(' ')[0] : '';
+
   // Define tone instructions
   const toneInstructions = {
-    professional: 'Write in a professional, formal business tone. Use proper salutations and closings.',
-    casual: 'Write in a friendly, casual tone. Keep it conversational and relaxed.',
-    friendly: 'Write in a warm, friendly tone. Be approachable and personable.',
-    concise: 'Write in a brief, to-the-point tone. Keep it short and direct.',
-    urgent: 'Write in an urgent but professional tone. Convey importance without being pushy.',
+    professional: `Write in a professional, formal business tone. ${firstName ? `Sign off with "Kind Regards,\\n${firstName}"` : 'Use proper closings.'}`,
+    casual: `Write in a friendly, casual tone. Keep it conversational. ${firstName ? `Sign off with "Cheers,\\n${firstName}" or "Best,\\n${firstName}"` : ''}`,
+    friendly: `Write in a warm, friendly tone. Be approachable and personable. ${firstName ? `Sign off with "Best regards,\\n${firstName}"` : ''}`,
+    concise: `Write in a brief, to-the-point tone. Keep it short and direct. ${firstName ? `Sign off with "Best,\\n${firstName}"` : ''}`,
+    urgent: `Write in an urgent but professional tone. Convey importance without being pushy. ${firstName ? `Sign off with "Regards,\\n${firstName}"` : ''}`,
   };
 
   const tonePrompt = toneInstructions[tone] || toneInstructions.professional;
@@ -507,13 +517,17 @@ export const generateEmailDraft = async (
     ? taskDescription.replace(/<!-- Email metadata:.*?-->/, '').replace(/<!-- Slack metadata:.*?-->/, '').trim()
     : '';
 
+  const signOffInstruction = firstName 
+    ? `\n\nIMPORTANT: You are writing on behalf of ${userName}. Sign off the email EXACTLY as specified (e.g., "Kind Regards,\\n${firstName}"). Do NOT use placeholders like {name}, [Your Name], [Name], etc. Use the actual name provided.`
+    : '';
+
   try {
     const response = await client.chat.completions.create({
       model: model,
       messages: [
         {
           role: 'system',
-          content: `You are an email writing assistant. Generate a well-written email reply based on the task context. ${tonePrompt}${customPrompt}`,
+          content: `You are an email writing assistant writing on behalf of ${userName || 'the user'}. Generate a well-written email reply based on the task context. ${tonePrompt}${customPrompt}${signOffInstruction}`,
         },
         {
           role: 'user',
@@ -523,7 +537,7 @@ Task: ${taskTitle}
 ${cleanDescription ? `Context: ${cleanDescription.substring(0, 1000)}` : ''}
 Email Subject: ${emailSubject || 'No subject'}
 
-Write an appropriate email reply that addresses the task. Keep it relevant to the context and appropriate for the tone requested.`,
+Write an appropriate email reply that addresses the task. Keep it relevant to the context and appropriate for the tone requested.${firstName ? `\n\nSign off with the user's actual name (${firstName}), not a placeholder.` : ''}`,
         },
       ],
       temperature: 0.7,
@@ -543,7 +557,8 @@ Write an appropriate email reply that addresses the task. Keep it relevant to th
 export const polishEmailReply = async (
   message,
   provider = 'openai',
-  instructions = ''
+  instructions = '',
+  userName = ''
 ) => {
   if (!message || typeof message !== 'string') {
     throw new Error('Invalid input: message must be a string');
@@ -552,8 +567,14 @@ export const polishEmailReply = async (
   const client = getClient(provider);
   const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
 
+  const firstName = userName ? userName.split(' ')[0] : '';
+  
   const customInstructions = instructions
     ? `\n\nCustom instructions: ${instructions}`
+    : '';
+
+  const signOffInstruction = firstName 
+    ? `\n\nIMPORTANT: If the email needs a sign-off, use the user's actual name: "${firstName}". Do NOT use placeholders like {name}, [Your Name], or similar.`
     : '';
 
   try {
@@ -562,11 +583,11 @@ export const polishEmailReply = async (
       messages: [
         {
           role: 'system',
-          content: `You are an email writing assistant. Polish and improve email messages to be professional, clear, and appropriate for business communication.${customInstructions}`,
+          content: `You are an email writing assistant${userName ? ` writing on behalf of ${userName}` : ''}. Polish and improve email messages to be professional, clear, and appropriate for business communication.${customInstructions}${signOffInstruction}`,
         },
         {
           role: 'user',
-          content: `Polish and improve this email message:\n\n${message}`,
+          content: `Polish and improve this email message:\n\n${message}${firstName ? `\n\nIf adding or updating the sign-off, use "Kind Regards,\n${firstName}" - no placeholders.` : ''}`,
         },
       ],
       temperature: 0.7,

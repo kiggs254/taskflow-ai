@@ -165,11 +165,16 @@ export const completeTask = async (userId, taskId, options = {}) => {
       const { generateEmailCompletionReply } = await import('./aiService.js');
       const { replyToEmail } = await import('./gmailService.js');
       
-      // Generate completion reply
+      // Get user's name for sign-off
+      const userResult = await query('SELECT name FROM users WHERE id = $1', [userId]);
+      const userName = userResult.rows[0]?.name || '';
+      
+      // Generate completion reply with user's name
       const replyMessage = await generateEmailCompletionReply(
         task.title,
         task.description,
-        'openai'
+        'openai',
+        userName
       );
       
       // Send the reply
