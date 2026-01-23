@@ -617,8 +617,20 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => 
     const dateText = dateLabel || new Date().toLocaleDateString();
 
     const lines = tasks.map((t, index) => {
-      // No workspace tag, just a clean numbered list of titles
-      return `${index + 1}. ${t.title}`;
+      // Start with the main task
+      let line = `${index + 1}. ${t.title}`;
+      
+      // Add subtasks if they exist
+      if (t.subtasks && Array.isArray(t.subtasks) && t.subtasks.length > 0) {
+        // Show all subtasks (completed and uncompleted) since the main task is done
+        const subtaskLines = t.subtasks.map(st => {
+          const checkmark = st.completed ? '✓' : '○';
+          return `   ${checkmark} ${st.title}`;
+        });
+        line += '\n' + subtaskLines.join('\n');
+      }
+      
+      return line;
     });
 
     const text = `*Newtons Tasks - ${dateText}*\n${lines.join('\n')}`;
