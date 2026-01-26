@@ -444,6 +444,28 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
               </h3>
             </div>
             
+            {/* Progress Bar */}
+            {subtasks.length > 0 && (
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-slate-400">
+                    Progress
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    {Math.round((subtasks.filter(s => s.completed).length / subtasks.length) * 100)}%
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ 
+                      width: `${(subtasks.filter(s => s.completed).length / subtasks.length) * 100}%` 
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            
             {/* Subtasks List */}
             {subtasks.length > 0 ? (
               <div className="space-y-2 mb-4">

@@ -847,6 +847,28 @@ const TaskCard: React.FC<{
             {task.title}
           </h3>
           
+          {/* Subtask Progress Bar */}
+          {task.subtasks && task.subtasks.length > 0 && (
+            <div className="mb-2">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-slate-400">
+                  {task.subtasks.filter(st => st.completed).length} / {task.subtasks.length} subtasks
+                </span>
+                <span className="text-xs text-slate-500">
+                  {Math.round((task.subtasks.filter(st => st.completed).length / task.subtasks.length) * 100)}%
+                </span>
+              </div>
+              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{ 
+                    width: `${(task.subtasks.filter(st => st.completed).length / task.subtasks.length) * 100}%` 
+                  }}
+                />
+              </div>
+            </div>
+          )}
+          
           <div className="flex flex-wrap gap-2">
             {task.tags.map(tag => (
               <span key={tag} className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 text-xs border border-slate-700">
@@ -2794,7 +2816,34 @@ export default function App() {
           // Check if daily report is enabled in Slack settings
           const slackStatus = await api.slack.status(token);
           if (slackStatus.connected && slackStatus.dailyReportEnabled !== false) {
-            await api.slack.dailySummary(token, completedTodayJob, todayLabel);
+            // Transform tasks: if a task has subtasks, only include completed subtasks as individual items
+            const reportItems: Array<{ title: string; subtasks?: any[] }> = [];
+            
+            completedTodayJob.forEach(task => {
+              if (task.subtasks && task.subtasks.length > 0) {
+                const completedSubtasks = task.subtasks.filter(st => st.completed);
+                const allSubtasksCompleted = completedSubtasks.length === task.subtasks.length;
+                
+                if (allSubtasksCompleted) {
+                  // All subtasks done, include the whole task
+                  reportItems.push(task);
+                } else if (completedSubtasks.length > 0) {
+                  // Only some subtasks done, include only completed subtasks as individual items
+                  completedSubtasks.forEach(subtask => {
+                    reportItems.push({
+                      title: `${task.title}: ${subtask.title}`,
+                      subtasks: []
+                    });
+                  });
+                }
+                // If no subtasks are completed, don't include anything
+              } else {
+                // No subtasks, include the task as normal
+                reportItems.push(task);
+              }
+            });
+            
+            await api.slack.dailySummary(token, reportItems, todayLabel);
           }
         } catch (err) {
           console.error('Failed to post Slack daily summary', err);
