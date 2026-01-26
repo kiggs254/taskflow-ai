@@ -2803,6 +2803,10 @@ export default function App() {
       const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
       const todayEnd = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1).getTime();
       
+      // Get all job tasks (not just completed ones) to check for subtask completion
+      const allJobTasks = tasks.filter(t => t.workspace === 'job');
+      
+      // Get tasks that were completed today (main task marked as done)
       const completedTodayJob = completedTasksAll.filter(
         (t) =>
           t.workspace === 'job' &&
@@ -2811,39 +2815,67 @@ export default function App() {
           t.completedAt < todayEnd
       );
 
-      if (completedTodayJob.length > 0) {
+      // Also include tasks with subtasks that have at least one completed subtask
+      // Check if any subtask was completed today (based on completedAt timestamp)
+      const tasksWithCompletedSubtasks = allJobTasks.filter(task => {
+        if (!task.subtasks || task.subtasks.length === 0) return false;
+        // Check if any subtask was completed today
+        return task.subtasks.some(st => 
+          st.completed && 
+          st.completedAt && 
+          st.completedAt >= todayStart && 
+          st.completedAt < todayEnd
+        );
+      });
+
+      // Combine both: completed tasks and tasks with completed subtasks
+      const allTasksForReport = new Map<string, Task>();
+      completedTodayJob.forEach(t => allTasksForReport.set(t.id, t));
+      tasksWithCompletedSubtasks.forEach(t => {
+        if (!allTasksForReport.has(t.id)) {
+          allTasksForReport.set(t.id, t);
+        }
+      });
+
+      const tasksForReport = Array.from(allTasksForReport.values());
+
+      if (tasksForReport.length > 0) {
         try {
           // Check if daily report is enabled in Slack settings
           const slackStatus = await api.slack.status(token);
           if (slackStatus.connected && slackStatus.dailyReportEnabled !== false) {
-            // Transform tasks: if a task has subtasks, only include completed subtasks as individual items
+            // Transform tasks for report
             const reportItems: Array<{ title: string; subtasks?: any[] }> = [];
             
-            completedTodayJob.forEach(task => {
+            tasksForReport.forEach(task => {
               if (task.subtasks && task.subtasks.length > 0) {
                 const completedSubtasks = task.subtasks.filter(st => st.completed);
                 const allSubtasksCompleted = completedSubtasks.length === task.subtasks.length;
                 
                 if (allSubtasksCompleted) {
-                  // All subtasks done, include the whole task
+                  // All subtasks done, include the whole task with all subtasks
                   reportItems.push(task);
                 } else if (completedSubtasks.length > 0) {
-                  // Only some subtasks done, include only completed subtasks as individual items
-                  completedSubtasks.forEach(subtask => {
-                    reportItems.push({
-                      title: `${task.title}: ${subtask.title}`,
-                      subtasks: []
-                    });
+                  // Some subtasks done: include main task title with ALL subtasks (done and undone)
+                  reportItems.push({
+                    ...task,
+                    title: task.title,
+                    subtasks: task.subtasks // Include all subtasks, not just completed ones
                   });
                 }
-                // If no subtasks are completed, don't include anything
+                // If no subtasks are completed, don't include the task
               } else {
-                // No subtasks, include the task as normal
-                reportItems.push(task);
+                // No subtasks, include the task as normal (only if it was completed)
+                if (task.status === 'done' && task.completedAt && 
+                    task.completedAt >= todayStart && task.completedAt < todayEnd) {
+                  reportItems.push(task);
+                }
               }
             });
             
-            await api.slack.dailySummary(token, reportItems, todayLabel);
+            if (reportItems.length > 0) {
+              await api.slack.dailySummary(token, reportItems, todayLabel);
+            }
           }
         } catch (err) {
           console.error('Failed to post Slack daily summary', err);

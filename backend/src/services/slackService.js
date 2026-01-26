@@ -622,7 +622,7 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => 
       
       // Add subtasks if they exist
       if (t.subtasks && Array.isArray(t.subtasks) && t.subtasks.length > 0) {
-        // Show all subtasks (completed and uncompleted) since the main task is done
+        // Show all subtasks (completed and uncompleted)
         const subtaskLines = t.subtasks.map(st => {
           const checkmark = st.completed ? '✓' : '○';
           return `   ${checkmark} ${st.title}`;
