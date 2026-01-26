@@ -11,6 +11,8 @@ import gmailRoutes from './routes/gmail.js';
 import telegramRoutes from './routes/telegram.js';
 import slackRoutes from './routes/slack.js';
 import draftTasksRoutes from './routes/draftTasks.js';
+import mediaRoutes from './routes/media.js';
+import productRoutes from './routes/products.js';
 import { initializeBot } from './services/telegramService.js';
 import { startEmailScanner } from './jobs/emailScanner.js';
 import { startSlackScanner } from './jobs/slackScanner.js';
@@ -45,6 +47,12 @@ app.use('/api/ai', aiRoutes);
 
 // Draft tasks routes (require authentication)
 app.use('/api/draft-tasks', authenticate, draftTasksRoutes);
+
+// Media routes (require authentication)
+app.use('/api/media', authenticate, mediaRoutes);
+
+// Product routes (require authentication)
+app.use('/api/products', authenticate, productRoutes);
 
 // Auth routes (no authentication required)
 app.use('/api', authRoutes);

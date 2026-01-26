@@ -62,6 +62,8 @@ export enum AppView {
   COMPLETED_TASKS = 'COMPLETED_TASKS',
   DRAFT_TASKS = 'DRAFT_TASKS',
   MEETINGS = 'MEETINGS',
+  MEDIA = 'MEDIA',
+  PRODUCTS = 'PRODUCTS',
 }
 
 export interface AIParsedTask {

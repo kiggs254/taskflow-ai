@@ -6,7 +6,8 @@ import {
   LogOut, Loader2, Link as LinkIcon, BarChart2, Settings as SettingsIcon,
   PieChart, Bell, Volume2, Shield, Palette, ArrowLeft, Pencil, Save, Filter,
   Search, Command, MoreVertical, Hourglass, AlarmClockOff, Video, Trash2,
-  Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw
+  Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw,
+  FolderImage, Package
 } from 'lucide-react';
 import { 
   Task, WorkspaceType, UserStats, AppView, User as UserType, EnergyLevel, RecurrenceRule
@@ -16,6 +17,8 @@ import { GmailSettings } from './components/GmailSettings';
 import { TelegramSettings } from './components/TelegramSettings';
 import { SlackSettings } from './components/SlackSettings';
 import { TaskDetailModal } from './components/TaskDetailModal';
+import { MediaLibrary } from './components/MediaLibrary';
+import { ProductManagement } from './components/ProductManagement';
 import { ToastContainer, Toast, ToastType } from './components/ToastNotification';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { AlertModal } from './components/AlertModal';
@@ -3150,7 +3153,21 @@ export default function App() {
                 >
                   <CheckSquare className="w-4 h-4" /> Completed
                 </button>
-                {/* 6. Settings */}
+                {/* 6. Media */}
+                <button 
+                  onClick={() => setView(AppView.MEDIA)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.MEDIA ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                >
+                  <FolderImage className="w-4 h-4" /> Media
+                </button>
+                {/* 7. Products */}
+                <button 
+                  onClick={() => setView(AppView.PRODUCTS)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.PRODUCTS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                >
+                  <Package className="w-4 h-4" /> Products
+                </button>
+                {/* 8. Settings */}
                 <button 
                   onClick={() => setView(AppView.SETTINGS)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.SETTINGS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -3563,6 +3580,14 @@ export default function App() {
 
           {/* Settings View */}
           {view === AppView.SETTINGS && user && <SettingsScreen user={user} onLogout={handleLogout} onBack={() => setView(AppView.DASHBOARD)} token={token!} />}
+
+          {view === AppView.MEDIA && token && (
+            <MediaLibrary token={token} />
+          )}
+
+          {view === AppView.PRODUCTS && token && (
+            <ProductManagement token={token} />
+          )}
 
         </div>
       </div>
