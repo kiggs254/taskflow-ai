@@ -19,21 +19,17 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.975.0",
-    "@aws-sdk/s3-request-presigner": "^3.975.0",
     "@slack/web-api": "^7.13.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "googleapis": "^128.0.0",
-    "multer": "^2.0.2",
     "node-cron": "^3.0.3",
     "node-telegram-bot-api": "^0.64.0",
     "nodemailer": "^6.9.8",
     "openai": "^4.20.1",
-    "pg": "^8.11.3",
-    "sharp": "^0.34.5"
+    "pg": "^8.11.3"
   },
   "engines": {
     "node": ">=18.0.0"
