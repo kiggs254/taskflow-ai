@@ -681,9 +681,18 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
     const originalMessageId = headers.find(h => h.name === 'Message-ID')?.value || '';
     const originalReferences = headers.find(h => h.name === 'References')?.value || '';
 
-    // Get user's email
+    // Get user's email and name
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const userEmail = profile.data.emailAddress;
+    
+    // Get user's full name from database
+    const userResult = await query('SELECT name FROM users WHERE id = $1', [userId]);
+    const userName = userResult.rows[0]?.name || '';
+    
+    // Format From header with name if available
+    const fromHeader = userName 
+      ? `From: "${userName}" <${userEmail}>`
+      : `From: ${userEmail}`;
 
     // Build Reply All recipients (exclude user's own email)
     const replyTo = originalTo.split(',').map(e => e.trim()).filter(e => !e.includes(userEmail));
@@ -703,6 +712,7 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
 
     // Build email message
     const emailLines = [
+      fromHeader,
       `To: ${replyTo.join(', ')}`,
     ];
     

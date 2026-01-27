@@ -597,6 +597,26 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => 
   try {
     const client = await getSlackClient(userId);
 
+    // Get Slack user's name
+    const slackIntegrationResult = await query(
+      'SELECT slack_user_id FROM slack_integrations WHERE user_id = $1 AND enabled = true',
+      [userId]
+    );
+    
+    let userName = 'Tasks';
+    if (slackIntegrationResult.rows.length > 0) {
+      try {
+        const slackUserId = slackIntegrationResult.rows[0].slack_user_id;
+        const userInfo = await client.users.info({ user: slackUserId });
+        if (userInfo.ok && userInfo.user) {
+          userName = userInfo.user.real_name || userInfo.user.display_name || userInfo.user.name || 'Tasks';
+        }
+      } catch (error) {
+        console.error('Error fetching Slack user info:', error);
+        // Fallback to 'Tasks' if we can't get the name
+      }
+    }
+
     // Find the #tech-team-daily-tasks channel
     const channelsResponse = await client.conversations.list({
       types: 'public_channel,private_channel',
@@ -633,7 +653,7 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => 
       return line;
     });
 
-    const text = `*Newtons Tasks - ${dateText}*\n${lines.join('\n')}`;
+    const text = `*${userName}'s Tasks - ${dateText}*\n${lines.join('\n')}`;
 
     await client.chat.postMessage({
       channel: channel.id,
