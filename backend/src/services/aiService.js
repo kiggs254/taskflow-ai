@@ -34,6 +34,45 @@ const getClient = (provider = 'openai') => {
 };
 
 /**
+ * Try OpenAI first, fallback to Deepseek if OpenAI fails
+ * @param {Function} fn - Internal function that takes provider as first arg, then other args
+ * @param {...any} args - Arguments to pass to the function (after provider)
+ */
+const tryWithFallback = async (fn, ...args) => {
+  try {
+    // Try OpenAI first
+    return await fn('openai', ...args);
+  } catch (openaiError) {
+    // Check if it's an API key error - don't fallback in that case
+    if (openaiError.message && openaiError.message.includes('API key not configured')) {
+      throw openaiError;
+    }
+    
+    console.warn('OpenAI request failed, falling back to Deepseek:', {
+      message: openaiError.message,
+      status: openaiError.status,
+    });
+    
+    // Check if Deepseek is available
+    if (!deepseekClient) {
+      console.error('Deepseek not available for fallback');
+      throw new Error(`OpenAI failed and Deepseek is not configured. Original error: ${openaiError.message}`);
+    }
+    
+    // Fallback to Deepseek
+    try {
+      return await fn('deepseek', ...args);
+    } catch (deepseekError) {
+      console.error('Deepseek fallback also failed:', {
+        message: deepseekError.message,
+        status: deepseekError.status,
+      });
+      throw new Error(`Both OpenAI and Deepseek failed. OpenAI: ${openaiError.message}, Deepseek: ${deepseekError.message}`);
+    }
+  }
+};
+
+/**
  * Parse task input using AI
  * Returns structured task data: title, energy, estimatedTime, tags, workspaceSuggestions
  */
@@ -435,6 +474,44 @@ For subtasks:
   }
 };
 
+const _generateEmailCompletionReplyInternal = async (provider, taskTitle, taskDescription, userName) => {
+  const client = getClient(provider);
+  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+
+  // Extract context from description (remove metadata comments)
+  const cleanDescription = taskDescription
+    ? taskDescription.replace(/<!-- Email metadata:.*?-->/, '').replace(/<!-- Slack metadata:.*?-->/, '').trim()
+    : '';
+
+  // Get first name from full name
+  const firstName = userName ? userName.split(' ')[0] : '';
+  const signOff = firstName ? `\n\nKind Regards,\n${firstName}` : '';
+
+  const response = await client.chat.completions.create({
+    model: model,
+    messages: [
+      {
+        role: 'system',
+        content: `You are an email assistant writing on behalf of ${userName || 'the user'}. Generate a brief, professional email reply to inform the sender that a task has been completed. Keep it concise (2-3 sentences max) and professional. ${firstName ? `Sign off with "Kind Regards,\\n${firstName}" - do NOT use placeholders like {name} or [name].` : 'Do not include a sign-off.'}`,
+      },
+      {
+        role: 'user',
+        content: `Generate a completion email reply for this task:
+        
+Task: ${taskTitle}
+${cleanDescription ? `Context: ${cleanDescription.substring(0, 500)}` : ''}
+${firstName ? `\nIMPORTANT: Sign off exactly as "Kind Regards,\\n${firstName}" - no placeholders.` : ''}
+
+Write a brief, professional email reply informing them the task is complete.`,
+      },
+    ],
+    temperature: 0.7,
+    max_tokens: 200,
+  });
+
+  return response.choices[0]?.message?.content || 'Thank you for your email. This task has been completed.';
+};
+
 /**
  * Generate email completion reply for Gmail tasks
  */
@@ -448,42 +525,19 @@ export const generateEmailCompletionReply = async (
     throw new Error('Invalid input: taskTitle must be a string');
   }
 
-  const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
-
-  // Extract context from description (remove metadata comments)
-  const cleanDescription = taskDescription
-    ? taskDescription.replace(/<!-- Email metadata:.*?-->/, '').replace(/<!-- Slack metadata:.*?-->/, '').trim()
-    : '';
-
-  // Get first name from full name
-  const firstName = userName ? userName.split(' ')[0] : '';
-  const signOff = firstName ? `\n\nKind Regards,\n${firstName}` : '';
-
   try {
-    const response = await client.chat.completions.create({
-      model: model,
-      messages: [
-        {
-          role: 'system',
-          content: `You are an email assistant writing on behalf of ${userName || 'the user'}. Generate a brief, professional email reply to inform the sender that a task has been completed. Keep it concise (2-3 sentences max) and professional. ${firstName ? `Sign off with "Kind Regards,\\n${firstName}" - do NOT use placeholders like {name} or [name].` : 'Do not include a sign-off.'}`,
-        },
-        {
-          role: 'user',
-          content: `Generate a completion email reply for this task:
-          
-Task: ${taskTitle}
-${cleanDescription ? `Context: ${cleanDescription.substring(0, 500)}` : ''}
-${firstName ? `\nIMPORTANT: Sign off exactly as "Kind Regards,\\n${firstName}" - no placeholders.` : ''}
-
-Write a brief, professional email reply informing them the task is complete.`,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 200,
-    });
-
-    return response.choices[0]?.message?.content || 'Thank you for your email. This task has been completed.';
+    // If provider is explicitly set to deepseek, use it directly
+    if (provider === 'deepseek') {
+      return await _generateEmailCompletionReplyInternal(provider, taskTitle, taskDescription, userName);
+    }
+    
+    // Otherwise, try OpenAI first, fallback to Deepseek
+    return await tryWithFallback(
+      _generateEmailCompletionReplyInternal,
+      taskTitle,
+      taskDescription,
+      userName
+    );
   } catch (error) {
     console.error('AI generateEmailCompletionReply error:', error);
     throw error;
@@ -493,19 +547,15 @@ Write a brief, professional email reply informing them the task is complete.`,
 /**
  * Generate email draft reply with AI based on task context and tone
  */
-export const generateEmailDraft = async (
+const _generateEmailDraftInternal = async (
+  provider,
   taskTitle,
   taskDescription,
   emailSubject,
-  tone = 'professional',
-  provider = 'openai',
-  customInstructions = '',
-  userName = ''
+  tone,
+  customInstructions,
+  userName
 ) => {
-  if (!taskTitle || typeof taskTitle !== 'string') {
-    throw new Error('Invalid input: taskTitle must be a string');
-  }
-
   const client = getClient(provider);
   const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
 
@@ -535,34 +585,64 @@ export const generateEmailDraft = async (
     ? `\n\nIMPORTANT: You are writing on behalf of ${userName}. Sign off the email EXACTLY as specified (e.g., "Kind Regards,\\n${firstName}"). Do NOT use placeholders like {name}, [Your Name], [Name], etc. Use the actual name provided.`
     : '';
 
-  try {
-    const response = await client.chat.completions.create({
-      model: model,
-      messages: [
-        {
-          role: 'system',
-          content: `You are an email writing assistant writing on behalf of ${userName || 'the user'}. Generate a well-written email reply based on the task context. ${tonePrompt}${customPrompt}${signOffInstruction}`,
-        },
-        {
-          role: 'user',
-          content: `Generate an email reply for the following task:
-          
+  const response = await client.chat.completions.create({
+    model: model,
+    messages: [
+      {
+        role: 'system',
+        content: `You are an email writing assistant writing on behalf of ${userName || 'the user'}. Generate a well-written email reply based on the task context. ${tonePrompt}${customPrompt}${signOffInstruction}`,
+      },
+      {
+        role: 'user',
+        content: `Generate an email reply for the following task:
+        
 Task: ${taskTitle}
 ${cleanDescription ? `Context: ${cleanDescription.substring(0, 1000)}` : ''}
 Email Subject: ${emailSubject || 'No subject'}
 
 Write an appropriate email reply that addresses the task. Keep it relevant to the context and appropriate for the tone requested.${firstName ? `\n\nSign off with the user's actual name (${firstName}), not a placeholder.` : ''}`,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 500,
-    });
+      },
+    ],
+    temperature: 0.7,
+    max_tokens: 500,
+  });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('AI returned empty response');
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    throw new Error('AI returned empty response');
+  }
+  return content;
+};
+
+export const generateEmailDraft = async (
+  taskTitle,
+  taskDescription,
+  emailSubject,
+  tone = 'professional',
+  provider = 'openai',
+  customInstructions = '',
+  userName = ''
+) => {
+  if (!taskTitle || typeof taskTitle !== 'string') {
+    throw new Error('Invalid input: taskTitle must be a string');
+  }
+
+  try {
+    // If provider is explicitly set to deepseek, use it directly
+    if (provider === 'deepseek') {
+      return await _generateEmailDraftInternal(provider, taskTitle, taskDescription, emailSubject, tone, customInstructions, userName);
     }
-    return content;
+    
+    // Otherwise, try OpenAI first, fallback to Deepseek
+    return await tryWithFallback(
+      _generateEmailDraftInternal,
+      taskTitle,
+      taskDescription,
+      emailSubject,
+      tone,
+      customInstructions,
+      userName
+    );
   } catch (error) {
     console.error('AI generateEmailDraft error:', {
       message: error.message,
@@ -578,16 +658,7 @@ Write an appropriate email reply that addresses the task. Keep it relevant to th
 /**
  * Polish email reply with AI
  */
-export const polishEmailReply = async (
-  message,
-  provider = 'openai',
-  instructions = '',
-  userName = ''
-) => {
-  if (!message || typeof message !== 'string') {
-    throw new Error('Invalid input: message must be a string');
-  }
-
+const _polishEmailReplyInternal = async (provider, message, instructions, userName) => {
   const client = getClient(provider);
   const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
 
@@ -601,29 +672,53 @@ export const polishEmailReply = async (
     ? `\n\nIMPORTANT: If the email needs a sign-off, use the user's actual name: "${firstName}". Do NOT use placeholders like {name}, [Your Name], or similar.`
     : '';
 
-  try {
-    const response = await client.chat.completions.create({
-      model: model,
-      messages: [
-        {
-          role: 'system',
-          content: `You are an email writing assistant${userName ? ` writing on behalf of ${userName}` : ''}. Polish and improve email messages to be professional, clear, and appropriate for business communication.${customInstructions}${signOffInstruction}`,
-        },
-        {
-          role: 'user',
-          content: `Polish and improve this email message:\n\n${message}${firstName ? `\n\nIf adding or updating the sign-off, use "Kind Regards,\n${firstName}" - no placeholders.` : ''}`,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 500,
-    });
+  const response = await client.chat.completions.create({
+    model: model,
+    messages: [
+      {
+        role: 'system',
+        content: `You are an email writing assistant${userName ? ` writing on behalf of ${userName}` : ''}. Polish and improve email messages to be professional, clear, and appropriate for business communication.${customInstructions}${signOffInstruction}`,
+      },
+      {
+        role: 'user',
+        content: `Polish and improve this email message:\n\n${message}${firstName ? `\n\nIf adding or updating the sign-off, use "Kind Regards,\n${firstName}" - no placeholders.` : ''}`,
+      },
+    ],
+    temperature: 0.7,
+    max_tokens: 500,
+  });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      console.warn('AI polishEmailReply returned empty response, using original message');
-      return message;
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    console.warn('AI polishEmailReply returned empty response, using original message');
+    return message;
+  }
+  return content;
+};
+
+export const polishEmailReply = async (
+  message,
+  provider = 'openai',
+  instructions = '',
+  userName = ''
+) => {
+  if (!message || typeof message !== 'string') {
+    throw new Error('Invalid input: message must be a string');
+  }
+
+  try {
+    // If provider is explicitly set to deepseek, use it directly
+    if (provider === 'deepseek') {
+      return await _polishEmailReplyInternal(provider, message, instructions, userName);
     }
-    return content;
+    
+    // Otherwise, try OpenAI first, fallback to Deepseek
+    return await tryWithFallback(
+      _polishEmailReplyInternal,
+      message,
+      instructions,
+      userName
+    );
   } catch (error) {
     console.error('AI polishEmailReply error:', {
       message: error.message,
