@@ -228,7 +228,8 @@ export const scanEmails = async (userId, maxEmails = 50) => {
 
     // Scan all mail. We rely on last_scan_at to avoid reprocessing instead of
     // filtering by label/category, so the user can control relevance via prompt instructions.
-    let queryString = '';
+    // Exclude sent emails - we only want to scan received emails
+    let queryString = '-in:sent';
     
     if (lastScanAt) {
       // Only get emails after last scan
