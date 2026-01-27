@@ -3090,9 +3090,11 @@ export default function App() {
         const taskPrefix = task.status === 'done' ? '[x]' : '[ ]';
 
         if (visibleSubtasks.length === 0) {
-          lines.push(`- ${taskPrefix} ${task.title}`);
+          // Main task in bold
+          lines.push(`- ${taskPrefix} **${task.title}**`);
         } else {
-          lines.push(`- ${taskPrefix} ${task.title}`);
+          // Main task in bold, subtasks normal to show distinction
+          lines.push(`- ${taskPrefix} **${task.title}**`);
           visibleSubtasks.forEach(st => {
             const subPrefix = st.completed ? '[x]' : '[ ]';
             lines.push(`  - ${subPrefix} ${st.title}`);
