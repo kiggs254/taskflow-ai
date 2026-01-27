@@ -682,9 +682,13 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
     const originalMessageId = headers.find(h => h.name === 'Message-ID')?.value || '';
     const originalReferences = headers.find(h => h.name === 'References')?.value || '';
 
-    // Get user's email (Gmail API will automatically use this for From header)
+    // Get user's email and name for From header
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const userEmail = profile.data.emailAddress;
+    
+    // Get user's full name from database
+    const userResult = await query('SELECT name FROM users WHERE id = $1', [userId]);
+    const userName = userResult.rows[0]?.name || '';
 
     // Build Reply All recipients (exclude user's own email)
     const replyTo = originalTo.split(',').map(e => e.trim()).filter(e => !e.includes(userEmail));
@@ -695,10 +699,6 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       replyTo.unshift(originalFrom);
     }
 
-    // Get user's name for AI polish if needed
-    const userResult = await query('SELECT name FROM users WHERE id = $1', [userId]);
-    const userName = userResult.rows[0]?.name || '';
-
     // Polish message with AI if requested
     let finalMessage = message;
     if (polishWithAI) {
@@ -706,8 +706,14 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       finalMessage = await polishEmailReply(message, 'openai', polishInstructions, userName);
     }
 
-    // Build email message (Gmail API automatically sets From header based on authenticated user)
+    // Build email message - Gmail requires From header but will override email to match authenticated user
+    // Format: "Display Name" <email@example.com> or just email@example.com
+    const fromHeader = userName 
+      ? `From: "${userName}" <${userEmail}>`
+      : `From: ${userEmail}`;
+    
     const emailLines = [
+      fromHeader,
       `To: ${replyTo.join(', ')}`,
     ];
     

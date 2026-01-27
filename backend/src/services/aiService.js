@@ -1,22 +1,36 @@
 import OpenAI from 'openai';
 import { config } from '../config/env.js';
 
-// Initialize OpenAI client
-const openaiClient = new OpenAI({
-  apiKey: config.ai.openai.apiKey,
-});
+// Initialize OpenAI client (only if API key exists)
+const openaiClient = config.ai.openai.apiKey 
+  ? new OpenAI({
+      apiKey: config.ai.openai.apiKey,
+    })
+  : null;
 
-// Initialize Deepseek client (OpenAI-compatible API)
-const deepseekClient = new OpenAI({
-  apiKey: config.ai.deepseek.apiKey,
-  baseURL: config.ai.deepseek.baseURL,
-});
+// Initialize Deepseek client (OpenAI-compatible API) (only if API key exists)
+const deepseekClient = config.ai.deepseek.apiKey
+  ? new OpenAI({
+      apiKey: config.ai.deepseek.apiKey,
+      baseURL: config.ai.deepseek.baseURL,
+    })
+  : null;
 
 /**
  * Get AI client based on provider
  */
 const getClient = (provider = 'openai') => {
-  return provider === 'deepseek' ? deepseekClient : openaiClient;
+  if (provider === 'deepseek') {
+    if (!deepseekClient) {
+      throw new Error('Deepseek API key not configured. Please set DEEPSEEK_API_KEY environment variable.');
+    }
+    return deepseekClient;
+  } else {
+    if (!openaiClient) {
+      throw new Error('OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.');
+    }
+    return openaiClient;
+  }
 };
 
 /**
