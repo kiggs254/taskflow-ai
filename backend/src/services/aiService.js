@@ -43,8 +43,25 @@ const tryWithFallback = async (fn, ...args) => {
     // Try OpenAI first
     return await fn('openai', ...args);
   } catch (openaiError) {
-    // Check if it's an API key error - don't fallback in that case
-    if (openaiError.message && openaiError.message.includes('API key not configured')) {
+    // Check if it's an API key error - don't fallback in that case, but if Deepseek is available, use it
+    const isApiKeyError = openaiError.message && (
+      openaiError.message.includes('API key not configured') ||
+      openaiError.message.includes('OPENAI_API_KEY') ||
+      openaiError.message.includes('apiKey')
+    );
+    
+    if (isApiKeyError) {
+      console.warn('OpenAI API key issue detected, checking Deepseek availability...');
+      // If OpenAI API key is missing but Deepseek is available, use Deepseek
+      if (deepseekClient) {
+        console.log('Using Deepseek as primary provider since OpenAI is not configured');
+        try {
+          return await fn('deepseek', ...args);
+        } catch (deepseekError) {
+          throw new Error(`OpenAI not configured and Deepseek also failed: ${deepseekError.message}`);
+        }
+      }
+      // If neither is available, throw the original error
       throw openaiError;
     }
     
@@ -556,7 +573,13 @@ const _generateEmailDraftInternal = async (
   customInstructions,
   userName
 ) => {
-  const client = getClient(provider);
+  let client;
+  try {
+    client = getClient(provider);
+  } catch (clientError) {
+    // Re-throw client initialization errors so fallback can handle them
+    throw clientError;
+  }
   const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
 
   // Get first name from full name

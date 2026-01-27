@@ -242,12 +242,13 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
   console.log('Generating draft with:', { title: task.title, tone, userName, emailSubject });
   
   try {
+    // Don't specify provider - let it use OpenAI with Deepseek fallback automatically
     const draft = await generateEmailDraft(
       task.title,
       task.description || '',
       emailSubject,
       tone || 'professional',
-      'openai',
+      undefined, // Use default provider (openai with fallback)
       customInstructions || '',
       userName
     );
