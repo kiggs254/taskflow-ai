@@ -682,18 +682,9 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
     const originalMessageId = headers.find(h => h.name === 'Message-ID')?.value || '';
     const originalReferences = headers.find(h => h.name === 'References')?.value || '';
 
-    // Get user's email and name
+    // Get user's email (Gmail API will automatically use this for From header)
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const userEmail = profile.data.emailAddress;
-    
-    // Get user's full name from database
-    const userResult = await query('SELECT name FROM users WHERE id = $1', [userId]);
-    const userName = userResult.rows[0]?.name || '';
-    
-    // Format From header with name if available
-    const fromHeader = userName 
-      ? `From: "${userName}" <${userEmail}>`
-      : `From: ${userEmail}`;
 
     // Build Reply All recipients (exclude user's own email)
     const replyTo = originalTo.split(',').map(e => e.trim()).filter(e => !e.includes(userEmail));
@@ -704,16 +695,19 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       replyTo.unshift(originalFrom);
     }
 
+    // Get user's name for AI polish if needed
+    const userResult = await query('SELECT name FROM users WHERE id = $1', [userId]);
+    const userName = userResult.rows[0]?.name || '';
+
     // Polish message with AI if requested
     let finalMessage = message;
     if (polishWithAI) {
       const { polishEmailReply } = await import('./aiService.js');
-      finalMessage = await polishEmailReply(message, 'openai', polishInstructions);
+      finalMessage = await polishEmailReply(message, 'openai', polishInstructions, userName);
     }
 
-    // Build email message
+    // Build email message (Gmail API automatically sets From header based on authenticated user)
     const emailLines = [
-      fromHeader,
       `To: ${replyTo.join(', ')}`,
     ];
     
@@ -740,17 +734,33 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       .replace(/=+$/, '');
 
     // Send reply
-    await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: {
-        threadId: threadId,
-        raw: encodedMessage,
-      },
-    });
-
-    return { success: true };
+    try {
+      const sendResult = await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          threadId: threadId,
+          raw: encodedMessage,
+        },
+      });
+      
+      console.log('Email sent successfully:', sendResult.data.id);
+      return { success: true, messageId: sendResult.data.id };
+    } catch (sendError) {
+      console.error('Gmail API send error:', {
+        message: sendError.message,
+        code: sendError.code,
+        response: sendError.response?.data,
+        stack: sendError.stack,
+      });
+      throw new Error(`Failed to send email: ${sendError.message}`);
+    }
   } catch (error) {
-    console.error('Error replying to email:', error);
+    console.error('Error replying to email:', {
+      message: error.message,
+      stack: error.stack,
+      userId,
+      taskId,
+    });
     throw error;
   }
 };

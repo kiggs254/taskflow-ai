@@ -544,10 +544,20 @@ Write an appropriate email reply that addresses the task. Keep it relevant to th
       max_tokens: 500,
     });
 
-    return response.choices[0]?.message?.content || 'Thank you for your email. I will look into this.';
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('AI returned empty response');
+    }
+    return content;
   } catch (error) {
-    console.error('AI generateEmailDraft error:', error);
-    throw error;
+    console.error('AI generateEmailDraft error:', {
+      message: error.message,
+      type: error.constructor.name,
+      status: error.status,
+      response: error.response?.data,
+      stack: error.stack,
+    });
+    throw new Error(`Failed to generate email draft: ${error.message}`);
   }
 };
 
@@ -594,9 +604,21 @@ export const polishEmailReply = async (
       max_tokens: 500,
     });
 
-    return response.choices[0]?.message?.content || message;
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      console.warn('AI polishEmailReply returned empty response, using original message');
+      return message;
+    }
+    return content;
   } catch (error) {
-    console.error('AI polishEmailReply error:', error);
-    return message; // Return original if polish fails
+    console.error('AI polishEmailReply error:', {
+      message: error.message,
+      type: error.constructor.name,
+      status: error.status,
+      response: error.response?.data,
+      stack: error.stack,
+    });
+    // Return original message if polish fails (non-blocking)
+    return message;
   }
 };
