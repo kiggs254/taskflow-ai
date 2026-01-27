@@ -2957,37 +2957,153 @@ export default function App() {
 
   const handleExport = (format: 'csv' | 'md', tasksToExport: Task[]) => {
     if (format === 'csv') {
-      // CSV Export: Strictly restricted to Title and Completed At
-      const headers = "Title,Completed At\n";
+      // CSV Export used for completed-tasks / daily reset views:
+      // keep it minimal and backwards-compatible (Title + Completed At only)
+      const headers = 'Title,Completed At\n';
       const rows = tasksToExport.map(task => {
         const title = `"${task.title.replace(/"/g, '""')}"`;
-        // NO Tags, NO Workspace, NO Time
-        const completed = task.completedAt ? new Date(task.completedAt).toLocaleString() : 'N/A';
+        const completed = task.completedAt
+          ? new Date(task.completedAt).toLocaleString()
+          : 'N/A';
         return [title, completed].join(',');
       }).join('\n');
 
       const csvContent = headers + rows;
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement("a");
+      const link = document.createElement('a');
       if (link.download !== undefined) {
         const url = URL.createObjectURL(blob);
         const today = new Date().toISOString().split('T')[0];
-        link.setAttribute("href", url);
-        link.setAttribute("download", `taskflow_report_${today}.csv`);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `taskflow_report_${today}.csv`);
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
       }
     } else if (format === 'md') {
-      // Markdown Export: Strictly restricted to Title
-      const markdown = tasksToExport.map(task => 
-        `- [x] ${task.title}`
-      ).join('\n');
+      // Markdown Export used for completed-tasks / daily reset views:
+      // keep it minimal and backwards-compatible (Title only)
+      const markdown = tasksToExport
+        .map(task => `- [x] ${task.title}`)
+        .join('\n');
       navigator.clipboard.writeText(markdown);
     }
   };
 
+  // Export the CURRENT visible task list (for the active workspace tab) including subtasks.
+  // Subtasks completed before today are excluded; undone subtasks are always included.
+  const exportCurrentTasks = (format: 'csv' | 'md') => {
+    const nowDate = new Date();
+    const todayStart = new Date(
+      nowDate.getFullYear(),
+      nowDate.getMonth(),
+      nowDate.getDate()
+    ).getTime();
+
+    // Match what the user currently sees: non-completed + waiting tasks in this workspace,
+    // already filtered by search, energy and tag filters via currentTasks & waitingTasks.
+    const tasksToExport = [...currentTasks, ...waitingTasks];
+
+    if (tasksToExport.length === 0) {
+      return;
+    }
+
+    const getVisibleSubtasks = (task: Task) => {
+      if (!task.subtasks || task.subtasks.length === 0) return [];
+      return task.subtasks.filter(st => {
+        if (!st.completed) return true; // always include undone subtasks
+        if (!st.completedAt) return true; // defensive: missing timestamp still included
+        // Exclude subtasks completed before today
+        return st.completedAt >= todayStart;
+      });
+    };
+
+    if (format === 'csv') {
+      const headers =
+        'Workspace,Status,Task Title,Subtask Title,Subtask Status,Subtask Completed At\n';
+
+      const rows: string[] = [];
+
+      tasksToExport.forEach(task => {
+        const visibleSubtasks = getVisibleSubtasks(task);
+
+        if (visibleSubtasks.length === 0) {
+          const cols = [
+            task.workspace,
+            task.status,
+            task.title,
+            '',
+            '',
+            '',
+          ];
+          rows.push(
+            cols
+              .map(val => `"${String(val ?? '').replace(/"/g, '""')}"`)
+              .join(',')
+          );
+        } else {
+          visibleSubtasks.forEach(st => {
+            const cols = [
+              task.workspace,
+              task.status,
+              task.title,
+              st.title,
+              st.completed ? 'done' : 'todo',
+              st.completed && st.completedAt
+                ? new Date(st.completedAt).toLocaleString()
+                : '',
+            ];
+            rows.push(
+              cols
+                .map(val => `"${String(val ?? '').replace(/"/g, '""')}"`)
+                .join(',')
+            );
+          });
+        }
+      });
+
+      const csvContent = headers + rows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        const today = new Date().toISOString().split('T')[0];
+        link.setAttribute(
+          'href',
+          url
+        );
+        link.setAttribute(
+          'download',
+          `taskflow_${activeWorkspace}_tasks_${today}.csv`
+        );
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } else if (format === 'md') {
+      const lines: string[] = [];
+
+      tasksToExport.forEach(task => {
+        const visibleSubtasks = getVisibleSubtasks(task);
+        const taskPrefix = task.status === 'done' ? '[x]' : '[ ]';
+
+        if (visibleSubtasks.length === 0) {
+          lines.push(`- ${taskPrefix} ${task.title}`);
+        } else {
+          lines.push(`- ${taskPrefix} ${task.title}`);
+          visibleSubtasks.forEach(st => {
+            const subPrefix = st.completed ? '[x]' : '[ ]';
+            lines.push(`  - ${subPrefix} ${st.title}`);
+          });
+        }
+      });
+
+      const markdown = lines.join('\n');
+      navigator.clipboard.writeText(markdown);
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -3368,11 +3484,15 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Title & Stats */}
+                {/* Title, Stats & Export */}
                 <div className="flex justify-between items-end pt-1">
-                   <div>
+                  <div>
                     <h2 className="text-2xl font-bold text-white mb-1 bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-                      {activeWorkspace === 'job' ? 'Work Tasks' : activeWorkspace === 'freelance' ? 'Client Projects' : 'Life Admin'}
+                      {activeWorkspace === 'job'
+                        ? 'Work Tasks'
+                        : activeWorkspace === 'freelance'
+                        ? 'Client Projects'
+                        : 'Life Admin'}
                     </h2>
                     <div className="flex items-center gap-1.5 text-xs">
                       <span className="text-slate-400">
@@ -3380,10 +3500,33 @@ export default function App() {
                       </span>
                       <span className="text-slate-600">•</span>
                       <span className="text-slate-400">
-                        {energyFilter === 'all' ? 'All Energies' : energyFilter === 'focus' ? 'High/Med Energy' : 'Low/Med Energy'}
+                        {energyFilter === 'all'
+                          ? 'All Energies'
+                          : energyFilter === 'focus'
+                          ? 'High/Med Energy'
+                          : 'Low/Med Energy'}
                       </span>
                     </div>
                   </div>
+                  {(currentTasks.length > 0 || waitingTasks.length > 0) && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => exportCurrentTasks('csv')}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700/70 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Export CSV
+                      </button>
+                      <button
+                        onClick={() => exportCurrentTasks('md')}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium border border-slate-800 transition-colors"
+                        title="Copy markdown list (tasks + subtasks) to clipboard"
+                      >
+                        <Clipboard className="w-3.5 h-3.5" />
+                        Copy MD
+                      </button>
+                    </div>
+                  )}
                 </div>
                 
                 {/* Tag Filters */}
