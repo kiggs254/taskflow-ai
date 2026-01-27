@@ -154,19 +154,34 @@ router.post('/disconnect', authenticate, asyncHandler(async (req, res) => {
 router.post('/reply', authenticate, asyncHandler(async (req, res) => {
   const { taskId, message, polishWithAI, polishInstructions } = req.body;
   
+  console.log('Reply request:', { taskId, hasMessage: !!message, polishWithAI, userId: req.user.id });
+  
   if (!taskId || !message) {
     return res.status(400).json({ error: 'taskId and message are required' });
   }
 
-  const result = await replyToEmail(
-    req.user.id,
-    taskId,
-    message,
-    polishWithAI || false,
-    polishInstructions || ''
-  );
-  
-  res.json(result);
+  try {
+    const result = await replyToEmail(
+      req.user.id,
+      taskId,
+      message,
+      polishWithAI || false,
+      polishInstructions || ''
+    );
+    
+    console.log('Reply sent successfully');
+    res.json(result);
+  } catch (error) {
+    console.error('Error in reply endpoint:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    });
+    return res.status(500).json({ 
+      error: 'Failed to send email reply: ' + error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
 }));
 
 /**
@@ -242,13 +257,13 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
   console.log('Generating draft with:', { title: task.title, tone, userName, emailSubject });
   
   try {
-    // Don't specify provider - let it use OpenAI with Deepseek fallback automatically
+    // Use default provider which will try OpenAI first, then fallback to Deepseek
     const draft = await generateEmailDraft(
       task.title,
       task.description || '',
       emailSubject,
       tone || 'professional',
-      undefined, // Use default provider (openai with fallback)
+      'openai', // Will use fallback logic automatically
       customInstructions || '',
       userName
     );
@@ -256,8 +271,16 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
     console.log('Draft generated successfully');
     res.json({ draft });
   } catch (aiError) {
-    console.error('AI Error generating draft:', aiError.message, aiError.stack);
-    return res.status(500).json({ error: 'Failed to generate draft: ' + aiError.message });
+    console.error('AI Error generating draft:', {
+      message: aiError.message,
+      stack: aiError.stack,
+      name: aiError.name,
+      cause: aiError.cause,
+    });
+    return res.status(500).json({ 
+      error: 'Failed to generate draft: ' + aiError.message,
+      details: process.env.NODE_ENV === 'development' ? aiError.stack : undefined
+    });
   }
 }));
 
