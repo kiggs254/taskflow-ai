@@ -8,7 +8,7 @@ import {
   updateGmailSettings,
   replyToEmail,
 } from '../services/gmailService.js';
-import { polishEmailReply, generateEmailDraft } from '../services/aiService.js';
+import { polishEmailReply, enhanceEmailMessage } from '../services/aiService.js';
 import { sendNotification } from '../services/telegramService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
