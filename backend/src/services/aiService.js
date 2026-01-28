@@ -730,22 +730,37 @@ const _enhanceEmailMessageInternal = async (provider, message, style, taskContex
     messages: [
       {
         role: 'system',
-        content: `You are an email writing assistant${userName ? ` writing on behalf of ${userName}` : ''}. Enhance and improve the user's email message to be professional, clear, and appropriate for business communication. ${stylePrompt}${signOffInstruction}`,
+        content: `You are an email writing assistant${userName ? ` writing on behalf of ${userName}` : ''}. Enhance and improve the user's email message to be professional, clear, and appropriate for business communication. ${stylePrompt}${signOffInstruction}
+
+CRITICAL: Return ONLY the email body text. Do NOT include:
+- Subject line
+- "Subject:" header
+- Any headers
+- Just return the message body content starting directly with the greeting or first sentence.`,
       },
       {
         role: 'user',
-        content: `Enhance this email message according to the ${style} style:\n\n${message}${contextPrompt}${firstName ? `\n\nIf adding or updating the sign-off, use "Kind Regards,\n${firstName}" - no placeholders.` : ''}`,
+        content: `Enhance this email message body according to the ${style} style. Return ONLY the body text (no subject, no headers):\n\n${message}${contextPrompt}${firstName ? `\n\nIf adding or updating the sign-off, use "Kind Regards,\n${firstName}" - no placeholders.` : ''}`,
       },
     ],
     temperature: 0.7,
     max_tokens: style === 'short' ? 300 : 800,
   });
 
-  const content = response.choices[0]?.message?.content;
+  let content = response.choices[0]?.message?.content;
   if (!content) {
     console.warn('AI enhanceEmailMessage returned empty response, using original message');
     return message;
   }
+  
+  // Remove any subject lines that might have been included
+  // Remove lines starting with "Subject:" (case insensitive)
+  content = content.replace(/^Subject:\s*.+$/gmi, '').trim();
+  // Remove any standalone "Subject:" lines
+  content = content.replace(/^Subject:\s*$/gmi, '').trim();
+  // Remove empty lines at the start
+  content = content.replace(/^\s*\n+/, '').trim();
+  
   return content;
 };
 
