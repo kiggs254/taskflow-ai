@@ -691,12 +691,26 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
     const userName = userResult.rows[0]?.name || '';
 
     // Build Reply All recipients (exclude user's own email)
-    const replyTo = originalTo.split(',').map(e => e.trim()).filter(e => !e.includes(userEmail));
-    const replyCc = originalCc.split(',').map(e => e.trim()).filter(e => !e.includes(userEmail));
+    let replyTo = originalTo ? originalTo.split(',').map(e => e.trim()).filter(e => e && !e.includes(userEmail)) : [];
+    let replyCc = originalCc ? originalCc.split(',').map(e => e.trim()).filter(e => e && !e.includes(userEmail)) : [];
     
     // Add original sender to To if not already there
-    if (originalFrom && !replyTo.some(e => e.includes(originalFrom.split('<')[1]?.split('>')[0] || originalFrom))) {
-      replyTo.unshift(originalFrom);
+    if (originalFrom) {
+      const originalFromEmail = originalFrom.includes('<') 
+        ? originalFrom.split('<')[1]?.split('>')[0] 
+        : originalFrom;
+      const alreadyInTo = replyTo.some(e => {
+        const email = e.includes('<') ? e.split('<')[1]?.split('>')[0] : e;
+        return email && email === originalFromEmail;
+      });
+      if (!alreadyInTo) {
+        replyTo.unshift(originalFrom);
+      }
+    }
+    
+    // Ensure we have at least one recipient
+    if (replyTo.length === 0) {
+      throw new Error('No valid recipients found for reply');
     }
 
     // Polish message with AI if requested
@@ -708,14 +722,13 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
 
     // Build email message with proper MIME formatting
     // Gmail requires proper MIME headers - From header will be overridden to match authenticated user
+    // Note: Gmail API will override the From address, but we still need to include it
     const fromHeader = userName 
       ? `From: "${userName}" <${userEmail}>`
       : `From: ${userEmail}`;
     
+    // Build headers in proper order (From, To, Cc, Subject, then MIME headers, then threading headers)
     const emailLines = [
-      `MIME-Version: 1.0`,
-      `Content-Type: text/plain; charset=UTF-8`,
-      `Content-Transfer-Encoding: 7bit`,
       fromHeader,
       `To: ${replyTo.join(', ')}`,
     ];
@@ -726,14 +739,22 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
     
     emailLines.push(`Subject: Re: ${subject}`);
     
+    // MIME headers
+    emailLines.push(`MIME-Version: 1.0`);
+    emailLines.push(`Content-Type: text/plain; charset=UTF-8`);
+    emailLines.push(`Content-Transfer-Encoding: 7bit`);
+    
+    // Threading headers
     if (originalMessageId) {
       emailLines.push(`In-Reply-To: ${originalMessageId}`);
       emailLines.push(`References: ${originalReferences ? originalReferences + ' ' : ''}${originalMessageId}`);
     }
     
     // Blank line separates headers from body (required by MIME standard)
-    emailLines.push('', finalMessage);
+    emailLines.push('');
+    emailLines.push(finalMessage);
 
+    // Use \r\n for proper email line endings
     const emailContent = emailLines.join('\r\n');
 
     // Encode message
@@ -745,6 +766,9 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
 
     // Send reply
     try {
+      console.log('Sending email with encoded message length:', encodedMessage.length);
+      console.log('Email content preview (first 500 chars):', emailContent.substring(0, 500));
+      
       const sendResult = await gmail.users.messages.send({
         userId: 'me',
         requestBody: {
@@ -756,13 +780,25 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       console.log('Email sent successfully:', sendResult.data.id);
       return { success: true, messageId: sendResult.data.id };
     } catch (sendError) {
-      console.error('Gmail API send error:', {
+      const errorDetails = {
         message: sendError.message,
         code: sendError.code,
-        response: sendError.response?.data,
+        status: sendError.response?.status,
+        statusText: sendError.response?.statusText,
+        data: sendError.response?.data,
         stack: sendError.stack,
-      });
-      throw new Error(`Failed to send email: ${sendError.message}`);
+      };
+      console.error('Gmail API send error:', JSON.stringify(errorDetails, null, 2));
+      
+      // Extract more detailed error message
+      let errorMessage = sendError.message;
+      if (sendError.response?.data?.error) {
+        errorMessage = sendError.response.data.error.message || sendError.response.data.error;
+      } else if (sendError.response?.data) {
+        errorMessage = JSON.stringify(sendError.response.data);
+      }
+      
+      throw new Error(`Failed to send email: ${errorMessage}`);
     }
   } catch (error) {
     console.error('Error replying to email:', {
