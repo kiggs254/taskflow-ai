@@ -33,9 +33,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [replyMessage, setReplyMessage] = useState('');
   const [polishedMessage, setPolishedMessage] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
-  const [selectedTone, setSelectedTone] = useState('professional');
-  const [generatingDraft, setGeneratingDraft] = useState(false);
-  const [customToneInstructions, setCustomToneInstructions] = useState('');
+  const [selectedStyle, setSelectedStyle] = useState<'short' | 'detailed'>('short');
+  const [enhancingMessage, setEnhancingMessage] = useState(false);
   const [sendEmailReplyOnComplete, setSendEmailReplyOnComplete] = useState(false);
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ 
     isOpen: false, title: '', message: '', type: 'info' 
@@ -716,8 +715,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                         setShowReply(false);
                         setReplyMessage('');
                         setPolishedMessage('');
-                        setSelectedTone('professional');
-                        setCustomToneInstructions('');
+                        setSelectedStyle('short');
                       }}
                       className="text-slate-400 hover:text-white transition-colors p-1 rounded hover:bg-slate-700"
                     >
@@ -760,94 +758,86 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                     </div>
                   </div>
 
-                  {/* AI Draft Generation Section */}
-                  <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Sparkles className="w-4 h-4 text-yellow-400" />
-                      <h4 className="text-sm font-semibold text-white">Generate AI Draft</h4>
-                    </div>
-                    
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-2">Tone</label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { value: 'professional', label: 'Professional' },
-                            { value: 'casual', label: 'Casual' },
-                            { value: 'friendly', label: 'Friendly' },
-                            { value: 'concise', label: 'Concise' },
-                            { value: 'urgent', label: 'Urgent' },
-                          ].map((tone) => (
-                            <button
-                              key={tone.value}
-                              onClick={() => setSelectedTone(tone.value)}
-                              className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                                selectedTone === tone.value
-                                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
-                                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                              }`}
-                            >
-                              {tone.label}
-                            </button>
-                          ))}
+                  {/* AI Enhancement Section */}
+                  {replyMessage && (
+                    <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Sparkles className="w-4 h-4 text-yellow-400" />
+                        <h4 className="text-sm font-semibold text-white">Enhance with AI</h4>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-2">Style</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { value: 'short' as const, label: 'Short' },
+                              { value: 'detailed' as const, label: 'Detailed' },
+                            ].map((style) => (
+                              <button
+                                key={style.value}
+                                onClick={() => setSelectedStyle(style.value)}
+                                className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                                  selectedStyle === style.value
+                                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                }`}
+                              >
+                                {style.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
 
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-2">Custom Instructions (optional)</label>
-                        <textarea
-                          value={customToneInstructions}
-                          onChange={(e) => setCustomToneInstructions(e.target.value)}
-                          rows={2}
-                          className="w-full px-3 py-2 rounded-lg bg-slate-800 text-white border border-slate-700 focus:border-blue-500 focus:outline-none resize-y text-sm"
-                          placeholder="e.g., 'Include a call to action', 'Mention the deadline', 'Keep it under 100 words'"
-                        />
+                        <button
+                          onClick={async () => {
+                            if (!replyMessage.trim()) {
+                              setAlertModal({ isOpen: true, title: 'Error', message: 'Please type a message first', type: 'error' });
+                              return;
+                            }
+                            
+                            setEnhancingMessage(true);
+                            try {
+                              const { api } = await import('../services/apiService');
+                              const token = localStorage.getItem('taskflow_token');
+                              if (!token) throw new Error('Not authenticated');
+                              
+                              const result = await api.gmail.generateDraft(token, {
+                                taskId: task.id,
+                                message: replyMessage,
+                                style: selectedStyle,
+                              });
+                              
+                              setPolishedMessage(result.draft);
+                              // Scroll message editor into view
+                              setTimeout(() => {
+                                messageEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }, 100);
+                            } catch (error) {
+                              console.error('Error enhancing message:', error);
+                              setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to enhance message: ' + (error as Error).message, type: 'error' });
+                            } finally {
+                              setEnhancingMessage(false);
+                            }
+                          }}
+                          disabled={enhancingMessage || !replyMessage.trim()}
+                          className="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
+                        >
+                          {enhancingMessage ? (
+                            <>
+                              <Brain className="w-4 h-4 animate-pulse" />
+                              Enhancing...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4" />
+                              Enhance Message
+                            </>
+                          )}
+                        </button>
                       </div>
-
-                      <button
-                        onClick={async () => {
-                          setGeneratingDraft(true);
-                          try {
-                            const { api } = await import('../services/apiService');
-                            const token = localStorage.getItem('taskflow_token');
-                            if (!token) throw new Error('Not authenticated');
-                            
-                            const result = await api.gmail.generateDraft(token, {
-                              taskId: task.id,
-                              tone: selectedTone,
-                              customInstructions: customToneInstructions || undefined,
-                            });
-                            
-                            setReplyMessage(result.draft);
-                            setPolishedMessage(''); // Clear polished message if exists
-                            // Scroll message editor into view
-                            setTimeout(() => {
-                              messageEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            }, 100);
-                          } catch (error) {
-                            console.error('Error generating draft:', error);
-                            setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to generate draft: ' + (error as Error).message, type: 'error' });
-                          } finally {
-                            setGeneratingDraft(false);
-                          }
-                        }}
-                        disabled={generatingDraft}
-                        className="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
-                      >
-                        {generatingDraft ? (
-                          <>
-                            <Brain className="w-4 h-4 animate-pulse" />
-                            Generating...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="w-4 h-4" />
-                            Generate Draft
-                          </>
-                        )}
-                      </button>
                     </div>
-                  </div>
+                  )}
 
                   {/* Action Buttons */}
                   <div className="flex gap-3 pt-2">
@@ -870,8 +860,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
                           setShowReply(false);
                           setReplyMessage('');
                           setPolishedMessage('');
-                          setSelectedTone('professional');
-                          setCustomToneInstructions('');
+                          setSelectedStyle('short');
                           setAlertModal({ isOpen: true, title: 'Success', message: 'Reply sent successfully!', type: 'success' });
                         } catch (error) {
                           console.error('Error sending reply:', error);

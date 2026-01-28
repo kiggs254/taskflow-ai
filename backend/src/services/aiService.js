@@ -701,6 +701,97 @@ export const generateEmailDraft = async (
 };
 
 /**
+ * Enhance email message with AI based on style (short or detailed)
+ */
+const _enhanceEmailMessageInternal = async (provider, message, style, taskContext, userName) => {
+  const client = getClient(provider);
+  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+
+  const firstName = userName ? userName.split(' ')[0] : '';
+  
+  // Style instructions
+  const styleInstructions = {
+    short: 'Make the message concise and to-the-point. Keep it brief while maintaining clarity. Remove unnecessary words and get straight to the point.',
+    detailed: 'Expand and enhance the message with more detail, context, and professional language. Add relevant information and make it comprehensive while keeping it professional.',
+  };
+
+  const stylePrompt = styleInstructions[style] || styleInstructions.short;
+  
+  const contextPrompt = taskContext
+    ? `\n\nTask context (for reference only, don't include in the email):\n${taskContext}`
+    : '';
+
+  const signOffInstruction = firstName 
+    ? `\n\nIMPORTANT: If the email needs a sign-off, use the user's actual name: "${firstName}". Do NOT use placeholders like {name}, [Your Name], or similar.`
+    : '';
+
+  const response = await client.chat.completions.create({
+    model: model,
+    messages: [
+      {
+        role: 'system',
+        content: `You are an email writing assistant${userName ? ` writing on behalf of ${userName}` : ''}. Enhance and improve the user's email message to be professional, clear, and appropriate for business communication. ${stylePrompt}${signOffInstruction}`,
+      },
+      {
+        role: 'user',
+        content: `Enhance this email message according to the ${style} style:\n\n${message}${contextPrompt}${firstName ? `\n\nIf adding or updating the sign-off, use "Kind Regards,\n${firstName}" - no placeholders.` : ''}`,
+      },
+    ],
+    temperature: 0.7,
+    max_tokens: style === 'short' ? 300 : 800,
+  });
+
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    console.warn('AI enhanceEmailMessage returned empty response, using original message');
+    return message;
+  }
+  return content;
+};
+
+export const enhanceEmailMessage = async (
+  message,
+  style = 'short',
+  provider = 'openai',
+  taskContext = '',
+  userName = ''
+) => {
+  if (!message || typeof message !== 'string') {
+    throw new Error('Invalid input: message must be a string');
+  }
+  
+  if (style !== 'short' && style !== 'detailed') {
+    throw new Error('Invalid style: must be "short" or "detailed"');
+  }
+
+  try {
+    // If provider is explicitly set to deepseek, use it directly
+    if (provider === 'deepseek') {
+      return await _enhanceEmailMessageInternal(provider, message, style, taskContext, userName);
+    }
+    
+    // Otherwise, try OpenAI first, fallback to Deepseek
+    return await tryWithFallback(
+      _enhanceEmailMessageInternal,
+      message,
+      style,
+      taskContext,
+      userName
+    );
+  } catch (error) {
+    console.error('AI enhanceEmailMessage error:', {
+      message: error.message,
+      type: error.constructor.name,
+      status: error.status,
+      response: error.response?.data,
+      stack: error.stack,
+    });
+    // Return original message if enhance fails (non-blocking)
+    return message;
+  }
+};
+
+/**
  * Polish email reply with AI
  */
 const _polishEmailReplyInternal = async (provider, message, instructions, userName) => {

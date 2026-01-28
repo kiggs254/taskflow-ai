@@ -211,26 +211,34 @@ router.post('/polish-reply', authenticate, asyncHandler(async (req, res) => {
  */
 router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
   try {
-    const { taskId, tone, customInstructions } = req.body;
+    const { taskId, message, style } = req.body;
     
-    console.log('Generate draft request received:', { 
+    console.log('Enhance message request received:', { 
       taskId, 
-      tone, 
+      style, 
+      hasMessage: !!message,
+      messageLength: message?.length || 0,
       userId: req.user.id,
-      hasTaskId: !!taskId,
-      hasBody: !!req.body
     });
     
     // Validate request
     if (!taskId) {
-      console.error('Generate draft failed: taskId is required');
+      console.error('Enhance message failed: taskId is required');
       return res.status(400).json({ error: 'taskId is required' });
     }
-
-    // Get task details and user name
-    const { query } = await import('../config/database.js');
     
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      console.error('Enhance message failed: message is required');
+      return res.status(400).json({ error: 'message is required' });
+    }
+    
+    if (!style || (style !== 'short' && style !== 'detailed')) {
+      console.error('Enhance message failed: style must be "short" or "detailed"');
+      return res.status(400).json({ error: 'style must be "short" or "detailed"' });
+    }
+
     // Get user's name
+    const { query } = await import('../config/database.js');
     let userName = '';
     try {
       const userResult = await query(
@@ -244,71 +252,54 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
       // Continue without userName - not critical
     }
     
-    // Get task
-    let task;
+    // Get task for context (optional, but helpful)
+    let taskContext = '';
     try {
       const taskResult = await query(
         'SELECT title, description FROM tasks WHERE id = $1 AND user_id = $2',
         [taskId, req.user.id]
       );
 
-      if (taskResult.rows.length === 0) {
-        console.error('Generate draft failed: Task not found', { taskId, userId: req.user.id });
-        return res.status(404).json({ error: 'Task not found' });
+      if (taskResult.rows.length > 0) {
+        const task = taskResult.rows[0];
+        // Extract clean description (remove metadata)
+        const cleanDescription = task.description
+          ? task.description.replace(/<!-- Email metadata:.*?-->/, '').replace(/<!-- Slack metadata:.*?-->/, '').trim()
+          : '';
+        taskContext = `Task: ${task.title}${cleanDescription ? `\nContext: ${cleanDescription.substring(0, 500)}` : ''}`;
       }
-
-      task = taskResult.rows[0];
-      console.log('Task retrieved:', { title: task.title, hasDescription: !!task.description });
     } catch (taskError) {
-      console.error('Error fetching task:', taskError);
-      return res.status(500).json({ error: 'Failed to retrieve task: ' + taskError.message });
-    }
-    
-    // Extract email metadata to get subject
-    let emailSubject = '';
-    if (task.description) {
-      const emailMetadataMatch = task.description.match(/<!-- Email metadata: (\{[^}]+\}) -->/);
-      if (emailMetadataMatch) {
-        try {
-          const metadata = JSON.parse(emailMetadataMatch[1]);
-          emailSubject = metadata.subject || '';
-          console.log('Email subject extracted:', emailSubject || 'none');
-        } catch (e) {
-          console.warn('Error parsing email metadata:', e.message);
-          // Continue without subject - not critical
-        }
-      }
+      console.warn('Error fetching task context:', taskError);
+      // Continue without context - not critical
     }
 
-    console.log('Generating draft with AI:', { 
-      title: task.title, 
-      tone: tone || 'professional', 
+    console.log('Enhancing message with AI:', { 
+      style,
       userName: userName || 'not set',
-      emailSubject: emailSubject || 'none',
-      hasDescription: !!task.description
+      messageLength: message.length,
+      hasContext: !!taskContext
     });
     
-    // Generate draft with AI
+    // Enhance message with AI
     try {
-      const draft = await generateEmailDraft(
-        task.title,
-        task.description || '',
-        emailSubject,
-        tone || 'professional',
+      const { enhanceEmailMessage } = await import('../services/aiService.js');
+      const enhanced = await enhanceEmailMessage(
+        message,
+        style,
         'openai', // Will use fallback logic automatically
-        customInstructions || '',
+        taskContext,
         userName
       );
       
-      if (!draft || typeof draft !== 'string') {
-        console.error('AI returned invalid draft:', { draft, type: typeof draft });
-        return res.status(500).json({ error: 'AI returned invalid draft format' });
+      if (!enhanced || typeof enhanced !== 'string') {
+        console.error('AI returned invalid enhanced message:', { enhanced, type: typeof enhanced });
+        return res.status(500).json({ error: 'AI returned invalid format' });
       }
       
-      console.log('Draft generated successfully, length:', draft.length);
-      return res.json({ draft });
+      console.log('Message enhanced successfully, length:', enhanced.length);
+      return res.json({ draft: enhanced });
     } catch (aiError) {
-      console.error('AI Error generating draft:', {
+      console.error('AI Error enhancing message:', {
         message: aiError.message,
         stack: aiError.stack,
         name: aiError.name,
@@ -316,7 +307,7 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
         type: aiError.constructor.name,
       });
       return res.status(500).json({ 
-        error: 'Failed to generate draft: ' + aiError.message,
+        error: 'Failed to enhance message: ' + aiError.message,
         details: process.env.NODE_ENV === 'development' ? aiError.stack : undefined
       });
     }

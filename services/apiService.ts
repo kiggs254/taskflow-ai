@@ -223,7 +223,7 @@ export const api = {
       if (!res.ok) throw new Error('Failed to polish email reply');
       return res.json();
     },
-    generateDraft: async (token: string, data: { taskId: string; tone?: string; customInstructions?: string }) => {
+    generateDraft: async (token: string, data: { taskId: string; message: string; style: 'short' | 'detailed' }) => {
       try {
         const url = `${API_BASE}/gmail/generate-draft`;
         console.log('Calling generate-draft API:', { url, taskId: data.taskId, hasToken: !!token });
