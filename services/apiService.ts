@@ -224,16 +224,40 @@ export const api = {
       return res.json();
     },
     generateDraft: async (token: string, data: { taskId: string; tone?: string; customInstructions?: string }) => {
-      const res = await fetch(`${API_BASE}/gmail/generate-draft`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error('Failed to generate email draft');
-      return res.json();
+      try {
+        const url = `${API_BASE}/gmail/generate-draft`;
+        console.log('Calling generate-draft API:', { url, taskId: data.taskId, hasToken: !!token });
+        
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(data),
+        });
+        
+        if (!res.ok) {
+          let errorMessage = 'Failed to generate email draft';
+          try {
+            const errorData = await res.json();
+            errorMessage = errorData.error || errorMessage;
+            console.error('API error response:', { status: res.status, error: errorData });
+          } catch (e) {
+            const text = await res.text();
+            console.error('API error (non-JSON):', { status: res.status, text });
+            errorMessage = `Failed to generate email draft (${res.status}): ${text.substring(0, 100)}`;
+          }
+          throw new Error(errorMessage);
+        }
+        
+        const result = await res.json();
+        console.log('Generate-draft API success:', { hasDraft: !!result.draft });
+        return result;
+      } catch (error) {
+        console.error('Generate-draft API call failed:', error);
+        throw error;
+      }
     },
   },
 

@@ -706,13 +706,16 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       finalMessage = await polishEmailReply(message, 'openai', polishInstructions, userName);
     }
 
-    // Build email message - Gmail requires From header but will override email to match authenticated user
-    // Format: "Display Name" <email@example.com> or just email@example.com
+    // Build email message with proper MIME formatting
+    // Gmail requires proper MIME headers - From header will be overridden to match authenticated user
     const fromHeader = userName 
       ? `From: "${userName}" <${userEmail}>`
       : `From: ${userEmail}`;
     
     const emailLines = [
+      `MIME-Version: 1.0`,
+      `Content-Type: text/plain; charset=UTF-8`,
+      `Content-Transfer-Encoding: 7bit`,
       fromHeader,
       `To: ${replyTo.join(', ')}`,
     ];
@@ -728,9 +731,10 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       emailLines.push(`References: ${originalReferences ? originalReferences + ' ' : ''}${originalMessageId}`);
     }
     
+    // Blank line separates headers from body (required by MIME standard)
     emailLines.push('', finalMessage);
 
-    const emailContent = emailLines.join('\n');
+    const emailContent = emailLines.join('\r\n');
 
     // Encode message
     const encodedMessage = Buffer.from(emailContent)

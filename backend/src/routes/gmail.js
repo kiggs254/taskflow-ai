@@ -210,76 +210,127 @@ router.post('/polish-reply', authenticate, asyncHandler(async (req, res) => {
  * Generate AI email draft based on task context
  */
 router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
-  const { taskId, tone, customInstructions } = req.body;
-  
-  console.log('Generate draft request:', { taskId, tone, userId: req.user.id });
-  
-  if (!taskId) {
-    return res.status(400).json({ error: 'taskId is required' });
-  }
-
-  // Get task details and user name
-  const { query } = await import('../config/database.js');
-  
-  // Get user's name
-  const userResult = await query(
-    'SELECT name FROM users WHERE id = $1',
-    [req.user.id]
-  );
-  const userName = userResult.rows[0]?.name || '';
-  console.log('User name for draft:', userName);
-  
-  const taskResult = await query(
-    'SELECT title, description FROM tasks WHERE id = $1 AND user_id = $2',
-    [taskId, req.user.id]
-  );
-
-  if (taskResult.rows.length === 0) {
-    console.log('Task not found:', taskId);
-    return res.status(404).json({ error: 'Task not found' });
-  }
-
-  const task = taskResult.rows[0];
-  console.log('Task found:', task.title);
-  
-  // Extract email metadata to get subject
-  const emailMetadataMatch = task.description?.match(/<!-- Email metadata: (\{[^}]+\}) -->/);
-  let emailSubject = '';
-  if (emailMetadataMatch) {
-    try {
-      const metadata = JSON.parse(emailMetadataMatch[1]);
-      emailSubject = metadata.subject || '';
-    } catch (e) {
-      console.log('Error parsing email metadata:', e.message);
-    }
-  }
-
-  console.log('Generating draft with:', { title: task.title, tone, userName, emailSubject });
-  
   try {
-    // Use default provider which will try OpenAI first, then fallback to Deepseek
-    const draft = await generateEmailDraft(
-      task.title,
-      task.description || '',
-      emailSubject,
-      tone || 'professional',
-      'openai', // Will use fallback logic automatically
-      customInstructions || '',
-      userName
-    );
+    const { taskId, tone, customInstructions } = req.body;
     
-    console.log('Draft generated successfully');
-    res.json({ draft });
-  } catch (aiError) {
-    console.error('AI Error generating draft:', {
-      message: aiError.message,
-      stack: aiError.stack,
-      name: aiError.name,
-      cause: aiError.cause,
+    console.log('Generate draft request received:', { 
+      taskId, 
+      tone, 
+      userId: req.user.id,
+      hasTaskId: !!taskId,
+      hasBody: !!req.body
+    });
+    
+    // Validate request
+    if (!taskId) {
+      console.error('Generate draft failed: taskId is required');
+      return res.status(400).json({ error: 'taskId is required' });
+    }
+
+    // Get task details and user name
+    const { query } = await import('../config/database.js');
+    
+    // Get user's name
+    let userName = '';
+    try {
+      const userResult = await query(
+        'SELECT name FROM users WHERE id = $1',
+        [req.user.id]
+      );
+      userName = userResult.rows[0]?.name || '';
+      console.log('User name retrieved:', userName || 'not set');
+    } catch (userError) {
+      console.error('Error fetching user name:', userError);
+      // Continue without userName - not critical
+    }
+    
+    // Get task
+    let task;
+    try {
+      const taskResult = await query(
+        'SELECT title, description FROM tasks WHERE id = $1 AND user_id = $2',
+        [taskId, req.user.id]
+      );
+
+      if (taskResult.rows.length === 0) {
+        console.error('Generate draft failed: Task not found', { taskId, userId: req.user.id });
+        return res.status(404).json({ error: 'Task not found' });
+      }
+
+      task = taskResult.rows[0];
+      console.log('Task retrieved:', { title: task.title, hasDescription: !!task.description });
+    } catch (taskError) {
+      console.error('Error fetching task:', taskError);
+      return res.status(500).json({ error: 'Failed to retrieve task: ' + taskError.message });
+    }
+    
+    // Extract email metadata to get subject
+    let emailSubject = '';
+    if (task.description) {
+      const emailMetadataMatch = task.description.match(/<!-- Email metadata: (\{[^}]+\}) -->/);
+      if (emailMetadataMatch) {
+        try {
+          const metadata = JSON.parse(emailMetadataMatch[1]);
+          emailSubject = metadata.subject || '';
+          console.log('Email subject extracted:', emailSubject || 'none');
+        } catch (e) {
+          console.warn('Error parsing email metadata:', e.message);
+          // Continue without subject - not critical
+        }
+      }
+    }
+
+    console.log('Generating draft with AI:', { 
+      title: task.title, 
+      tone: tone || 'professional', 
+      userName: userName || 'not set',
+      emailSubject: emailSubject || 'none',
+      hasDescription: !!task.description
+    });
+    
+    // Generate draft with AI
+    try {
+      const draft = await generateEmailDraft(
+        task.title,
+        task.description || '',
+        emailSubject,
+        tone || 'professional',
+        'openai', // Will use fallback logic automatically
+        customInstructions || '',
+        userName
+      );
+      
+      if (!draft || typeof draft !== 'string') {
+        console.error('AI returned invalid draft:', { draft, type: typeof draft });
+        return res.status(500).json({ error: 'AI returned invalid draft format' });
+      }
+      
+      console.log('Draft generated successfully, length:', draft.length);
+      return res.json({ draft });
+    } catch (aiError) {
+      console.error('AI Error generating draft:', {
+        message: aiError.message,
+        stack: aiError.stack,
+        name: aiError.name,
+        cause: aiError.cause,
+        type: aiError.constructor.name,
+      });
+      return res.status(500).json({ 
+        error: 'Failed to generate draft: ' + aiError.message,
+        details: process.env.NODE_ENV === 'development' ? aiError.stack : undefined
+      });
+    }
+  } catch (error) {
+    // Catch any unexpected errors
+    console.error('Unexpected error in generate-draft endpoint:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      type: error.constructor.name,
     });
     return res.status(500).json({ 
-      error: 'Failed to generate draft: ' + aiError.message,
-      details: process.env.NODE_ENV === 'development' ? aiError.stack : undefined
+      error: 'Internal server error: ' + error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 }));
