@@ -686,9 +686,9 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const userEmail = profile.data.emailAddress;
     
-    // Get user's full name from database
-    const userResult = await query('SELECT name FROM users WHERE id = $1', [userId]);
-    const userName = userResult.rows[0]?.name || '';
+    // Get user's name from database (using username column)
+    const userResult = await query('SELECT username FROM users WHERE id = $1', [userId]);
+    const userName = userResult.rows[0]?.username || '';
 
     // Build Reply All recipients (exclude user's own email)
     let replyTo = originalTo ? originalTo.split(',').map(e => e.trim()).filter(e => e && !e.includes(userEmail)) : [];

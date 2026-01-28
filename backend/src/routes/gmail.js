@@ -197,8 +197,8 @@ router.post('/polish-reply', authenticate, asyncHandler(async (req, res) => {
 
   // Get user's name for sign-off
   const { query } = await import('../config/database.js');
-  const userResult = await query('SELECT name FROM users WHERE id = $1', [req.user.id]);
-  const userName = userResult.rows[0]?.name || '';
+  const userResult = await query('SELECT username FROM users WHERE id = $1', [req.user.id]);
+  const userName = userResult.rows[0]?.username || '';
 
   const polishedMessage = await polishEmailReply(message, 'openai', instructions || '', userName);
   
@@ -234,10 +234,10 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
     let userName = '';
     try {
       const userResult = await query(
-        'SELECT name FROM users WHERE id = $1',
+        'SELECT username FROM users WHERE id = $1',
         [req.user.id]
       );
-      userName = userResult.rows[0]?.name || '';
+      userName = userResult.rows[0]?.username || '';
       console.log('User name retrieved:', userName || 'not set');
     } catch (userError) {
       console.error('Error fetching user name:', userError);

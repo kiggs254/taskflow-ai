@@ -166,8 +166,8 @@ export const completeTask = async (userId, taskId, options = {}) => {
       const { replyToEmail } = await import('./gmailService.js');
       
       // Get user's name for sign-off
-      const userResult = await query('SELECT name FROM users WHERE id = $1', [userId]);
-      const userName = userResult.rows[0]?.name || '';
+      const userResult = await query('SELECT username FROM users WHERE id = $1', [userId]);
+      const userName = userResult.rows[0]?.username || '';
       
       // Generate completion reply with user's name
       const replyMessage = await generateEmailCompletionReply(
