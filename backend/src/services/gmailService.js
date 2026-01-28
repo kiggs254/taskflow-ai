@@ -719,10 +719,21 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       const { polishEmailReply } = await import('./aiService.js');
       finalMessage = await polishEmailReply(message, 'openai', polishInstructions, userName);
     }
+    
+    // Validate message
+    if (!finalMessage || typeof finalMessage !== 'string' || finalMessage.trim().length === 0) {
+      throw new Error('Email message is empty');
+    }
+    
+    // Ensure message doesn't start with headers (security check)
+    if (finalMessage.includes('\nFrom:') || finalMessage.includes('\r\nFrom:')) {
+      throw new Error('Email message contains invalid header-like content');
+    }
 
     // Build email message with proper MIME formatting
-    // Gmail requires proper MIME headers - From header will be overridden to match authenticated user
-    // Note: Gmail API will override the From address, but we still need to include it
+    // Gmail API will automatically set From to match authenticated user
+    // We include From header but ensure email matches authenticated user exactly
+    // The display name can be included but email must match
     const fromHeader = userName 
       ? `From: "${userName}" <${userEmail}>`
       : `From: ${userEmail}`;
@@ -754,15 +765,34 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
     emailLines.push('');
     emailLines.push(finalMessage);
 
-    // Use \r\n for proper email line endings
+    // Use \r\n for proper email line endings (RFC 2822 standard)
     const emailContent = emailLines.join('\r\n');
+    
+    // Validate email content before encoding
+    if (!emailContent || emailContent.trim().length === 0) {
+      throw new Error('Email content is empty');
+    }
+    
+    // Ensure we have proper header/body separation
+    if (!emailContent.includes('\r\n\r\n')) {
+      throw new Error('Email content missing header/body separator');
+    }
 
-    // Encode message
-    const encodedMessage = Buffer.from(emailContent)
+    // Encode message using base64url encoding (RFC 4648)
+    const encodedMessage = Buffer.from(emailContent, 'utf-8')
       .toString('base64')
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=+$/, '');
+    
+    console.log('Email formatted:', {
+      headerCount: emailLines.length - 2, // Exclude blank line and body
+      bodyLength: finalMessage.length,
+      encodedLength: encodedMessage.length,
+      hasFrom: emailContent.includes('From:'),
+      hasTo: emailContent.includes('To:'),
+      hasSubject: emailContent.includes('Subject:'),
+    });
 
     // Send reply
     try {
