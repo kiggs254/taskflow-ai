@@ -84,6 +84,24 @@ export const localDateString = (tz = DEFAULT_TIMEZONE, atMs = Date.now()) => {
 };
 
 /**
+ * Day of week in the user's timezone: 0 = Sunday .. 6 = Saturday, matching Date#getDay.
+ *
+ * Derived from the local calendar date rather than the host clock's getDay(): a server
+ * in UTC is still on Friday when Nairobi has ticked over to Saturday, so the two
+ * disagree for three hours every night -- exactly the window the report fires in on
+ * some settings.
+ */
+export const localDayOfWeek = (tz = DEFAULT_TIMEZONE, atMs = Date.now()) => {
+  const p = partsIn(tz, atMs);
+  return new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay();
+};
+
+export const isWeekend = (tz = DEFAULT_TIMEZONE, atMs = Date.now()) => {
+  const d = localDayOfWeek(tz, atMs);
+  return d === 0 || d === 6;
+};
+
+/**
  * Local wall clock as { hour, minute }.
  */
 export const localHourMinute = (tz = DEFAULT_TIMEZONE, atMs = Date.now()) => {

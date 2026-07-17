@@ -1,5 +1,6 @@
 import path from 'path';
 import { query } from '../config/database.js';
+import { truncateAtWord } from '../utils/text.js';
 import { syncTask } from './taskService.js';
 import { callAI } from './ai/callAI.js';
 import {
@@ -256,10 +257,15 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
     }
 
     const items = Array.isArray(parsed?.items)
-      ? parsed.items.filter((i) => typeof i === 'string' && i.trim()).map((i) => i.trim().slice(0, 120)).slice(0, 6)
+      ? parsed.items
+          .filter((i) => typeof i === 'string' && i.trim())
+          .map((i) => truncateAtWord(i, 110))
+          .slice(0, 6)
       : [];
 
-    return { summary: `${projectSlug} — ${summary.slice(0, 70)}`, items };
+    // truncateAtWord, not slice: a hard cut produced "…added showroom s", which reads
+    // as a bug rather than an abbreviation.
+    return { summary: `${projectSlug} — ${truncateAtWord(summary, 80)}`, items };
   } catch (error) {
     console.error('Agent: session summary failed, using fallback:', error.message);
     return fallback;

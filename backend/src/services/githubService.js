@@ -1,4 +1,5 @@
 import { query } from '../config/database.js';
+import { truncateAtWord } from '../utils/text.js';
 import { syncTask } from './taskService.js';
 import { callAI } from './ai/callAI.js';
 import { getClientForUser, nextPageUrl, isGithubConfigured } from './githubAuth.js';
@@ -274,7 +275,8 @@ const summariseDay = async (userId, repoName, commits) => {
       );
       return fallback;
     }
-    return `${repoName} — ${summary.trim().slice(0, 70)}`;
+    // truncateAtWord, not slice: a hard cut landed mid-word and read as corruption.
+    return `${repoName} — ${truncateAtWord(summary, 80)}`;
   } catch (error) {
     // A summary is a nicety; never lose the commit record over it.
     console.error('GitHub: commit summary failed, using fallback:', error.message);

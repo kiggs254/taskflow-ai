@@ -1,5 +1,6 @@
 import { WebClient } from '@slack/web-api';
 import { query } from '../config/database.js';
+import { truncateAtWord } from '../utils/text.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import { parseTask, generateCompletionMessage } from './aiService.js';
 import { syncTask } from './taskService.js';
@@ -624,6 +625,114 @@ export const updateSlackSettings = async (userId, settings) => {
  *   when absent -- so any user not in that exact workspace got an exception instead
  *   of a report.
  */
+/**
+ * Render the daily report as Slack blocks.
+ *
+ * The old version was one mrkdwn string: a numbered list where every task and every
+ * subtask was the same size and weight, wrapping mid-sentence on mobile with no
+ * indentation surviving. Twenty items looked like one undifferentiated wall, and the
+ * project a line belonged to was impossible to see at a glance.
+ *
+ * Pure and exported so it can be tested without a Slack workspace: the only way to
+ * check the old one was to post to a real channel and look.
+ *
+ * @param {string} userName
+ * @param {Array}  tasks     report items, each { title, subtasks[] }
+ * @param {string} dateText
+ */
+export const buildDailySummaryMessage = (userName, tasks = [], dateText = '') => {
+  // Titles are built as "project — what happened" upstream. Splitting lets the project
+  // carry the visual weight and the outcome read as prose beneath it.
+  const splitTitle = (title) => {
+    const raw = String(title ?? '').trim();
+    const i = raw.indexOf(' — ');
+    if (i === -1) return { project: raw, outcome: '' };
+    return { project: raw.slice(0, i).trim(), outcome: raw.slice(i + 3).trim() };
+  };
+
+  const totalItems = tasks.reduce(
+    (n, t) => n + (Array.isArray(t.subtasks) ? t.subtasks.filter((s) => s.completed).length : 0),
+    0
+  );
+
+  const blocks = [
+    {
+      type: 'header',
+      // plain_text: Slack does not render mrkdwn in a header, and a raw '*' would show.
+      text: { type: 'plain_text', text: truncateAtWord(`${userName} — ${dateText}`, 150), emoji: true },
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: `*${tasks.length}* ${tasks.length === 1 ? 'project' : 'projects'}${
+            totalItems ? ` · *${totalItems}* completed` : ''
+          }`,
+        },
+      ],
+    },
+    { type: 'divider' },
+  ];
+
+  // Slack hard-caps a message at 50 blocks and silently rejects more. Two blocks are
+  // spent per project plus the three above, so cap and say so rather than have Slack
+  // drop the tail with no explanation.
+  const MAX_PROJECTS = 20;
+  const shown = tasks.slice(0, MAX_PROJECTS);
+
+  for (const t of shown) {
+    const { project, outcome } = splitTitle(t.title);
+    const subtasks = Array.isArray(t.subtasks) ? t.subtasks : [];
+
+    // Drop a subtask that just restates the title. That happens whenever a session
+    // summary fell back: the one line became title, sole subtask and description at
+    // once, so the reader saw the same sentence twice with a tick next to it.
+    const meaningful = subtasks.filter((st) => {
+      const s = String(st.title ?? '').trim();
+      return s && s !== String(t.title ?? '').trim() && s !== outcome;
+    });
+
+    const MAX_ITEMS = 8;
+    const lines = meaningful.slice(0, MAX_ITEMS).map((st) => {
+      const mark = st.completed ? '✅' : '⬜';
+      return `${mark} ${truncateAtWord(st.title, 160)}`;
+    });
+    if (meaningful.length > MAX_ITEMS) {
+      lines.push(`…and ${meaningful.length - MAX_ITEMS} more`);
+    }
+
+    // The outcome is NOT wrapped in _italics_. Slack's mrkdwn has no escape, and these
+    // strings are full of identifiers: `_honour AI_PRIMARY_PROVIDER_` gives the parser
+    // four underscores to pair up and it renders something nobody wrote. The bold
+    // project above it already carries the hierarchy.
+    const body = [outcome || null, lines.join('\n') || null].filter(Boolean).join('\n');
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        // 3000 is Slack's per-section limit; over it the whole post 400s.
+        text: `*${project}*${body ? `\n${body}` : ''}`.slice(0, 2900),
+      },
+    });
+  }
+
+  if (tasks.length > shown.length) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `…and ${tasks.length - shown.length} more projects` }],
+    });
+  }
+
+  // The notification fallback: one line, since this is what shows on a lock screen.
+  const text = `${userName} — ${dateText}: ${tasks.length} ${
+    tasks.length === 1 ? 'project' : 'projects'
+  }${totalItems ? `, ${totalItems} completed` : ''}`;
+
+  return { blocks, text };
+};
+
 export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel, channelName = 'tech-team-daily-tasks') => {
   if (!tasks || tasks.length === 0) {
     return { success: true, posted: false, reason: 'no_tasks' };
@@ -680,27 +789,13 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel, cha
 
     const dateText = dateLabel || new Date().toLocaleDateString();
 
-    const lines = tasks.map((t, index) => {
-      // Start with the main task
-      let line = `${index + 1}. ${t.title}`;
-      
-      // Add subtasks if they exist
-      if (t.subtasks && Array.isArray(t.subtasks) && t.subtasks.length > 0) {
-        // Show all subtasks (completed and uncompleted)
-        const subtaskLines = t.subtasks.map(st => {
-          const checkmark = st.completed ? '✓' : '○';
-          return `   ${checkmark} ${st.title}`;
-        });
-        line += '\n' + subtaskLines.join('\n');
-      }
-      
-      return line;
-    });
-
-    const text = `*${userName}'s Tasks - ${dateText}*\n${lines.join('\n')}`;
+    const { blocks, text } = buildDailySummaryMessage(userName, tasks, dateText);
 
     await client.chat.postMessage({
       channel: channel.id,
+      blocks,
+      // Fallback for notifications and any client that can't render blocks. Slack
+      // requires it; without it the push notification is empty.
       text,
       mrkdwn: true,
     });

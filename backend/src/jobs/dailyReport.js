@@ -8,7 +8,7 @@ import {
 import { getUserById } from '../services/userService.js';
 import { sendDailyReportEmail } from '../services/emailService.js';
 import { postDailySummaryToSlack } from '../services/slackService.js';
-import { localDateString, localMinutesOfDay, parseTimeToMinutes, DEFAULT_TIMEZONE } from '../utils/time.js';
+import { localDateString, localMinutesOfDay, parseTimeToMinutes, isWeekend, DEFAULT_TIMEZONE } from '../utils/time.js';
 
 const SWEEP_MINUTES = 5;
 
@@ -110,6 +110,17 @@ export const startDailyReport = () => {
           // Fire in the bucket at or just after the target, so a slightly late tick
           // still lands. Never fires twice thanks to the claim below.
           if (nowMinutes < target || nowMinutes >= target + SWEEP_MINUTES) continue;
+
+          // Weekends: skip the send entirely, and crucially do NOT claim.
+          //
+          // Leaving last_sent_at where it is means Monday's window still reaches back
+          // to Friday's send, so anything done over the weekend rolls into Monday's
+          // report rather than being lost -- the same carry-forward that catches
+          // after-hours work. That's the whole mechanism; there's nothing to defer
+          // explicitly.
+          //
+          // Friday->Monday is 3 days, inside the 7-day window clamp.
+          if (settings.skip_weekends !== false && isWeekend(tz, now)) continue;
 
           const today = localDateString(tz, now);
           if (settings.last_sent_on && localDateString(tz, now) === String(settings.last_sent_on).slice(0, 10)) {
