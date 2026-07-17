@@ -97,9 +97,15 @@ const installationToken = async (installationId) => {
  * Resolve the right bearer token for a user, whichever auth kind they connected with.
  */
 const tokenForUser = async (userId) => {
+  // Deliberately does NOT filter on `enabled`. That column means "should the
+  // background scanner run", not "is GitHub connected" -- conflating the two meant a
+  // row with enabled=false made the client unusable, so listing repos, refreshing and
+  // Scan Now all failed with a misleading "not connected" while /status happily
+  // reported Connected. The scanner filters on `enabled` itself, which is the only
+  // place that distinction belongs.
   const result = await query(
     `SELECT auth_kind, installation_id, access_token
-     FROM github_integrations WHERE user_id = $1 AND enabled = true`,
+     FROM github_integrations WHERE user_id = $1`,
     [userId]
   );
   const row = result.rows[0];
