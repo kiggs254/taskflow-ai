@@ -74,6 +74,7 @@ export const syncTask = async (userId, taskData) => {
       snoozed_until = EXCLUDED.snoozed_until,
       recurrence = EXCLUDED.recurrence,
       meeting_link = EXCLUDED.meeting_link
+    WHERE tasks.user_id = EXCLUDED.user_id
     RETURNING id`,
     [
       id,
@@ -96,6 +97,18 @@ export const syncTask = async (userId, taskData) => {
       meetingLink || null,
     ]
   );
+
+  // The upsert is scoped by `WHERE tasks.user_id = EXCLUDED.user_id`, so a task id
+  // that already belongs to a *different* user updates nothing and returns no row.
+  //
+  // Without that guard this was a cross-tenant write: the conflict target is `id`
+  // alone, `user_id` is not in the SET list, so a colliding id silently rewrote
+  // another user's task while leaving them as its owner. Integration-generated ids
+  // make that reachable rather than theoretical -- e.g. two users tracking the same
+  // GitHub repo produce the same repo-day id.
+  if (result.rows.length === 0) {
+    throw new Error(`Task id ${id} already belongs to another user`);
+  }
 
   return { success: true };
 };

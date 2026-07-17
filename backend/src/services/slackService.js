@@ -163,10 +163,23 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
     const userMention = `<@${slackUserId}>`;
     console.log(`🔎 Scanning for mentions of user: ${userMention} (Slack ID: ${slackUserId})`);
     
-    let oldestTimestamp = null;
-    if (lastScanAt) {
-      oldestTimestamp = Math.floor(new Date(lastScanAt).getTime() / 1000); // Slack uses Unix timestamp in seconds
-    }
+    // The scan window, in Slack's Unix-seconds format.
+    //
+    // This value used to be computed here and then never read again -- the scheduled
+    // path sent no `oldest` at all, so every run re-walked the last 100 messages of
+    // every channel and fanned out to conversations.replies for every threaded
+    // parent, whatever the age. That is what produced the continuous 429s.
+    //
+    // The 7-day floor is load-bearing, not a nicety: last_scan_at only ever advanced
+    // when a task was created, so in production it is months stale. Honouring it
+    // literally would make this fix's own first run replay that entire history and
+    // reproduce the incident it exists to stop.
+    const MAX_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+    const scanStartedAt = Date.now();
+    const floorMs = scanStartedAt - MAX_LOOKBACK_MS;
+    const lastScanMs = lastScanAt ? new Date(lastScanAt).getTime() : 0;
+    const windowStartMs = Math.max(lastScanMs || floorMs, floorMs);
+    const oldestTimestamp = Math.floor(windowStartMs / 1000);
 
     const createdTasks = [];
     let processedCount = 0;
@@ -206,7 +219,21 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
         }
 
         const channelName = channel.name || 'unknown';
-        
+
+        // Consult the ledger BEFORE any further API call. This check used to sit
+        // behind chat.getPermalink, so every message the ledger was about to reject
+        // still cost a network round trip first -- against the same rate-limit bucket
+        // that was already exhausted.
+        const processedCheck = await query(
+          `SELECT id FROM processed_slack_messages WHERE user_id = $1 AND message_ts = $2 AND channel_id = $3`,
+          [userId, message.ts, channel.id]
+        );
+
+        if (processedCheck.rows.length > 0) {
+          console.log(`⏭️ Slack message ${message.ts} already processed (task may have been deleted), skipping`);
+          return false;
+        }
+
         // Get permalink for the message
         let permalink = '';
         try {
@@ -220,24 +247,15 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
         } catch (e) {
           // Permalink might fail, continue anyway
         }
-        
-        // Check if this Slack message was already processed (even if task was later deleted)
-        const processedCheck = await query(
-          `SELECT id FROM processed_slack_messages WHERE user_id = $1 AND message_ts = $2 AND channel_id = $3`,
-          [userId, message.ts, channel.id]
-        );
-        
-        if (processedCheck.rows.length > 0) {
-          console.log(`⏭️ Slack message ${message.ts} already processed (task may have been deleted), skipping`);
-          return false;
-        }
-        
-        // Also check if task still exists (fallback for messages processed before this tracking)
+
+        // Legacy fallback for messages handled before the ledger existed. Unindexable
+        // (LIKE on description) so it stays behind the ledger check, and it backfills
+        // the ledger when it hits so each message pays this at most once.
         const existingTaskCheck = await query(
           `SELECT id FROM tasks WHERE user_id = $1 AND description LIKE $2`,
           [userId, `%"messageTs":"${message.ts}"%`]
         );
-        
+
         if (existingTaskCheck.rows.length > 0) {
           // Task exists but wasn't tracked - add to tracking table
           await query(
@@ -332,12 +350,11 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
         const historyParams = {
           channel: channel.id,
           limit: todayOnly ? 50 : 100, // Fetch fewer messages for manual scans
+          // Always bound the window. The manual path already did this "to avoid rate
+          // limiting"; the scheduled path -- the one that runs 1,440x a day -- did not,
+          // which is the direct cause of the 429 storm.
+          oldest: (todayOnly && todayStart ? todayStart : oldestTimestamp).toString(),
         };
-        
-        // For manual scans, only look at today's messages to avoid rate limiting
-        if (todayOnly && todayStart) {
-          historyParams.oldest = todayStart.toString();
-        }
 
         const historyResponse = await client.conversations.history(historyParams);
 
@@ -366,21 +383,27 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
           // (processMessage will check timestamp internally)
           await processMessage(message, channel, false);
 
-          // If message has thread replies, scan them too
-          // reply_count > 0 indicates there are replies in the thread
-          if (message.reply_count && message.reply_count > 0) {
+          // If message has thread replies, scan them too.
+          //
+          // `latest_reply` gates the fan-out: a thread whose newest reply predates the
+          // window can hold nothing new, so fetching it is pure waste. It already
+          // arrives in the history payload, so this check costs nothing and removes
+          // most of the calls to conversations.replies -- the endpoint actually
+          // returning the 429s. Previously every threaded parent in the last 100
+          // messages of every channel was fetched on every scan, forever.
+          const windowOldest = todayOnly && todayStart ? todayStart : oldestTimestamp;
+          const threadIsStale =
+            message.latest_reply && parseFloat(message.latest_reply) <= windowOldest;
+
+          if (message.reply_count && message.reply_count > 0 && !threadIsStale) {
             try {
               // Fetch thread replies
               const repliesParams = {
                 channel: channel.id,
                 ts: message.ts, // thread_ts is the ts of the parent message
                 limit: todayOnly ? 30 : 100, // Fetch fewer replies for manual scans
+                oldest: windowOldest.toString(),
               };
-              
-              // For manual scans, only look at today's replies to avoid rate limiting
-              if (todayOnly && todayStart) {
-                repliesParams.oldest = todayStart.toString();
-              }
 
               const repliesResponse = await client.conversations.replies(repliesParams);
 
@@ -422,18 +445,24 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
       }
     }
 
-    // Only update last_scan_at if we actually processed some messages
-    // This prevents skipping messages that were seen but not processed due to errors
-    if (createdTasks.length > 0 && newestProcessedTimestamp > 0) {
-      const newScanTime = new Date(newestProcessedTimestamp).toISOString();
-      console.log(`📌 Updating last_scan_at to ${newScanTime} (based on newest processed message)`);
-      await query(
-        'UPDATE slack_integrations SET last_scan_at = $1 WHERE user_id = $2',
-        [newScanTime, userId]
-      );
-    } else {
-      console.log(`📌 Not updating last_scan_at - no new tasks created`);
-    }
+    // Advance the watermark on every successful scan, not only when a task happened
+    // to be created.
+    //
+    // The old guard (`createdTasks.length > 0`) meant a day of mentions the AI judged
+    // uninteresting moved last_scan_at zero, so it sat months stale. That broke two
+    // things at once: the scan window never closed, and -- because the cron gate
+    // compares `now - last_scan_at` against scan_frequency -- the gate could never
+    // fire either, so a 15-minute setting ran every 60 seconds.
+    //
+    // The guard was hand-rolling at-least-once delivery, which is exactly what
+    // processed_slack_messages already guarantees. A 5-minute overlap covers messages
+    // that landed mid-scan.
+    const OVERLAP_MS = 5 * 60 * 1000;
+    const newScanTime = new Date(scanStartedAt - OVERLAP_MS).toISOString();
+    await query(
+      'UPDATE slack_integrations SET last_scan_at = $1 WHERE user_id = $2',
+      [newScanTime, userId]
+    );
 
     return { success: true, tasksCreated: createdTasks.length, tasks: createdTasks };
   } catch (error) {

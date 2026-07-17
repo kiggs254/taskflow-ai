@@ -361,7 +361,11 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
       if (!dayCommits.length) continue;
 
       const repoName = `${repo.owner}/${repo.name}`;
-      const taskId = `gh-${repo.repo_id}-${day}`;
+      // userId is part of the id deliberately: repo_id is GitHub's *global* id, so
+      // `gh-{repo_id}-{day}` collides across TaskFlow users who track the same repo,
+      // and syncTask's conflict target is the id alone. Namespacing keeps each user's
+      // repo-day task distinct; syncTask's user_id guard is the second line of defence.
+      const taskId = `gh-${userId}-${repo.repo_id}-${day}`;
       const title = await summariseDay(userId, repo.name, dayCommits);
       const lastCommitAt = Number(dayCommits[dayCommits.length - 1].committed_at);
 
