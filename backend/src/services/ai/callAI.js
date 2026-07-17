@@ -47,16 +47,22 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *
  * The old tryWithFallback matched substrings like 'apiKey' and 'not configured'
  * against the message text, then ran the *same* fallback for both branches -- so the
- * classification was elaborate and did nothing. Worse, it fell back on every error
- * including 400s, which fail identically on the second provider: double the latency
- * and spend to reach the same failure.
+ * classification was elaborate and did nothing.
+ *
+ * On 400: don't retry the SAME provider (the request won't get better by repeating
+ * it), but DO try the next one. An earlier version treated 400 as terminal on the
+ * reasoning that "the other provider would reject it identically" -- which is true
+ * for a malformed request and false for the most likely 400 of all, an unknown model
+ * id. Model ids are provider-specific: `deepseek-v4-pro` being rejected says nothing
+ * about `gpt-4o`. Treating that as terminal meant one wrong id in config silently
+ * disabled AI everywhere, with no fallback, surfacing only as degraded output.
  */
 const classify = (err) => {
   const status = err?.status ?? err?.response?.status;
   if (status === 401 || status === 403) return 'auth';       // provider unusable
   if (status === 429) return 'retry';                        // rate limited
   if (status >= 500) return 'retry';                         // provider fault
-  if (status === 400 || status === 422) return 'fatal';      // our bug: don't fall through
+  if (status === 400 || status === 422) return 'no_retry';   // bad request for THIS provider
   if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return 'retry';
   const code = err?.code;
   if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ECONNREFUSED') return 'retry';
@@ -207,10 +213,15 @@ export const callAI = async ({
           break; // try the next provider
         }
 
-        if (kind === 'fatal') {
-          // A malformed request or schema violation is our bug. The next provider
-          // would reject it the same way, so fail fast and loudly.
-          throw err;
+        if (kind === 'no_retry') {
+          // Repeating an identical bad request is pointless, but the next provider
+          // may well accept it -- an unknown model id is per-provider. Fall through
+          // without burning retries here.
+          console.error(
+            `AI: ${p}/${model} rejected the request (${status}). Trying the next provider. ` +
+              `If this is an unknown-model error, set the *_MODEL_* env var for ${p}.`
+          );
+          break;
         }
 
         if (kind === 'retry' && attempt < MAX_ATTEMPTS) {

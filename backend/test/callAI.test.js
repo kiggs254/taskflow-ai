@@ -77,11 +77,22 @@ test('429 retries the same provider with backoff, then falls back', async () => 
   assert.ok(hits.openai[2] - hits.openai[0] >= 250, 'expected exponential backoff between attempts');
 });
 
-test('400 fails fast: it is our bug, and the other provider would reject it too', async () => {
+test('400 does not retry the same provider, but DOES try the next one', async () => {
+  // The most common 400 in practice is an unknown model id, and model ids are
+  // provider-specific — `deepseek-v4-pro` being rejected says nothing about
+  // `gpt-4o`. An earlier version treated 400 as terminal, so one wrong id in config
+  // silently disabled AI everywhere with no fallback.
   reset(); openaiMode = '400'; deepseekMode = 'ok';
+  const r = await call();
+  assert.equal(r.provider, 'deepseek', 'should fall through to the other provider');
+  assert.equal(hits.openai.length, 1, 'must not retry an identical bad request');
+});
+
+test('400 on every provider still throws rather than hanging', async () => {
+  reset(); openaiMode = '400'; deepseekMode = '400';
   await assert.rejects(() => call());
-  assert.equal(hits.openai.length, 1, 'must not retry a malformed request');
-  assert.equal(hits.deepseek.length, 0, 'must not waste a fallback call on a 400');
+  assert.equal(hits.openai.length, 1, 'one attempt each, no retries');
+  assert.equal(hits.deepseek.length, 1);
 });
 
 test('5xx retries then falls back', async () => {

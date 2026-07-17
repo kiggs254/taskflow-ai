@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Send, Loader2, Clock } from 'lucide-react';
+import { Send, Loader2, Clock, Eye } from 'lucide-react';
 import { api } from '../services/apiService';
 import { AlertModal } from './AlertModal';
 
@@ -39,6 +39,8 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label
 export const ReportSettings: React.FC<ReportSettingsProps> = ({ token }) => {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sending, setSending] = useState(false);
+  const [preview, setPreview] = useState<any>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({
     isOpen: false, title: '', message: '', type: 'info',
   });
@@ -60,6 +62,22 @@ export const ReportSettings: React.FC<ReportSettingsProps> = ({ token }) => {
       setAlertModal({ isOpen: true, title: 'Save Failed', message: error.message, type: 'error' });
     }
   };
+
+  // Show exactly what today's report contains, before anything is sent. Reads the
+  // same endpoint the 16:30 job uses, so this is the real payload rather than a
+  // separate rendering that could drift from it.
+  const loadPreview = async () => {
+    setLoadingPreview(true);
+    try {
+      setPreview(await api.reports.completedToday(token));
+    } catch (error: any) {
+      setAlertModal({ isOpen: true, title: 'Preview Failed', message: error.message, type: 'error' });
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  useEffect(() => { loadPreview(); }, [token]);
 
   const sendTest = async () => {
     setSending(true);
@@ -96,6 +114,76 @@ export const ReportSettings: React.FC<ReportSettingsProps> = ({ token }) => {
       <div className="flex items-center gap-3 mb-6">
         <Clock className="w-6 h-6 text-primary" />
         <h2 className="text-xl font-semibold text-white">End-of-Day Report</h2>
+      </div>
+
+      {/* What's actually going out. Previously the only way to find out was to send
+          it -- to a team channel. */}
+      <div className="mb-6 bg-slate-800/40 border border-slate-700/60 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Eye className="w-4 h-4 text-slate-400" />
+            <h3 className="text-sm font-semibold text-slate-200">What will be sent today</h3>
+          </div>
+          <button
+            onClick={loadPreview}
+            disabled={loadingPreview}
+            className="text-xs text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+          >
+            {loadingPreview ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
+
+        {!preview ? (
+          <p className="text-xs text-slate-500">Loading…</p>
+        ) : preview.items?.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            Nothing completed today yet — no report would be sent.
+          </p>
+        ) : (
+          <>
+            {settings.requireCommits && !preview.commitDerived && (
+              <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded p-2 mb-3">
+                <strong>This would NOT send.</strong> "Only on days I commit code" is on, and
+                nothing today came from a commit or a Claude Code session.
+              </div>
+            )}
+            <div className="space-y-2">
+              {preview.items.map((item: any) => (
+                <div key={item.id} className="text-xs">
+                  <div className="flex items-start gap-2">
+                    <span className="text-success mt-0.5">✓</span>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-slate-200">{item.title}</span>
+                      {item.fromCommits && (
+                        <span className="ml-2 text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">code</span>
+                      )}
+                      {item.fromAgent && (
+                        <span className="ml-2 text-[10px] bg-slate-600/40 text-slate-300 px-1.5 py-0.5 rounded">claude code</span>
+                      )}
+                      {(item.subtasks ?? []).length > 0 && (
+                        <div className="mt-1 space-y-0.5 pl-1">
+                          {item.subtasks.map((st: any, i: number) => (
+                            <div key={i} className={st.completed ? 'text-slate-400' : 'text-slate-600'}>
+                              {st.completed ? '✓' : '○'} {st.title}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-3 pt-3 border-t border-slate-700/60">
+              {preview.counts?.tasks} task{preview.counts?.tasks === 1 ? '' : 's'}
+              {preview.commitCount > 0 && `, ${preview.commitCount} from commits`}
+              {preview.agentCount > 0 && `, ${preview.agentCount} from Claude Code`}
+              {' — '}goes to{' '}
+              {[settings.emailEnabled && 'email', settings.slackEnabled && `#${settings.slackChannel}`]
+                .filter(Boolean).join(' and ') || 'nowhere (both channels off)'}
+            </p>
+          </>
+        )}
       </div>
 
       <div className="space-y-5">

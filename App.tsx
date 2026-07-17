@@ -7,7 +7,7 @@ import {
   PieChart, Bell, Volume2, Shield, Palette, ArrowLeft, Pencil, Save, Filter,
   Search, Command, MoreVertical, Hourglass, AlarmClockOff, Video, Trash2,
   Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw,
-  EyeOff
+  EyeOff, ChevronRight
 } from 'lucide-react';
 import { 
   Task, WorkspaceType, UserStats, AppView, User as UserType, EnergyLevel, RecurrenceRule
@@ -1849,6 +1849,15 @@ const CompletedTasksScreen = ({
 }) => {
   const [filter, setFilter] = useState<WorkspaceType | 'all'>('all');
   const [copied, setCopied] = useState(false);
+  // Which rows are showing their commits / session detail.
+  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) =>
+    setExpandedTaskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const filteredTasks = tasks.filter(t => filter === 'all' || t.workspace === filter);
 
@@ -1948,29 +1957,68 @@ const CompletedTasksScreen = ({
             <div key={groupName}>
               <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">{groupName}</h3>
               <div className="space-y-2">
-                {tasksInGroup.map(task => (
-                  <div key={task.id} className="bg-surface p-3 rounded-lg border border-slate-800 flex justify-between items-center group">
-                    <div>
-                      <p className="text-slate-300 line-through opacity-70">{task.title}</p>
-                      <p className="text-xs text-slate-500 capitalize">{task.workspace}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500">
-                        {task.completedAt 
-                          ? new Date(task.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-                          : 'Unknown Date'
-                        }
-                      </span>
+                {tasksInGroup.map(task => {
+                  // Integration-sourced tasks (commits, Claude Code sessions) carry
+                  // their detail in subtasks. Without this the row showed only
+                  // "taskflow-ai — 6 commits" and the six commits were invisible.
+                  const detail = task.subtasks ?? [];
+                  const isExpanded = expandedTaskIds.has(task.id);
+                  return (
+                  <div key={task.id} className="bg-surface rounded-lg border border-slate-800 group">
+                    <div className="p-3 flex justify-between items-center gap-2">
                       <button
-                        onClick={() => onUncomplete(task.id)}
-                        className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700 transition-colors opacity-0 group-hover:opacity-100"
-                        title="Mark as To-Do"
+                        onClick={() => detail.length > 0 && toggleExpanded(task.id)}
+                        className={`flex items-start gap-2 text-left flex-1 min-w-0 ${detail.length > 0 ? 'cursor-pointer' : 'cursor-default'}`}
+                        aria-expanded={isExpanded}
                       >
-                        <RotateCcw className="w-4 h-4" />
+                        {detail.length > 0 && (
+                          <ChevronRight
+                            className={`w-4 h-4 text-slate-500 shrink-0 mt-0.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                          />
+                        )}
+                        <span className="min-w-0">
+                          <span className="block text-slate-300 line-through opacity-70 truncate">{task.title}</span>
+                          <span className="block text-xs text-slate-500 capitalize">
+                            {task.workspace}
+                            {detail.length > 0 && ` · ${detail.length} item${detail.length > 1 ? 's' : ''}`}
+                          </span>
+                        </span>
                       </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-slate-500">
+                          {task.completedAt
+                            ? new Date(task.completedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                            : 'Unknown Date'
+                          }
+                        </span>
+                        <button
+                          onClick={() => onUncomplete(task.id)}
+                          className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Mark as To-Do"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
+
+                    {isExpanded && detail.length > 0 && (
+                      <div className="px-3 pb-3 pt-0 space-y-1 border-t border-slate-800/60 mt-0">
+                        {detail.map(st => (
+                          <div key={st.id} className="flex items-start gap-2 pt-2">
+                            <Check className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${st.completed ? 'text-success' : 'text-slate-600'}`} />
+                            <span className={`text-xs ${st.completed ? 'text-slate-400' : 'text-slate-600'}`}>{st.title}</span>
+                          </div>
+                        ))}
+                        {task.description && (
+                          <p className="text-[11px] text-slate-600 whitespace-pre-wrap pt-2 border-t border-slate-800/60 mt-2">
+                            {task.description}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );
