@@ -23,7 +23,14 @@ const toClient = (s) => ({
  * in-app view and the 16:30 job can't disagree.
  */
 router.get('/completed-today', asyncHandler(async (req, res) => {
-  const report = await getCompletedToday(req.user.id, { timezone: req.query.tz });
+  // Built from the same window the job will use, including the carry-forward from the
+  // last send -- its only caller is the report preview in Settings, and a preview that
+  // doesn't match what gets sent is worse than no preview.
+  const settings = await getReportSettings(req.user.id);
+  const report = await getCompletedToday(req.user.id, {
+    timezone: req.query.tz || settings.timezone,
+    since: settings.last_sent_at ?? null,
+  });
   res.json(report);
 }));
 

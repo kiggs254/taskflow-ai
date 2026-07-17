@@ -16,9 +16,22 @@ const SWEEP_MINUTES = 5;
  * Send one user's report across their enabled channels.
  * Exported so "Send test report" in Settings runs the exact same path.
  */
-export const sendReportForUser = async (userId, settings, { force = false } = {}) => {
+export const sendReportForUser = async (userId, settings, { force = false, atMs = Date.now() } = {}) => {
   const tz = settings.timezone || DEFAULT_TIMEZONE;
-  const report = await getCompletedToday(userId, { timezone: tz });
+  // Pick up where the last report stopped, so work done after yesterday's send is
+  // carried into this one rather than falling into the gap between the two.
+  //
+  // atMs is the caller's send instant, not a fresh Date.now(): it must be the exact
+  // value the claim writes to last_sent_at, or the sliver between the two would be
+  // this window's end AND the next window's start, and land in both reports.
+  //
+  // `since` is skipped when forced: "Send test report" run an hour after a real one
+  // would otherwise report an empty hour and look broken. A test wants to show a day.
+  const report = await getCompletedToday(userId, {
+    timezone: tz,
+    atMs,
+    since: force ? null : settings.last_sent_at ?? null,
+  });
 
   // The gate: no commits today means no report. Commits are the trigger; the report
   // itself still covers everything completed, not just the code.
@@ -103,17 +116,23 @@ export const startDailyReport = () => {
             continue;
           }
 
+          // Read before the claim overwrites it: this is the previous send time, and
+          // it's the window start the report is about to be built from.
+          const previousSentAt = settings.last_sent_at ?? null;
+
           // Claim before sending: at-most-once. A missed report beats a duplicate
           // landing in a team channel.
-          const claimed = await claimReportDay(settings.user_id, today);
+          const claimed = await claimReportDay(settings.user_id, today, now);
           if (!claimed) continue;
 
-          const outcome = await sendReportForUser(settings.user_id, settings);
+          const outcome = await sendReportForUser(settings.user_id, settings, { atMs: now });
 
           if (!outcome.sent) {
             // Nothing went out -- release the claim so a later tick (or tomorrow's
-            // commits) can still produce a report.
-            await releaseReportDay(settings.user_id, today);
+            // commits) can still produce a report. Restoring the old last_sent_at is
+            // what makes a quiet day carry forward instead of vanish: tomorrow's
+            // window then still reaches back over today's work.
+            await releaseReportDay(settings.user_id, today, previousSentAt);
             if (outcome.reason !== 'no_commits_today') {
               console.log(`Daily report skipped for user ${settings.user_id}: ${outcome.reason ?? 'delivery failed'}`);
             }

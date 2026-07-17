@@ -1,5 +1,5 @@
 import { query } from '../config/database.js';
-import { DEFAULT_TIMEZONE, startOfLocalDayMs, endOfLocalDayMs, localDateString, isValidTimezone } from '../utils/time.js';
+import { DEFAULT_TIMEZONE, startOfLocalDayMs, localDateString, isValidTimezone } from '../utils/time.js';
 
 /**
  * "What did I finish today", server-side.
@@ -63,10 +63,36 @@ export const updateReportSettings = async (userId, patch) => {
 /**
  * Build the report payload for a user's local day.
  */
-export const getCompletedToday = async (userId, { timezone = DEFAULT_TIMEZONE, atMs = Date.now() } = {}) => {
+export const getCompletedToday = async (
+  userId,
+  { timezone = DEFAULT_TIMEZONE, atMs = Date.now(), since = null } = {}
+) => {
   const tz = resolveTz(timezone);
-  const dayStart = startOfLocalDayMs(tz, atMs);
-  const dayEnd = endOfLocalDayMs(tz, atMs);
+  const midnight = startOfLocalDayMs(tz, atMs);
+
+  // The window ends NOW, not at local midnight.
+  //
+  // Midnight is in the future at 16:30, so [midnight, midnight+1d) and
+  // [16:30, tomorrow midnight) overlap by 7.5 hours. Nothing duplicates today only
+  // because a task can't be completed in the future -- a true statement that the
+  // correctness of the partition should not depend on. Ending at the send instant
+  // makes consecutive reports provably disjoint.
+  const windowEnd = atMs;
+
+  // The window starts where the last report stopped, not at midnight.
+  //
+  // Anchored to midnight, work finished after the 16:30 send belonged to a day whose
+  // report had already gone out, and tomorrow's report only looks at tomorrow. So
+  // evening work fell into a 7.5-hour hole and appeared in no report, ever -- it
+  // wasn't deferred to the next day, it was dropped. Anchoring to the previous send
+  // makes consecutive reports an exact partition of time: every completed task lands
+  // in exactly one report, and after-hours work rolls into the next one.
+  //
+  // Clamped to 7 days for the same reason the Slack scanner clamps its window: an
+  // account that has never sent (or hasn't in months, because require_commits kept it
+  // quiet) would otherwise make its first report dump the entire backlog.
+  const CLAMP_MS = 7 * 24 * 60 * 60 * 1000;
+  const windowStart = since ? Math.max(Number(since), atMs - CLAMP_MS) : midnight;
 
   // Candidates: completed in-window, OR carrying a subtask completed in-window.
   // The subtask arm is why this can't just be `status='done' AND completed_at ...`.
@@ -98,7 +124,7 @@ export const getCompletedToday = async (userId, { timezone = DEFAULT_TIMEZONE, a
          )
        )
      ORDER BY t.completed_at ASC NULLS LAST`,
-    [userId, dayStart, dayEnd]
+    [userId, windowStart, windowEnd]
   );
 
   const items = [];
@@ -113,7 +139,7 @@ export const getCompletedToday = async (userId, { timezone = DEFAULT_TIMEZONE, a
       items.push({ ...row, subtasks });
     } else {
       const completedInWindow =
-        row.status === 'done' && row.completedAt >= dayStart && row.completedAt < dayEnd;
+        row.status === 'done' && row.completedAt >= windowStart && row.completedAt < windowEnd;
       if (!completedInWindow) continue;
       items.push({ ...row, subtasks: [] });
     }
@@ -127,8 +153,12 @@ export const getCompletedToday = async (userId, { timezone = DEFAULT_TIMEZONE, a
   return {
     date: localDateString(tz, atMs),
     timezone: tz,
-    dayStart,
-    dayEnd,
+    windowStart,
+    windowEnd,
+    // Kept: the preview reads these. They are the report window, which is no longer
+    // the calendar day -- it starts at the previous send.
+    dayStart: windowStart,
+    dayEnd: windowEnd,
     items,
     // "Did I actually do tracked work today", not "did I commit".
     //
@@ -154,21 +184,28 @@ export const getCompletedToday = async (userId, { timezone = DEFAULT_TIMEZONE, a
  * once; a duplicate report in a team channel is worse than a missed one, so this is
  * deliberately at-most-once: claim first, then send.
  */
-export const claimReportDay = async (userId, dateStr) => {
+export const claimReportDay = async (userId, dateStr, atMs = Date.now()) => {
   const result = await query(
     `UPDATE user_report_settings
-     SET last_sent_on = $2
+     SET last_sent_on = $2, last_sent_at = $3
      WHERE user_id = $1 AND last_sent_on IS DISTINCT FROM $2
      RETURNING user_id`,
-    [userId, dateStr]
+    [userId, dateStr, atMs]
   );
   return result.rows.length > 0;
 };
 
-/** Undo a claim when every channel failed, so the next tick can retry. */
-export const releaseReportDay = async (userId, dateStr) => {
+/**
+ * Undo a claim when every channel failed, so the next tick can retry.
+ *
+ * last_sent_at is restored to what it was, not cleared: it's the next report's window
+ * start, and a failed send must not advance it. Cleared, the window would silently
+ * skip forward over work nobody ever received; left at the claim time, the same.
+ */
+export const releaseReportDay = async (userId, dateStr, previousSentAt = null) => {
   await query(
-    'UPDATE user_report_settings SET last_sent_on = NULL WHERE user_id = $1 AND last_sent_on = $2',
-    [userId, dateStr]
+    `UPDATE user_report_settings SET last_sent_on = NULL, last_sent_at = $3
+     WHERE user_id = $1 AND last_sent_on = $2`,
+    [userId, dateStr, previousSentAt]
   );
 };
