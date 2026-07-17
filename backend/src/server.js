@@ -14,6 +14,7 @@ import draftTasksRoutes from './routes/draftTasks.js';
 import githubRoutes from './routes/github.js';
 import reportsRoutes from './routes/reports.js';
 import analyticsRoutes from './routes/analytics.js';
+import agentRoutes from './routes/agent.js';
 import { initializeBot } from './services/telegramService.js';
 import { startDailyReport } from './jobs/dailyReport.js';
 import { startEmailScanner } from './jobs/emailScanner.js';
@@ -60,6 +61,10 @@ app.use('/api/reports', reportsRoutes);
 
 // Analytics routes (require authentication - already in the router)
 app.use('/api/analytics', analyticsRoutes);
+
+// Agent routes (mixed auth: API token for the machine paths, session for the UI
+// paths - each route names its own middleware)
+app.use('/api/agent', agentRoutes);
 
 // Auth routes (no authentication required)
 app.use('/api', authRoutes);

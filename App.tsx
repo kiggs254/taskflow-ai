@@ -19,6 +19,7 @@ import { SlackSettings } from './components/SlackSettings';
 import { GitHubSettings } from './components/GitHubSettings';
 import { ReportSettings } from './components/ReportSettings';
 import { AnalyticsScreen } from './components/AnalyticsScreen';
+import { AgentSettings } from './components/AgentSettings';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { ToastContainer, Toast, ToastType } from './components/ToastNotification';
 import { ConfirmationModal } from './components/ConfirmationModal';
@@ -1623,6 +1624,7 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
               <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Integrations</h4>
               <div className="space-y-4">
                  <GitHubSettings token={token} />
+                 <AgentSettings token={token} />
                  <ReportSettings token={token} />
                  <GmailSettings token={token} />
                  <TelegramSettings token={token} />

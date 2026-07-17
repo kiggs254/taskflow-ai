@@ -243,6 +243,50 @@ export const api = {
     },
   },
 
+  // Claude Code agent logging
+  agent: {
+    settings: async (token: string) => {
+      const res = await fetch(`${API_BASE}/agent/settings`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load agent settings');
+      return res.json();
+    },
+    updateSettings: async (token: string, settings: { enabled?: boolean; workPaths?: { path: string; workspace: string }[] }) => {
+      const res = await fetch(`${API_BASE}/agent/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) throw new Error('Failed to save agent settings');
+      return res.json();
+    },
+    tokens: async (token: string) => {
+      const res = await fetch(`${API_BASE}/agent/tokens`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load tokens');
+      return res.json();
+    },
+    createToken: async (token: string, name: string) => {
+      const res = await fetch(`${API_BASE}/agent/tokens`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error('Failed to create token');
+      return res.json();
+    },
+    revokeToken: async (token: string, id: number) => {
+      const res = await fetch(`${API_BASE}/agent/tokens/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to revoke token');
+      return res.json();
+    },
+  },
+
   // Analytics
   analytics: {
     summary: async (token: string, range: string) => {

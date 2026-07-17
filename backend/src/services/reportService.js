@@ -73,12 +73,17 @@ export const getCompletedToday = async (userId, { timezone = DEFAULT_TIMEZONE, a
   const result = await query(
     `SELECT t.id, t.title, t.workspace, t.energy, t.status, t.tags, t.subtasks,
             t.completed_at AS "completedAt", t.estimated_time AS "estimatedTime",
-            (pc.task_id IS NOT NULL) AS "fromCommits"
+            (pc.task_id IS NOT NULL) AS "fromCommits",
+            (ag.task_id IS NOT NULL) AS "fromAgent"
      FROM tasks t
      LEFT JOIN LATERAL (
        SELECT DISTINCT task_id FROM processed_commits
        WHERE task_id = t.id AND user_id = $1 LIMIT 1
      ) pc ON true
+     LEFT JOIN LATERAL (
+       SELECT DISTINCT task_id FROM agent_sessions
+       WHERE task_id = t.id AND user_id = $1 LIMIT 1
+     ) ag ON true
      WHERE t.user_id = $1
        AND (
          (t.status = 'done' AND t.completed_at >= $2 AND t.completed_at < $3)
@@ -114,9 +119,10 @@ export const getCompletedToday = async (userId, { timezone = DEFAULT_TIMEZONE, a
     }
   }
 
-  // Commit-derivation is decided by the ledger join, not by sniffing the 'github'
-  // tag -- a user can edit a tag off a task, and that must not change the gate.
+  // Decided by the ledger joins, not by sniffing the 'github' tag -- a user can edit
+  // a tag off a task, and that must not change the gate.
   const commitItems = items.filter((i) => i.fromCommits);
+  const agentItems = items.filter((i) => i.fromAgent);
 
   return {
     date: localDateString(tz, atMs),
@@ -124,8 +130,15 @@ export const getCompletedToday = async (userId, { timezone = DEFAULT_TIMEZONE, a
     dayStart,
     dayEnd,
     items,
-    commitDerived: commitItems.length > 0,
+    // "Did I actually do tracked work today", not "did I commit".
+    //
+    // This gates the 16:30 report. Counting only commits meant a day of purely
+    // agent-logged work -- WordPress, ops, anything not in a tracked repo -- sent no
+    // report at all, i.e. the report went silent on exactly the days the agent
+    // logging exists to capture.
+    commitDerived: commitItems.length > 0 || agentItems.length > 0,
     commitCount: commitItems.length,
+    agentCount: agentItems.length,
     counts: {
       tasks: items.length,
       subtasks: items.reduce((n, i) => n + i.subtasks.filter((s) => s.completed).length, 0),
