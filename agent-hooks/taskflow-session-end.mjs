@@ -69,14 +69,26 @@ const getPolicy = async () => {
   return policy;
 };
 
-/** Longest matching prefix wins, so a sub-folder can override its parent. */
+/**
+ * Longest matching prefix wins, so a sub-folder can override its parent.
+ *
+ * Must stay in step with matchWorkPath in agentService.js — this is the gate that
+ * decides whether anything leaves the machine, and the server re-checks it. If they
+ * disagree, work silently vanishes (hook stricter) or a request gets made that the
+ * server then rejects (hook looser).
+ *
+ * Case-insensitive: on macOS "/Desktop/Random AI tasks" and "/Desktop/random ai
+ * tasks" are the same folder, so an exact compare turned a capitalisation slip in
+ * Settings into permanent silent non-logging.
+ */
 const matchWorkPath = (dir, workPaths = []) => {
-  const target = path.resolve(dir);
+  const target = path.resolve(dir).toLowerCase();
   let best = null;
   for (const rule of workPaths) {
     const root = path.resolve(rule.path).replace(/\/+$/, '');
+    const rootLower = root.toLowerCase();
     // Boundary-aware: '/a/bcd' must not match a rule for '/a/b'.
-    if (target !== root && !target.startsWith(`${root}${path.sep}`)) continue;
+    if (target !== rootLower && !target.startsWith(`${rootLower}${path.sep}`)) continue;
     if (!best || root.length > best.path.length) best = { ...rule, path: root };
   }
   return best;

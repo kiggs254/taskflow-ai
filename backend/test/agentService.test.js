@@ -63,6 +63,52 @@ test('relative and untidy paths are normalised before matching', () => {
 });
 
 /**
+ * Real-world folders have spaces and capitals. These are macOS paths, and macOS is
+ * case-insensitive: "/Desktop/Random AI tasks" and "/Desktop/random ai tasks" are
+ * the same directory. An exact compare turned a capitalisation slip when typing the
+ * folder into Settings into permanent, silent non-logging.
+ */
+
+const SPACED = [{ path: '/Users/mac/Desktop/Random AI tasks', workspace: 'job' }];
+
+test('a folder with spaces matches, itself and its children', () => {
+  assert.equal(matchWorkPath('/Users/mac/Desktop/Random AI tasks', SPACED), 'job');
+  assert.equal(matchWorkPath('/Users/mac/Desktop/Random AI tasks/notes.md', SPACED), 'job');
+  assert.equal(matchWorkPath('/Users/mac/Desktop/Random AI tasks/a b c/d e f', SPACED), 'job');
+});
+
+test('casing differences still match — same folder on macOS', () => {
+  assert.equal(matchWorkPath('/Users/mac/Desktop/random ai tasks/x', SPACED), 'job');
+  assert.equal(matchWorkPath('/USERS/MAC/DESKTOP/RANDOM AI TASKS', SPACED), 'job');
+});
+
+test('a rule typed with the wrong casing still works', () => {
+  // The actual failure mode: folder is "Random AI tasks", user types it lowercase.
+  const typo = [{ path: '/Users/mac/Desktop/random ai TASKS', workspace: 'job' }];
+  assert.equal(matchWorkPath('/Users/mac/Desktop/Random AI tasks/x', typo), 'job');
+});
+
+test('space-boundary trap: a longer sibling name must NOT match', () => {
+  // "Random AI tasks 2" starts with "Random AI tasks" as a string.
+  assert.equal(matchWorkPath('/Users/mac/Desktop/Random AI tasks 2/x', SPACED), null);
+  assert.equal(matchWorkPath('/Users/mac/Desktop/Random AI tasks-old', SPACED), null);
+});
+
+test('the parent directory does not match', () => {
+  assert.equal(matchWorkPath('/Users/mac/Desktop', SPACED), null);
+  assert.equal(matchWorkPath('/Users/mac/Desktop/Other', SPACED), null);
+});
+
+test('case-insensitivity does not break longest-prefix override', () => {
+  const nested = [
+    { path: '/Users/mac/Desktop/Random AI tasks', workspace: 'job' },
+    { path: '/Users/mac/Desktop/Random AI tasks/Personal Stuff', workspace: 'personal' },
+  ];
+  assert.equal(matchWorkPath('/Users/mac/Desktop/Random AI tasks/x', nested), 'job');
+  assert.equal(matchWorkPath('/users/mac/desktop/random ai tasks/personal stuff/y', nested), 'personal');
+});
+
+/**
  * parseGitRemote feeds the "is this already covered by GitHub" check. A remote that
  * fails to parse means we log work GitHub also logs — a duplicate, not a leak.
  */

@@ -84,15 +84,27 @@ export const updateAgentSettings = async (userId, patch) => {
  */
 export const matchWorkPath = (dir, workPaths = []) => {
   if (!dir || typeof dir !== 'string') return null;
-  const target = path.resolve(dir);
+
+  // Case-insensitive, because these are macOS/Windows paths: there,
+  // "/Desktop/Random AI tasks" and "/Desktop/random ai tasks" are literally the same
+  // folder. Comparing exactly meant a capitalisation slip when typing the folder into
+  // Settings produced silent, permanent non-logging with nothing to explain it -- the
+  // worst possible failure for a background feature.
+  //
+  // The trade-off is a Linux server could over-match two folders differing only in
+  // case. That needs someone to keep genuinely distinct `Work/` and `work/` folders,
+  // which is far less likely than a typo, and its cost (a task filed under the right
+  // person, wrong folder) is far lower than never recording anything.
+  const target = path.resolve(dir).toLowerCase();
 
   let best = null;
   for (const rule of workPaths) {
-    const root = rule.path;
+    const root = path.resolve(rule.path).replace(/\/+$/, '');
+    const rootLower = root.toLowerCase();
     // Compare on a path boundary: '/a/bcd' must not match the rule '/a/b'.
-    const isMatch = target === root || target.startsWith(`${root}${path.sep}`);
+    const isMatch = target === rootLower || target.startsWith(`${rootLower}${path.sep}`);
     if (!isMatch) continue;
-    if (!best || root.length > best.path.length) best = rule;
+    if (!best || root.length > best.root.length) best = { root, workspace: rule.workspace };
   }
 
   return best ? best.workspace : null;
