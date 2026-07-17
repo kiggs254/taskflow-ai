@@ -6,6 +6,7 @@ import { getAuthUrl, isGithubConfigured } from '../services/githubAuth.js';
 import {
   handleInstallCallback,
   listRepos,
+  refreshRepos,
   setSelectedRepos,
   scanCommits,
   getGithubStatus,
@@ -47,7 +48,17 @@ router.get('/callback', async (req, res) => {
 
     if (!installationId) throw new Error('Missing installation_id');
 
-    await handleInstallCallback(userId, Number(installationId));
+    const result = await handleInstallCallback(userId, Number(installationId));
+
+    // The install succeeded but we couldn't read the repo list. Say so, rather than
+    // reporting "connected" and leaving an empty picker with no explanation.
+    if (result.error) {
+      return res.redirect(
+        `${frontend}/settings?github=error&message=${encodeURIComponent(
+          `Connected, but listing repositories failed: ${result.error}`
+        )}`
+      );
+    }
     return res.redirect(`${frontend}/settings?github=connected`);
   } catch (error) {
     console.error('GitHub callback error:', error.message);
@@ -59,8 +70,18 @@ router.get('/status', authenticate, asyncHandler(async (req, res) => {
   res.json(await getGithubStatus(req.user.id));
 }));
 
+/**
+ * GET /api/github/repos?refresh=1
+ * Refreshing re-reads the repo set from GitHub. Needed because the user can change
+ * which repos the installation can see at any time, on GitHub, without telling us.
+ */
 router.get('/repos', authenticate, asyncHandler(async (req, res) => {
-  res.json({ repos: await listRepos(req.user.id) });
+  let error = null;
+  if (req.query.refresh) {
+    const result = await refreshRepos(req.user.id);
+    if (!result.ok) error = result.error;
+  }
+  res.json({ repos: await listRepos(req.user.id), error });
 }));
 
 /** PUT /api/github/repos  body: { repoIds: number[] } */

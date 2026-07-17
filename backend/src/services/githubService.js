@@ -10,6 +10,55 @@ const MAX_PAGES = 5; // 500 commits/repo/day; beyond this something is wrong
  * Complete the GitHub App installation callback.
  * `userId` comes from the *verified* signed state, never from the query string.
  */
+/**
+ * Pull the repo list GitHub currently grants this installation and cache it.
+ *
+ * This has to be callable at any time, not just at install. The repo set changes
+ * whenever the user edits the installation on GitHub, and the first fetch can fail
+ * (bad JWT, clock skew, a transient 5xx) -- if the only fetch were at install time,
+ * the integration would be stuck showing "Connected" with zero repos forever, with
+ * re-installing as the only recovery.
+ *
+ * Never throws: returns {ok, error} so callers can surface the reason instead of
+ * turning it into an opaque failure.
+ */
+export const refreshRepos = async (userId) => {
+  let client;
+  try {
+    client = await getClientForUser(userId);
+  } catch (error) {
+    console.error(`GitHub: auth failed for user ${userId}:`, error.message);
+    return { ok: false, error: error.message };
+  }
+  if (!client) return { ok: false, error: 'GitHub is not connected for this user.' };
+
+  try {
+    const all = [];
+    let url = '/installation/repositories?per_page=100';
+    let pages = 0;
+
+    while (url && pages < MAX_PAGES) {
+      const res = await client.request(url);
+      all.push(...(res.data?.repositories || []));
+      url = nextPageUrl(res.link);
+      pages++;
+    }
+
+    // Needed to filter commits by author.
+    const login = all[0]?.owner?.login ?? null;
+    if (login) {
+      await query('UPDATE github_integrations SET github_login = $2 WHERE user_id = $1', [userId, login]);
+    }
+
+    await upsertRepos(userId, all);
+    console.log(`GitHub: cached ${all.length} repo(s) for user ${userId}`);
+    return { ok: true, count: all.length };
+  } catch (error) {
+    console.error(`GitHub: failed to list repositories for user ${userId}:`, error.message);
+    return { ok: false, error: error.message };
+  }
+};
+
 export const handleInstallCallback = async (userId, installationId) => {
   await query(
     `INSERT INTO github_integrations (user_id, installation_id, auth_kind, enabled)
@@ -21,19 +70,12 @@ export const handleInstallCallback = async (userId, installationId) => {
     [userId, installationId]
   );
 
-  // Cache the repos GitHub granted, and who we are (needed to filter commits by author).
-  const client = await getClientForUser(userId);
-  if (!client) throw new Error('GitHub: could not authenticate after install');
-
-  const { data } = await client.request('/installation/repositories?per_page=100');
-  const login = data.repositories?.[0]?.owner?.login ?? null;
-
-  if (login) {
-    await query('UPDATE github_integrations SET github_login = $2 WHERE user_id = $1', [userId, login]);
-  }
-
-  await upsertRepos(userId, data.repositories || []);
-  return { repos: (data.repositories || []).length };
+  // Deliberately does not throw on a failed repo fetch. The installation itself is
+  // real and recorded; the repo list is recoverable and is re-fetched by /status and
+  // /repos. Throwing here used to abort the callback *after* the row was written,
+  // which left exactly the state this fixes: "Connected", zero repos, no way back.
+  const result = await refreshRepos(userId);
+  return { repos: result.count ?? 0, error: result.ok ? null : result.error };
 };
 
 const upsertRepos = async (userId, repos) => {
@@ -87,7 +129,18 @@ export const getGithubStatus = async (userId) => {
   const row = result.rows[0];
   if (!row) return { connected: false, configured: true };
 
-  const repos = await listRepos(userId);
+  let repos = await listRepos(userId);
+  let repoError = null;
+
+  // Self-heal: an empty cache means the install-time fetch failed or the user has
+  // since changed which repos the app can see. Re-fetch rather than telling them to
+  // reinstall, and report *why* if GitHub refuses.
+  if (repos.length === 0) {
+    const refreshed = await refreshRepos(userId);
+    if (refreshed.ok) repos = await listRepos(userId);
+    else repoError = refreshed.error;
+  }
+
   return {
     connected: true,
     configured: true,
@@ -96,6 +149,7 @@ export const getGithubStatus = async (userId) => {
     scanFrequency: row.scan_frequency,
     enabled: row.enabled,
     repos,
+    repoError,
     selectedCount: repos.filter((r) => r.selected).length,
   };
 };

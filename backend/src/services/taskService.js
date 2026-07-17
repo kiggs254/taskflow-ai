@@ -173,7 +173,7 @@ export const completeTask = async (userId, taskId, options = {}) => {
       const replyMessage = await generateEmailCompletionReply(
         task.title,
         task.description,
-        'openai',
+        undefined,
         userName
       );
       

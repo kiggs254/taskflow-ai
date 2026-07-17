@@ -329,6 +329,13 @@ export const api = {
       if (!res.ok) throw new Error('Failed to get GitHub status');
       return res.json();
     },
+    refreshRepos: async (token: string) => {
+      const res = await fetch(`${API_BASE}/github/repos?refresh=1`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to refresh repositories');
+      return res.json();
+    },
     setRepos: async (token: string, repoIds: number[]) => {
       const res = await fetch(`${API_BASE}/github/repos`, {
         method: 'PUT',

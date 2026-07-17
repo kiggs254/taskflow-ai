@@ -2525,7 +2525,10 @@ export default function App() {
       estimatedTime: 15,
     };
 
-    const aiResult = await parseTaskWithGemini(combinedInput, token, 'openai', { activeWorkspace });
+    // No provider argument: the server picks it from AI_PRIMARY_PROVIDER. Hardcoding
+    // one here overrode the server config, which is why a dead OpenAI key still 401'd
+    // for users running on Deepseek.
+    const aiResult = await parseTaskWithGemini(combinedInput, token, undefined, { activeWorkspace });
     
     if (aiResult) {
       newTask = {

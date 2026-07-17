@@ -13,7 +13,7 @@ const aiRequest = async (
   endpoint: string,
   body: any,
   token: string,
-  provider: 'openai' | 'deepseek' = 'openai'
+  provider?: 'openai' | 'deepseek'
 ): Promise<any> => {
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -46,7 +46,7 @@ const aiRequest = async (
 export const parseTaskWithGemini = async (
   input: string,
   token: string,
-  provider: 'openai' | 'deepseek' = 'openai',
+  provider?: 'openai' | 'deepseek',
   options: { activeWorkspace?: string } = {}
 ): Promise<AIParsedTask | null> => {
   if (!token) {
@@ -78,7 +78,7 @@ export const getDailyMotivation = async (
   completedTasks: number,
   pendingTasks: number,
   token: string,
-  provider: 'openai' | 'deepseek' = 'openai'
+  provider?: 'openai' | 'deepseek'
 ): Promise<string> => {
   if (!token) return "Great work today! Keep pushing forward.";
 
@@ -99,7 +99,7 @@ export const getDailyMotivation = async (
 export const generateDailyPlan = async (
   pendingTasks: Task[],
   token: string,
-  provider: 'openai' | 'deepseek' = 'openai'
+  provider?: 'openai' | 'deepseek'
 ): Promise<string> => {
   if (!token) return "Focus on the high energy tasks first tomorrow!";
   if (pendingTasks.length === 0) return "No tasks left! Enjoy your clean slate.";
@@ -121,7 +121,7 @@ export const generateDailyPlan = async (
 export const generateClientFollowUp = async (
   taskTitle: string,
   token: string,
-  provider: 'openai' | 'deepseek' = 'openai'
+  provider?: 'openai' | 'deepseek'
 ): Promise<string> => {
   if (!token) return "Hey, just checking in on this.";
 

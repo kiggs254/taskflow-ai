@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../config/env.js';
-import { modelFor } from '../config/aiModels.js';
+import { modelFor, primaryProvider } from '../config/aiModels.js';
 import { DEFAULT_TIMEZONE } from '../utils/time.js';
 import { callAI } from './ai/callAI.js';
 import { buildTaskContext, renderSystemPrompt } from './ai/context.js';
@@ -24,7 +24,7 @@ const deepseekClient = config.ai.deepseek.apiKey
 /**
  * Get AI client based on provider
  */
-const getClient = (provider = 'openai') => {
+const getClient = (provider = primaryProvider()) => {
   if (provider === 'deepseek') {
     if (!deepseekClient) {
       throw new Error('Deepseek API key not configured. Please set DEEPSEEK_API_KEY environment variable.');
@@ -44,61 +44,34 @@ const getClient = (provider = 'openai') => {
  * @param {...any} args - Arguments to pass to the function (after provider)
  */
 const tryWithFallback = async (fn, ...args) => {
-  console.log('tryWithFallback: Attempting OpenAI first');
+  // Follows AI_PRIMARY_PROVIDER rather than always starting at OpenAI. Hardcoding
+  // OpenAI here meant a dead OpenAI key cost every call a guaranteed-failing round
+  // trip before the fallback, even when the user had configured Deepseek.
+  const first = primaryProvider();
+  const second = first === 'openai' ? 'deepseek' : 'openai';
   try {
-    // Try OpenAI first
-    const result = await fn('openai', ...args);
-    console.log('tryWithFallback: OpenAI succeeded');
+    const result = await fn(first, ...args);
     return result;
   } catch (openaiError) {
-    console.log('tryWithFallback: OpenAI failed, error:', openaiError.message, 'type:', openaiError.constructor.name);
-    // Check if it's an API key error or client initialization error
-    const isApiKeyError = openaiError.message && (
-      openaiError.message.includes('API key not configured') ||
-      openaiError.message.includes('OPENAI_API_KEY') ||
-      openaiError.message.includes('apiKey') ||
-      openaiError.message.includes('not configured')
-    );
-    
-    if (isApiKeyError) {
-      console.warn('OpenAI API key issue detected, checking Deepseek availability...');
-      // If OpenAI API key is missing but Deepseek is available, use Deepseek
-      if (deepseekClient) {
-        console.log('Using Deepseek as primary provider since OpenAI is not configured');
-        try {
-          const result = await fn('deepseek', ...args);
-          console.log('tryWithFallback: Deepseek succeeded as fallback');
-          return result;
-        } catch (deepseekError) {
-          console.error('tryWithFallback: Deepseek fallback also failed:', deepseekError.message);
-          throw new Error(`OpenAI not configured and Deepseek also failed: ${deepseekError.message}`);
-        }
-      }
-      // If neither is available, throw the original error
-      console.error('tryWithFallback: Neither OpenAI nor Deepseek available');
+    console.log(`tryWithFallback: ${first} failed, error:`, openaiError.message);
+    // Both branches of the old code did the same thing (try Deepseek), so the
+    // elaborate string-matching on error.message to detect "API key errors" was
+    // dead weight. It also retried on 400s, which fail identically on the other
+    // provider -- double the latency to reach the same error.
+    const client = second === 'deepseek' ? deepseekClient : openaiClient;
+    if (!client) {
+      console.error(`tryWithFallback: ${second} is not configured; cannot fall back.`);
       throw openaiError;
     }
-    
-    console.warn('OpenAI request failed, falling back to Deepseek:', {
-      message: openaiError.message,
-      status: openaiError.status,
-    });
-    
-    // Check if Deepseek is available
-    if (!deepseekClient) {
-      console.error('Deepseek not available for fallback');
-      throw new Error(`OpenAI failed and Deepseek is not configured. Original error: ${openaiError.message}`);
-    }
-    
-    // Fallback to Deepseek
+
     try {
-      return await fn('deepseek', ...args);
-    } catch (deepseekError) {
-      console.error('Deepseek fallback also failed:', {
-        message: deepseekError.message,
-        status: deepseekError.status,
-      });
-      throw new Error(`Both OpenAI and Deepseek failed. OpenAI: ${openaiError.message}, Deepseek: ${deepseekError.message}`);
+      const result = await fn(second, ...args);
+      console.log(`tryWithFallback: ${second} succeeded as fallback`);
+      return result;
+    } catch (fallbackError) {
+      throw new Error(
+        `Both providers failed. ${first}: ${openaiError.message}; ${second}: ${fallbackError.message}`
+      );
     }
   }
 };
@@ -122,7 +95,7 @@ const tryWithFallback = async (fn, ...args) => {
  * `options.userId` + `options.activeWorkspace` are what make this smarter; without
  * them it still works, just blind.
  */
-export const parseTask = async (input, provider = 'openai', options = {}) => {
+export const parseTask = async (input, provider = primaryProvider(), options = {}) => {
   if (!input || typeof input !== 'string') {
     throw new Error('Invalid input: task input must be a string');
   }
@@ -192,7 +165,7 @@ export const parseTask = async (input, provider = 'openai', options = {}) => {
 export const getDailyMotivation = async (
   completedTasks,
   pendingTasks,
-  provider = 'openai'
+  provider = primaryProvider()
 ) => {
   const client = getClient(provider);
   const model = modelFor(provider, 'fast');
@@ -220,7 +193,7 @@ export const getDailyMotivation = async (
 /**
  * Generate daily plan based on pending tasks
  */
-export const generateDailyPlan = async (pendingTasks, provider = 'openai') => {
+export const generateDailyPlan = async (pendingTasks, provider = primaryProvider()) => {
   if (!Array.isArray(pendingTasks) || pendingTasks.length === 0) {
     return 'No tasks left! Enjoy your clean slate.';
   }
@@ -260,7 +233,7 @@ Create a short, strategic bullet-point plan (max 3 points) for how to tackle the
  */
 export const generateClientFollowUp = async (
   taskTitle,
-  provider = 'openai'
+  provider = primaryProvider()
 ) => {
   if (!taskTitle || typeof taskTitle !== 'string') {
     throw new Error('Invalid input: taskTitle must be a string');
@@ -295,7 +268,7 @@ Keep it under 280 characters. Casual but professional tone.`,
  */
 export const generateCompletionMessage = async (
   taskTitle,
-  provider = 'openai'
+  provider = primaryProvider()
 ) => {
   if (!taskTitle || typeof taskTitle !== 'string') {
     throw new Error('Invalid input: taskTitle must be a string');
@@ -332,7 +305,7 @@ Keep it under 200 characters. Be casual and professional. Start with something l
  * NOTE: This is a LENIENT filter - it only excludes emails that are EXPLICITLY 
  * mentioned in the user's "don't" instructions. When in doubt, process the email.
  */
-export const checkEmailRelevance = async (emailSummary, promptInstructions, provider = 'openai') => {
+export const checkEmailRelevance = async (emailSummary, promptInstructions, provider = primaryProvider()) => {
   if (!promptInstructions || !promptInstructions.trim()) {
     // No instructions provided, consider all emails relevant
     return { isRelevant: true, reason: 'No filter instructions provided' };
@@ -391,7 +364,7 @@ Return valid JSON with: { "isRelevant": boolean, "reason": string }`,
 /**
  * Parse full email thread and extract title, todos, subtasks, and formatted description
  */
-export const parseEmailThread = async (fullThreadContent, provider = 'openai', promptInstructions = '') => {
+export const parseEmailThread = async (fullThreadContent, provider = primaryProvider(), promptInstructions = '') => {
   if (!fullThreadContent || typeof fullThreadContent !== 'string') {
     throw new Error('Invalid input: fullThreadContent must be a string');
   }
@@ -560,7 +533,7 @@ Write a brief, professional email reply informing them the task is complete.`,
 export const generateEmailCompletionReply = async (
   taskTitle,
   taskDescription,
-  provider = 'openai',
+  provider = primaryProvider(),
   userName = ''
 ) => {
   if (!taskTitle || typeof taskTitle !== 'string') {
@@ -671,7 +644,7 @@ export const generateEmailDraft = async (
   taskDescription,
   emailSubject,
   tone = 'professional',
-  provider = 'openai',
+  provider = primaryProvider(),
   customInstructions = '',
   userName = ''
 ) => {
@@ -783,7 +756,7 @@ CRITICAL: Return ONLY the email body text. Do NOT include:
 export const enhanceEmailMessage = async (
   message,
   style = 'short',
-  provider = 'openai',
+  provider = primaryProvider(),
   taskContext = '',
   userName = ''
 ) => {
@@ -865,7 +838,7 @@ const _polishEmailReplyInternal = async (provider, message, instructions, userNa
 
 export const polishEmailReply = async (
   message,
-  provider = 'openai',
+  provider = primaryProvider(),
   instructions = '',
   userName = ''
 ) => {

@@ -22,6 +22,7 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ token }) => {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [savingRepos, setSavingRepos] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [scanFrequency, setScanFrequency] = useState(30);
   const [disconnectConfirm, setDisconnectConfirm] = useState(false);
@@ -64,6 +65,28 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ token }) => {
       next.has(repoId) ? next.delete(repoId) : next.add(repoId);
       return next;
     });
+  };
+
+  const refreshRepos = async () => {
+    setRefreshing(true);
+    try {
+      const result = await api.github.refreshRepos(token);
+      await loadStatus();
+      if (result.error) {
+        setAlertModal({ isOpen: true, title: 'GitHub Refused', message: result.error, type: 'error' });
+      } else if ((result.repos ?? []).length === 0) {
+        setAlertModal({
+          isOpen: true,
+          title: 'No Repositories',
+          message: 'GitHub returned no repositories for this installation. Check that the app is installed and granted access to at least one repo.',
+          type: 'info',
+        });
+      }
+    } catch (error: any) {
+      setAlertModal({ isOpen: true, title: 'Refresh Failed', message: error.message, type: 'error' });
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const saveRepos = async () => {
@@ -158,22 +181,40 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ token }) => {
               <label className="text-sm font-medium text-slate-300">
                 Tracked repositories ({selected.size}/{status.repos?.length ?? 0})
               </label>
-              <button
-                onClick={saveRepos}
-                disabled={savingRepos}
-                className="text-xs font-semibold text-primary hover:text-white transition-colors disabled:opacity-50"
-              >
-                {savingRepos ? 'Saving...' : 'Save selection'}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={refreshRepos}
+                  disabled={refreshing}
+                  className="text-xs text-slate-400 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-1"
+                  title="Re-read the repository list from GitHub"
+                >
+                  <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                <button
+                  onClick={saveRepos}
+                  disabled={savingRepos}
+                  className="text-xs font-semibold text-primary hover:text-white transition-colors disabled:opacity-50"
+                >
+                  {savingRepos ? 'Saving...' : 'Save selection'}
+                </button>
+              </div>
             </div>
             <p className="text-xs text-slate-500 mb-3">
               Commits you author in these repos become completed tasks — one per repo per day, with each commit as a subtask.
             </p>
 
+            {/* Surface the real reason rather than a generic "reinstall" message. */}
+            {status.repoError && (
+              <div className="mb-3 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-2.5">
+                GitHub refused the repository list: {status.repoError}
+              </div>
+            )}
+
             <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-700 divide-y divide-slate-700/60">
               {(status.repos ?? []).length === 0 ? (
                 <p className="text-sm text-slate-500 p-3">
-                  No repositories available. Re-run the GitHub install and grant access to the repos you want tracked.
+                  No repositories yet. If you just changed which repos the app can access on GitHub, hit Refresh.
                 </p>
               ) : (
                 (status.repos as Repo[]).map(repo => (

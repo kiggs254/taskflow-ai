@@ -19,7 +19,7 @@ router.use(authenticate);
  * Body: { input: string, provider?: 'openai' | 'deepseek', activeWorkspace?, timezone? }
  */
 router.post('/parse-task', asyncHandler(async (req, res) => {
-  const { input, provider = 'openai', activeWorkspace, timezone } = req.body;
+  const { input, provider, activeWorkspace, timezone } = req.body;
 
   if (!input) {
     return res.status(400).json({ error: 'Input is required' });
@@ -51,7 +51,7 @@ router.post('/daily-motivation', asyncHandler(async (req, res) => {
   const {
     completedTasks = 0,
     pendingTasks = 0,
-    provider = 'openai',
+    provider,
   } = req.body;
 
   try {
@@ -73,7 +73,7 @@ router.post('/daily-motivation', asyncHandler(async (req, res) => {
  * Body: { pendingTasks: Task[], provider?: 'openai' | 'deepseek' }
  */
 router.post('/daily-plan', asyncHandler(async (req, res) => {
-  const { pendingTasks = [], provider = 'openai' } = req.body;
+  const { pendingTasks = [], provider } = req.body;
 
   if (!Array.isArray(pendingTasks)) {
     return res.status(400).json({ error: 'pendingTasks must be an array' });
@@ -94,7 +94,7 @@ router.post('/daily-plan', asyncHandler(async (req, res) => {
  * Body: { taskTitle: string, provider?: 'openai' | 'deepseek' }
  */
 router.post('/client-followup', asyncHandler(async (req, res) => {
-  const { taskTitle, provider = 'openai' } = req.body;
+  const { taskTitle, provider } = req.body;
 
   if (!taskTitle) {
     return res.status(400).json({ error: 'taskTitle is required' });

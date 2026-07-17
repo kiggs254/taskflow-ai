@@ -200,7 +200,7 @@ router.post('/polish-reply', authenticate, asyncHandler(async (req, res) => {
   const userResult = await query('SELECT username FROM users WHERE id = $1', [req.user.id]);
   const userName = userResult.rows[0]?.username || '';
 
-  const polishedMessage = await polishEmailReply(message, 'openai', instructions || '', userName);
+  const polishedMessage = await polishEmailReply(message, undefined, instructions || '', userName);
   
   res.json({ polishedMessage });
 }));
@@ -286,7 +286,7 @@ router.post('/generate-draft', authenticate, asyncHandler(async (req, res) => {
       const enhanced = await enhanceEmailMessage(
         message,
         style,
-        'openai', // Will use fallback logic automatically
+        undefined, // provider comes from AI_PRIMARY_PROVIDER
         taskContext,
         userName
       );

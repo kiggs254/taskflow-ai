@@ -249,7 +249,7 @@ export const scanSlackMentions = async (userId, maxMentions = 50, todayOnly = fa
         }
         
         // Use AI to determine if this is a task
-        const aiResult = await parseTask(messageText, 'openai');
+        const aiResult = await parseTask(messageText);
         
         if (aiResult && aiResult.title) {
           // Create approved task directly (no draft step)
@@ -709,7 +709,7 @@ export const replyToSlackTask = async (userId, taskTitle, taskDescription) => {
     const client = await getSlackClient(userId);
     
     // Generate AI response
-    const aiMessage = await generateCompletionMessage(taskTitle, 'openai');
+    const aiMessage = await generateCompletionMessage(taskTitle);
 
     // Post reply to Slack thread
     await client.chat.postMessage({
@@ -765,7 +765,7 @@ export const handleSlackEvent = async (event) => {
 
           try {
             // Use AI to parse task
-            const aiResult = await parseTask(taskText, 'openai');
+            const aiResult = await parseTask(taskText);
 
             // Create a fully approved task directly (no draft step)
             const title = aiResult?.title || taskText.split('\n')[0].substring(0, 100) || taskText.substring(0, 100);

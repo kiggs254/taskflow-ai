@@ -186,7 +186,7 @@ const getGmailClient = async (userId) => {
  */
 const processEmailThread = async (fullThreadContent, promptInstructions = '') => {
   try {
-    const result = await parseEmailThread(fullThreadContent, 'openai', promptInstructions);
+    const result = await parseEmailThread(fullThreadContent, undefined, promptInstructions);
     return result;
   } catch (error) {
     console.error('Error processing email thread:', error);
@@ -398,7 +398,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
         // Only apply filter if user has provided meaningful instructions
         if (promptInstructions && promptInstructions.trim().length > 10) {
           const emailSummary = `Subject: ${subject}\nFrom: ${from}\n\n${bodyText.substring(0, 1500)}`;
-          const relevanceCheck = await checkEmailRelevance(emailSummary, promptInstructions, 'openai');
+          const relevanceCheck = await checkEmailRelevance(emailSummary, promptInstructions);
           
           if (!relevanceCheck.isRelevant) {
             console.log(`Skipping email ${message.id} (${subject}): Not relevant - ${relevanceCheck.reason}`);
@@ -416,7 +416,7 @@ export const scanEmails = async (userId, maxEmails = 50) => {
         try {
           const aiResult = await parseTask(
             `Subject: ${subject}\n\nFrom: ${from}\n\n${bodyText.substring(0, 2000)}`,
-            'openai',
+            undefined,
             promptInstructions || ''
           );
           
@@ -743,7 +743,7 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
     let finalMessage = message;
     if (polishWithAI) {
       const { polishEmailReply } = await import('./aiService.js');
-      finalMessage = await polishEmailReply(message, 'openai', polishInstructions, userName);
+      finalMessage = await polishEmailReply(message, undefined, polishInstructions, userName);
     }
     
     // Validate message

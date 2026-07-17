@@ -133,7 +133,7 @@ export const approveDraftTask = async (userId, draftId, edits = {}) => {
   try {
     const aiResult = await parseTask(
       `${draft.title}\n${draft.description || ''}`,
-      'openai'
+      undefined
     );
     aiTitle = aiResult?.title || '';
   } catch (err) {

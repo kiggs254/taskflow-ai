@@ -346,7 +346,7 @@ const setupBotHandlers = () => {
       }
 
       // Use AI to parse task (pass full multi-line text)
-      const aiResult = await parseTask(taskText, 'openai');
+      const aiResult = await parseTask(taskText);
       
       // Create a fully approved task directly (no draft step)
       // Use first line or AI title for title, full text for description
@@ -677,7 +677,7 @@ const setupBotHandlers = () => {
       }
 
       console.log(`Creating draft task for user ${userId} from Telegram message`);
-      const aiResult = await parseTask(msg.text, 'openai');
+      const aiResult = await parseTask(msg.text);
       
       const draftTask = await createDraftTask(userId, {
         source: 'telegram',
