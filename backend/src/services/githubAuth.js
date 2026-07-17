@@ -24,9 +24,51 @@ const UA = 'TaskFlow.AI';
 
 const appId = () => process.env.GITHUB_APP_ID;
 const appSlug = () => process.env.GITHUB_APP_SLUG;
-const privateKey = () =>
-  // Coolify env vars can't hold raw newlines; accept the common \n-escaped form.
-  (process.env.GITHUB_APP_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+/**
+ * Coerce whatever the host's env var field did to the PEM back into a real PEM.
+ *
+ * A GitHub App private key is a multi-line PKCS#1 block, and dashboards mangle it in
+ * predictable ways. If the result isn't byte-exact OpenSSL throws
+ * `error:1E08010C:DECODER routines::unsupported`, which reads like a GitHub problem
+ * but is entirely local. Handles:
+ *   1. \n-escaped        -- the usual .env form
+ *   2. base64 of the PEM -- the standard workaround for single-line-only fields
+ *   3. newlines flattened to spaces, or stripped entirely -- what Coolify and several
+ *      other dashboards do to a pasted multi-line value
+ */
+export const normalizePrivateKey = (raw) => {
+  if (!raw || typeof raw !== 'string') return '';
+  let key = raw.trim();
+
+  // (2) A base64 blob of the entire PEM.
+  if (!key.includes('-----BEGIN')) {
+    try {
+      const decoded = Buffer.from(key, 'base64').toString('utf8');
+      if (decoded.includes('-----BEGIN')) key = decoded.trim();
+    } catch {
+      /* not base64; fall through */
+    }
+  }
+
+  // (1) Literal backslash-n.
+  key = key.replace(/\\n/g, '\n');
+
+  // (3) Header survived but the body's line breaks became spaces (or vanished).
+  //     PEM base64 must be wrapped at 64 chars, so rebuild it.
+  const match = key.match(/-----BEGIN ([A-Z0-9 ]+?)-----([\s\S]*?)-----END \1-----/);
+  if (match) {
+    const label = match[1].trim();
+    const body = match[2].replace(/\s+/g, '');
+    const wrapped = body.match(/.{1,64}/g)?.join('\n') ?? body;
+    key = `-----BEGIN ${label}-----\n${wrapped}\n-----END ${label}-----`;
+  }
+
+  // OpenSSL wants the trailing newline.
+  return key.endsWith('\n') ? key : `${key}\n`;
+};
+
+const privateKey = () => normalizePrivateKey(process.env.GITHUB_APP_PRIVATE_KEY);
 
 export const isGithubConfigured = () => Boolean(appId() && privateKey() && appSlug());
 
@@ -50,8 +92,20 @@ const appJwt = () => {
   );
   const signer = crypto.createSign('RSA-SHA256');
   signer.update(`${header}.${payload}`);
-  const sig = signer.sign(privateKey(), 'base64url');
-  return `${header}.${payload}.${sig}`;
+
+  try {
+    const sig = signer.sign(privateKey(), 'base64url');
+    return `${header}.${payload}.${sig}`;
+  } catch (error) {
+    // OpenSSL's own message here is `error:1E08010C:DECODER routines::unsupported`,
+    // which sounds like a GitHub/network fault and sends you looking in the wrong
+    // place. It only ever means the PEM we handed it isn't parseable.
+    throw new Error(
+      'GITHUB_APP_PRIVATE_KEY is not a readable PEM. Paste the whole key including ' +
+        'the BEGIN/END lines; if the host strips newlines, base64-encode the .pem ' +
+        `and set that instead. (openssl: ${error.message})`
+    );
+  }
 };
 
 /**

@@ -47,7 +47,21 @@ New backend vars — GitHub (all three required for the integration to appear):
 ```
 GITHUB_APP_ID=...
 GITHUB_APP_SLUG=...          # from the app URL: github.com/apps/<slug>
-GITHUB_APP_PRIVATE_KEY=...   # PEM; \n-escaped newlines are handled
+GITHUB_APP_PRIVATE_KEY=...   # the .pem contents, or base64 of the .pem
+```
+
+**On `GITHUB_APP_PRIVATE_KEY`.** It's a multi-line PKCS#1 PEM and Coolify's env field
+flattens multi-line values, which corrupts it. A corrupted key surfaces as
+`error:1E08010C:DECODER routines::unsupported` — that reads like a GitHub failure but
+is purely local: OpenSSL can't parse the key, so the app JWT can never be signed and
+the repo list always comes back empty.
+
+Pristine, `\n`-escaped, space-flattened, and CRLF forms are all normalized now. If in
+doubt, sidestep the field entirely by base64-encoding the whole file — this is
+accepted directly:
+
+```bash
+base64 -i your-app.private-key.pem | tr -d '\n'
 ```
 
 Without them the Settings panel explains it is unconfigured and the scanner stays off.
