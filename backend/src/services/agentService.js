@@ -372,6 +372,76 @@ const rebuildDayTask = async (userId, projectSlug, workspace, day) => {
  * @param {object} payload {sessionId, cwd, projectDir, gitRemote, commitShas,
  *                          changedPaths, prompts, startedAt, endedAt, timezone}
  */
+/**
+ * Re-summarise sessions already in the ledger, from their stored prompts.
+ *
+ * The summary is computed once at log time and cached on the row; rebuildDayTask
+ * reads it rather than recomputing. That's right in the steady state — re-running a
+ * smart-tier call on every rebuild would be absurd — but it means a session logged
+ * while summarisation was broken keeps its fallback title forever, even after the
+ * bug is fixed. Every session logged before the truncation fix is in exactly that
+ * state.
+ *
+ * Recoverable only because `prompts` is persisted: the hook deletes its local log at
+ * session end, so this row is the last copy of what was asked. Without the column
+ * the only repair would be redoing the work.
+ *
+ * Days are rebuilt once each at the end, not per session, since sessions sharing a
+ * (project, day) all rebuild the same task.
+ */
+export const resummariseSessions = async (userId, { day, sessionId, force = false } = {}) => {
+  const filters = ['user_id = $1'];
+  const params = [userId];
+  if (day) { params.push(day); filters.push(`day = $${params.length}`); }
+  if (sessionId) { params.push(sessionId); filters.push(`session_id = $${params.length}`); }
+  // Default to only the rows that look broken: no items means the AI never returned a
+  // usable shape. `force` re-does the lot.
+  if (!force) filters.push(`(items IS NULL OR jsonb_array_length(items) = 0)`);
+
+  const sessions = (
+    await query(
+      `SELECT session_id, day, project_slug, workspace, prompts, changed_paths
+       FROM agent_sessions
+       WHERE ${filters.join(' AND ')}
+       ORDER BY ended_at ASC`,
+      params
+    )
+  ).rows;
+
+  const days = new Map();
+  const results = [];
+
+  for (const s of sessions) {
+    const prompts = Array.isArray(s.prompts) ? s.prompts : [];
+    const changedPaths = Array.isArray(s.changed_paths) ? s.changed_paths : [];
+
+    // Nothing to work from: a re-run would produce the same fallback and bill for it.
+    if (!prompts.length && !changedPaths.length) {
+      results.push({ sessionId: s.session_id, skipped: 'no stored prompts or paths' });
+      continue;
+    }
+
+    const { summary, items } = await summariseSession(
+      userId, s.project_slug, prompts, changedPaths
+    );
+
+    await query(
+      `UPDATE agent_sessions SET summary = $1, items = $2
+       WHERE user_id = $3 AND session_id = $4 AND day = $5`,
+      [summary, JSON.stringify(items), userId, s.session_id, s.day]
+    );
+
+    days.set(`${s.project_slug}|${s.day}`, { slug: s.project_slug, workspace: s.workspace, day: s.day });
+    results.push({ sessionId: s.session_id, summary, items: items.length });
+  }
+
+  for (const d of days.values()) {
+    await rebuildDayTask(userId, d.slug, d.workspace, d.day);
+  }
+
+  return { resummarised: results.length, tasksRebuilt: days.size, results };
+};
+
 export const logWork = async (userId, payload) => {
   const {
     sessionId,

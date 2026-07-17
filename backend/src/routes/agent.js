@@ -2,7 +2,12 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { authenticateAgent } from '../middleware/agentAuth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { getAgentSettings, updateAgentSettings, logWork } from '../services/agentService.js';
+import {
+  getAgentSettings,
+  updateAgentSettings,
+  logWork,
+  resummariseSessions,
+} from '../services/agentService.js';
 import { createApiToken, listApiTokens, revokeApiToken } from '../services/apiTokenService.js';
 
 const router = express.Router();
@@ -50,6 +55,24 @@ router.post('/log-work', authenticateAgent, asyncHandler(async (req, res) => {
 
   const result = await logWork(req.user.id, req.body);
   res.json(result);
+}));
+
+/**
+ * POST /api/agent/resummarise
+ * Body: { day?, sessionId?, force? }
+ *
+ * Replays stored prompts through the summariser and rebuilds the affected day tasks.
+ * For sessions logged while summarisation was silently truncating: their fallback
+ * title is cached on the row, so fixing the summariser doesn't retroactively fix them.
+ *
+ * On the agent token rather than a login session: it only ever touches rows the agent
+ * itself wrote, and it grants no capability log-work doesn't already have (that calls
+ * the same summariser). Defaults to only re-doing rows with no items — a re-run of a
+ * good summary just costs money.
+ */
+router.post('/resummarise', authenticateAgent, asyncHandler(async (req, res) => {
+  const { day, sessionId, force } = req.body || {};
+  res.json(await resummariseSessions(req.user.id, { day, sessionId, force: Boolean(force) }));
 }));
 
 // --- UI-facing --------------------------------------------------------------
