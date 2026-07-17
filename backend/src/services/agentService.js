@@ -157,16 +157,33 @@ export const findCoveredRepo = async (userId, gitRemote) => {
 // Summarization
 // ---------------------------------------------------------------------------
 
+/**
+ * Summary AND items.
+ *
+ * Asking for a single line meant there was nothing to expand into: the same string
+ * became the title, the only subtask and the description. The request is what carries
+ * the meaning ("save submissions in the admin so they can be viewed and exported"),
+ * and it usually contains several distinct deliverables -- those are the subtasks.
+ */
 const SUMMARY_SCHEMA = {
   name: 'session_summary',
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['summary'],
+    required: ['summary', 'items'],
     properties: {
       summary: {
         type: 'string',
-        description: "One past-tense line, max 70 chars, describing what was done.",
+        description:
+          'One past-tense line, max 70 chars, naming the outcome. Describe what the ' +
+          'work achieved, not how many files moved.',
+      },
+      items: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'The distinct things done, 1-6 of them, each a short past-tense phrase. ' +
+          'These are read as standup bullets, so make each one stand alone.',
       },
     },
   },
@@ -174,11 +191,15 @@ const SUMMARY_SCHEMA = {
 
 const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
   const fileCount = changedPaths.length;
-  const fallback = fileCount
-    ? `${projectSlug} — updated ${fileCount} file${fileCount > 1 ? 's' : ''}`
-    : `${projectSlug} — working session`;
+  // Deliberately dull: if the model can't tell us what happened, say what we know for
+  // certain rather than inventing an accomplishment.
+  const fallback = {
+    summary: fileCount
+      ? `${projectSlug} — updated ${fileCount} file${fileCount > 1 ? 's' : ''}`
+      : `${projectSlug} — working session`,
+    items: [],
+  };
 
-  // Nothing to go on: don't ask a model to invent an accomplishment.
   if (!prompts.length && !fileCount) return fallback;
 
   try {
@@ -187,30 +208,47 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
       tier: 'smart',
       userId,
       temperature: 0.2,
-      maxTokens: 120,
+      maxTokens: 400,
       schema: SUMMARY_SCHEMA,
       messages: [
         {
           role: 'system',
           content:
-            'You summarise one coding session into a single past-tense line for a standup ' +
-            'report. Say concretely what changed. The requests describe intent; the files ' +
-            'show where it landed. No filler, no "various changes", no file counts. If the ' +
-            'requests are vague, describe the files instead of inventing work. Return JSON.',
+            'You turn one coding session into a standup entry: a headline plus the ' +
+            'distinct things that were done.\n\n' +
+            'The requests are the source of truth for WHAT was wanted and WHY — lead with ' +
+            'that outcome, in the requester\'s terms. The file paths only corroborate where ' +
+            'it landed; they are not the story.\n\n' +
+            'A request like "the client needs submissions saved in the admin so they can be ' +
+            'viewed and exported" should read as "admin view and export for form submissions" ' +
+            '— with the storage, the view and the export as separate items. Never "updated 4 ' +
+            'files", never "various changes", never a file count.\n\n' +
+            'Write for someone who did not see the session. If the requests are too vague to ' +
+            'tell, describe the files plainly rather than inventing work. Return json.',
         },
         {
           role: 'user',
           content:
             `Project: ${projectSlug}\n\n` +
-            `What was asked:\n${prompts.slice(0, 12).map((p) => `- ${p}`).join('\n') || '(none)'}\n\n` +
-            `Files touched:\n${changedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n') || '(none)'}`,
+            `What was requested (most important):\n${
+              prompts.slice(0, 12).map((p) => `- ${p}`).join('\n') || '(none captured)'
+            }\n\n` +
+            `Files touched (supporting evidence only):\n${
+              changedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n') || '(none)'
+            }`,
         },
       ],
     });
 
-    const summary = JSON.parse(content)?.summary;
-    if (!summary || typeof summary !== 'string') return fallback;
-    return `${projectSlug} — ${summary.trim().slice(0, 70)}`;
+    const parsed = JSON.parse(content);
+    const summary = typeof parsed?.summary === 'string' ? parsed.summary.trim() : '';
+    if (!summary) return fallback;
+
+    const items = Array.isArray(parsed?.items)
+      ? parsed.items.filter((i) => typeof i === 'string' && i.trim()).map((i) => i.trim().slice(0, 120)).slice(0, 6)
+      : [];
+
+    return { summary: `${projectSlug} — ${summary.slice(0, 70)}`, items };
   } catch (error) {
     console.error('Agent: session summary failed, using fallback:', error.message);
     return fallback;
@@ -237,7 +275,7 @@ const rebuildDayTask = async (userId, projectSlug, workspace, day) => {
   // drift from what was written.
   const sessions = (
     await query(
-      `SELECT session_id, summary, started_at, ended_at
+      `SELECT session_id, summary, items, changed_paths, started_at, ended_at
        FROM agent_sessions
        WHERE user_id = $1 AND project_slug = $2 AND day = $3
        ORDER BY ended_at ASC`,
@@ -251,28 +289,59 @@ const rebuildDayTask = async (userId, projectSlug, workspace, day) => {
   // re-report upserts rather than piling up.
   const taskId = `agent-${userId}-${projectSlug}-${day}`;
 
+  // Subtasks are the work itself, not a restatement of the title. Previously the one
+  // summary line served as title, sole subtask and description at once, so expanding
+  // a row showed you the same sentence three more times.
+  const subtasks = [];
+  for (const s of sessions) {
+    const items = Array.isArray(s.items) ? s.items : [];
+    if (items.length) {
+      for (const item of items) {
+        subtasks.push({
+          id: `${taskId}-${subtasks.length}`,
+          title: String(item).slice(0, 120),
+          completed: true,
+          // Numeric, not ISO: reportService matches subtask completedAt with ~ '^[0-9]+$'.
+          completedAt: Number(s.ended_at),
+        });
+      }
+    } else {
+      // No items (older row, or the AI fell back) -- the summary is all we have.
+      subtasks.push({
+        id: `${taskId}-${subtasks.length}`,
+        title: String(s.summary || 'Session').slice(0, 120),
+        completed: true,
+        completedAt: Number(s.ended_at),
+      });
+    }
+  }
+
+  // Multiple sessions on one project in a day are one continuous piece of work, so
+  // lead with the last summary (where it ended up) rather than a bare count.
+  const title =
+    sessions.length === 1
+      ? sessions[0].summary
+      : `${sessions[sessions.length - 1].summary} (+${sessions.length - 1} earlier session${sessions.length > 2 ? 's' : ''})`;
+
+  // The description carries what the title and subtasks don't: where it landed.
+  const files = [...new Set(sessions.flatMap((s) => (Array.isArray(s.changed_paths) ? s.changed_paths : [])))];
+  const description = [
+    `${sessions.length} Claude Code session${sessions.length > 1 ? 's' : ''} on ${day}`,
+    files.length ? `\nFiles touched (${files.length}):\n${files.slice(0, 30).map((f) => `- ${f}`).join('\n')}` : '',
+    files.length > 30 ? `\n…and ${files.length - 30} more` : '',
+  ].filter(Boolean).join('\n');
+
   await syncTask(userId, {
     id: taskId,
-    title:
-      sessions.length === 1
-        ? sessions[0].summary
-        : `${projectSlug} — ${sessions.length} sessions`,
-    description:
-      `${projectSlug} — ${sessions.length} Claude Code session${sessions.length > 1 ? 's' : ''} on ${day}\n\n` +
-      sessions.map((s) => `- ${s.summary}`).join('\n'),
+    title,
+    description,
     workspace,
     energy: 'medium',
     status: 'done',
     estimatedTime: null,
     tags: ['claude-code', projectSlug],
     dependencies: [],
-    subtasks: sessions.map((s, i) => ({
-      id: `${taskId}-${i}`,
-      title: String(s.summary || '').slice(0, 120),
-      completed: true,
-      // Numeric, not ISO: reportService matches subtask completedAt with ~ '^[0-9]+$'.
-      completedAt: Number(s.ended_at),
-    })),
+    subtasks,
     createdAt: Number(sessions[0].started_at),
     completedAt: Number(sessions[sessions.length - 1].ended_at),
   });
@@ -346,7 +415,7 @@ export const logWork = async (userId, payload) => {
   const started = Number(startedAt) || ended;
   const projectSlug = slugify(root);
 
-  const summary = await summariseSession(userId, projectSlug, prompts, uncoveredPaths);
+  const { summary, items } = await summariseSession(userId, projectSlug, prompts, uncoveredPaths);
 
   const day = localDateString(tz, ended);
 
@@ -361,10 +430,11 @@ export const logWork = async (userId, payload) => {
   await query(
     `INSERT INTO agent_sessions (
        user_id, session_id, day, project_slug, project_path, workspace, summary,
-       prompts, changed_paths, started_at, ended_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       items, prompts, changed_paths, started_at, ended_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT (user_id, session_id, day) DO UPDATE SET
        summary = EXCLUDED.summary,
+       items = EXCLUDED.items,
        prompts = EXCLUDED.prompts,
        changed_paths = EXCLUDED.changed_paths,
        ended_at = EXCLUDED.ended_at`,
@@ -376,6 +446,7 @@ export const logWork = async (userId, payload) => {
       root,
       workspace,
       summary,
+      JSON.stringify(items),
       JSON.stringify(prompts.slice(0, 50)),
       JSON.stringify(uncoveredPaths.slice(0, 200)),
       started,

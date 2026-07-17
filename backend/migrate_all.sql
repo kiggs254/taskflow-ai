@@ -540,6 +540,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_user_session_day
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_day
     ON agent_sessions(user_id, project_slug, day);
 
+-- ---------------------------------------------------------------------------
+-- migration_add_agent_session_items.sql
+-- ---------------------------------------------------------------------------
+-- Migration: store the individual things a session did
+--
+-- summariseSession used to return one line, which then served as the task title, its
+-- only subtask AND its description -- expanding a row just showed the same sentence
+-- three more times, with no actual detail. A request like "save submissions in the
+-- admin so they can be viewed and exported" contains several distinct deliverables;
+-- those are the subtasks. This is where they live.
+
+ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'::jsonb;
+
 COMMIT;
 
 -- ============================================================================
