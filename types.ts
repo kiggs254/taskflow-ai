@@ -69,7 +69,14 @@ export interface AIParsedTask {
   energy: EnergyLevel;
   estimatedTime: number;
   tags: string[];
+  /** Advisory only. The workspace the user selected always wins. */
   workspaceSuggestions?: WorkspaceType;
+  /** 0-1 confidence in the workspace suggestion. */
+  workspaceConfidence?: number;
+  /** 0-1 overall confidence, reported by the model rather than hardcoded. */
+  confidence?: number;
+  dueDate?: number | null;
+  subtasks?: string[];
 }
 
 export interface DraftTask {

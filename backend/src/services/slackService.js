@@ -589,7 +589,13 @@ export const updateSlackSettings = async (userId, settings) => {
  * Post a daily summary of completed tasks to a Slack channel.
  * Targets #tech-team-daily-tasks in the user's workspace.
  */
-export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => {
+/**
+ * @param {string} [channelName] target channel; defaults to the legacy hardcoded one.
+ *   Configurable because this used to be fixed at 'tech-team-daily-tasks' and *threw*
+ *   when absent -- so any user not in that exact workspace got an exception instead
+ *   of a report.
+ */
+export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel, channelName = 'tech-team-daily-tasks') => {
   if (!tasks || tasks.length === 0) {
     return { success: true, posted: false, reason: 'no_tasks' };
   }
@@ -628,10 +634,19 @@ export const postDailySummaryToSlack = async (userId, tasks = [], dateLabel) => 
       throw new Error('Failed to list Slack channels');
     }
 
-    const channel = channelsResponse.channels.find((ch) => ch.name === 'tech-team-daily-tasks');
+    const target = (channelName || 'tech-team-daily-tasks').replace(/^#/, '');
+    const channel = channelsResponse.channels.find((ch) => ch.name === target);
 
     if (!channel) {
-      throw new Error('Slack channel #tech-team-daily-tasks not found or app not invited');
+      // Return rather than throw: a missing channel is a configuration problem, not
+      // an exception. Throwing here meant one bad setting took down the whole job
+      // and swallowed the email that would otherwise still have gone out.
+      return {
+        success: false,
+        posted: false,
+        reason: 'channel_not_found',
+        message: `Slack channel #${target} not found, or the app hasn't been invited to it.`,
+      };
     }
 
     const dateText = dateLabel || new Date().toLocaleDateString();

@@ -14,18 +14,12 @@ if (!API_BASE.endsWith('/api')) {
 
 // Helper to handle requests
 const request = async (action: string, method: 'GET' | 'POST', body?: any, token?: string) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:16',message:'request function entry',data:{action,method,hasToken:!!token,hasBody:!!body,apiBase:API_BASE},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  // #region agent log
-  fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:22',message:'headers after token check',data:{hasAuthHeader:!!headers['Authorization'],action},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-  // #endregion
 
   const config: RequestInit = {
     method,
@@ -39,15 +33,9 @@ const request = async (action: string, method: 'GET' | 'POST', body?: any, token
 
   try {
     const url = `${API_BASE}?action=${action}`;
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:35',message:'about to fetch',data:{url,action,headers:Object.keys(headers)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     const res = await fetch(url, config);
     const text = await res.text();
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:37',message:'fetch response received',data:{status:res.status,statusText:res.statusText,action,textPreview:text.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-    
+
     // Handle non-JSON responses (like 404 HTML pages or 500 errors)
     const contentType = res.headers.get("content-type");
     if (contentType && contentType.toLowerCase().indexOf("application/json") === -1) {
@@ -68,9 +56,6 @@ const request = async (action: string, method: 'GET' | 'POST', body?: any, token
     }
     
     if (!res.ok) {
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:57',message:'request failed',data:{status:res.status,action,error:data?.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
       // Extract error message from response
       const errorMessage = data?.error || `Request failed with status ${res.status}`;
       console.error(`API Error (${action}):`, {
@@ -99,9 +84,6 @@ export const api = {
     return request('login', 'POST', { email, password });
   },
   forgotPassword: async (email: string) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2bf9f9ad-65fb-4474-8fe6-6f000c106851',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'apiService.ts:85',message:'forgotPassword called',data:{email,apiBase:API_BASE},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     return request('forgot_password', 'POST', { email });
   },
   resetPassword: async (token: string, password: string) => {
@@ -258,6 +240,141 @@ export const api = {
         console.error('Generate-draft API call failed:', error);
         throw error;
       }
+    },
+  },
+
+  // Analytics
+  analytics: {
+    summary: async (token: string, range: string) => {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await fetch(`${API_BASE}/analytics/summary?range=${range}&tz=${encodeURIComponent(tz)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load analytics');
+      return res.json();
+    },
+    narrative: async (token: string, range: string) => {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await fetch(`${API_BASE}/analytics/narrative?range=${range}&tz=${encodeURIComponent(tz)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load insights');
+      return res.json();
+    },
+  },
+
+  // Daily report
+  reports: {
+    settings: async (token: string) => {
+      const res = await fetch(`${API_BASE}/reports/settings`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load report settings');
+      return res.json();
+    },
+    updateSettings: async (token: string, settings: Record<string, unknown>) => {
+      const res = await fetch(`${API_BASE}/reports/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) throw new Error('Failed to save report settings');
+      return res.json();
+    },
+    completedToday: async (token: string) => {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await fetch(`${API_BASE}/reports/completed-today?tz=${encodeURIComponent(tz)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load today\'s report');
+      return res.json();
+    },
+    sendNow: async (token: string) => {
+      const res = await fetch(`${API_BASE}/reports/send-now`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ force: true }),
+      });
+      if (!res.ok) throw new Error('Failed to send test report');
+      return res.json();
+    },
+  },
+
+  // GitHub Integration
+  github: {
+    connect: async (token: string) => {
+      const res = await fetch(`${API_BASE}/github/connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to get GitHub auth URL');
+      }
+      return res.json();
+    },
+    status: async (token: string) => {
+      const res = await fetch(`${API_BASE}/github/status`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to get GitHub status');
+      return res.json();
+    },
+    setRepos: async (token: string, repoIds: number[]) => {
+      const res = await fetch(`${API_BASE}/github/repos`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ repoIds }),
+      });
+      if (!res.ok) throw new Error('Failed to update tracked repos');
+      return res.json();
+    },
+    scanNow: async (token: string) => {
+      const res = await fetch(`${API_BASE}/github/scan-now`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+      });
+      if (!res.ok) throw new Error('Failed to scan GitHub');
+      return res.json();
+    },
+    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean }) => {
+      const res = await fetch(`${API_BASE}/github/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) throw new Error('Failed to update GitHub settings');
+      return res.json();
+    },
+    disconnect: async (token: string) => {
+      const res = await fetch(`${API_BASE}/github/disconnect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error('Failed to disconnect GitHub');
+      return res.json();
     },
   },
 

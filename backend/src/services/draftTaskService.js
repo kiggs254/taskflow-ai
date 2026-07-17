@@ -47,30 +47,17 @@ export const getDraftTask = async (userId, draftId) => {
   };
 };
 
-/**
- * Check if a draft task already exists for a given source and sourceId
- */
-export const draftTaskExists = async (userId, source, sourceId) => {
-  const result = await query(
-    `SELECT id FROM draft_tasks 
-     WHERE user_id = $1 AND source = $2 AND source_id = $3 
-     AND status IN ('pending', 'approved')`,
-    [userId, source, sourceId]
-  );
-  return result.rows.length > 0;
-};
-
-/**
- * Check if a task already exists for a given sourceId (in description metadata)
- */
-export const taskExistsForSource = async (userId, sourceId) => {
-  const result = await query(
-    `SELECT id FROM tasks 
-     WHERE user_id = $1 AND description LIKE $2`,
-    [userId, `%"messageId":"${sourceId}"%`]
-  );
-  return result.rows.length > 0;
-};
+// draftTaskExists() and taskExistsForSource() lived here and were the old dedup
+// mechanism. Both are gone deliberately:
+//
+//   draftTaskExists     -- matched only status IN ('pending','approved'), so a
+//                          rejected draft looked unprocessed and came straight back.
+//   taskExistsForSource -- an unindexed `description LIKE '%"messageId":"..."%'`
+//                          full scan per email, that also broke whenever the task was
+//                          deleted or its description edited.
+//
+// Both asked "does an artifact still exist?" when the real question is "did we
+// already handle this message?". That now lives in processedMessageService.js.
 
 /**
  * Create a draft task (with duplicate prevention)
@@ -89,27 +76,19 @@ export const createDraftTask = async (userId, draftData) => {
     aiConfidence,
   } = draftData;
 
-  // Check for existing draft with same sourceId (prevent duplicates)
-  if (sourceId) {
-    const exists = await draftTaskExists(userId, source, sourceId);
-    if (exists) {
-      console.log(`Draft task already exists for sourceId: ${sourceId}, skipping...`);
-      return null; // Return null to indicate skipped
-    }
-    
-    // Also check if a task already exists for this source
-    const taskExists = await taskExistsForSource(userId, sourceId);
-    if (taskExists) {
-      console.log(`Task already exists for sourceId: ${sourceId}, skipping draft creation...`);
-      return null;
-    }
-  }
-
+  // Duplicate prevention is now structural rather than a read-then-write check.
+  //
+  // Callers consult the processed_* ledger before doing any work, and the partial
+  // unique index on (user_id, source, source_id) makes a duplicate impossible even
+  // if two overlapping scans race here. ON CONFLICT DO NOTHING returns no rows on a
+  // collision, which surfaces as the same `null` ("skipped") the callers already
+  // handle -- so behaviour is unchanged, minus the race and two extra queries.
   const result = await query(
     `INSERT INTO draft_tasks (
       user_id, source, source_id, title, description, workspace, energy,
       estimated_time, tags, due_date, ai_confidence, status
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
+    ON CONFLICT (user_id, source, source_id) WHERE source_id IS NOT NULL DO NOTHING
     RETURNING id, user_id, source, source_id, title, description, workspace, energy,
               estimated_time as "estimatedTime", tags, due_date as "dueDate",
               status, ai_confidence as "aiConfidence", created_at as "createdAt"`,
@@ -128,7 +107,14 @@ export const createDraftTask = async (userId, draftData) => {
     ]
   );
 
+  // No row means ON CONFLICT skipped the insert: a draft for this source message
+  // already exists. Callers already treat null as "skipped".
   const task = result.rows[0];
+  if (!task) {
+    console.log(`Draft task already exists for sourceId: ${sourceId}, skipping...`);
+    return null;
+  }
+
   return {
     ...task,
     tags: task.tags || [],
@@ -159,7 +145,10 @@ export const approveDraftTask = async (userId, draftId, edits = {}) => {
     id: crypto.randomUUID(),
     title: edits.title || aiTitle || draft.title,
     description: edits.description || draft.description,
-    workspace: edits.workspace || draft.workspace || 'personal',
+    // 'job', not 'personal': these drafts come from Gmail/Slack/Telegram, i.e. work.
+    // Defaulting to 'personal' filed them into a tab that is hidden by default, so an
+    // approved draft could vanish from the UI the moment it became a real task.
+    workspace: edits.workspace || draft.workspace || 'job',
     energy: edits.energy || draft.energy || 'medium',
     status: 'todo',
     estimatedTime: edits.estimatedTime || draft.estimatedTime,

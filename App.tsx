@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   Plus, Brain, Zap, Coffee, Briefcase, User, Laptop, CheckCircle2, Play, 
   X, Menu, Trophy, Flame, ArrowRight, Sparkles, Target, Clock, Layout, 
@@ -6,7 +6,8 @@ import {
   LogOut, Loader2, Link as LinkIcon, BarChart2, Settings as SettingsIcon,
   PieChart, Bell, Volume2, Shield, Palette, ArrowLeft, Pencil, Save, Filter,
   Search, Command, MoreVertical, Hourglass, AlarmClockOff, Video, Trash2,
-  Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw
+  Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw,
+  EyeOff
 } from 'lucide-react';
 import { 
   Task, WorkspaceType, UserStats, AppView, User as UserType, EnergyLevel, RecurrenceRule
@@ -15,6 +16,9 @@ import { DraftTasksView } from './components/DraftTasksView';
 import { GmailSettings } from './components/GmailSettings';
 import { TelegramSettings } from './components/TelegramSettings';
 import { SlackSettings } from './components/SlackSettings';
+import { GitHubSettings } from './components/GitHubSettings';
+import { ReportSettings } from './components/ReportSettings';
+import { AnalyticsScreen } from './components/AnalyticsScreen';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { ToastContainer, Toast, ToastType } from './components/ToastNotification';
 import { ConfirmationModal } from './components/ConfirmationModal';
@@ -26,6 +30,36 @@ import {
   generateClientFollowUp
 } from './services/geminiService';
 import { api } from './services/apiService';
+
+// --- Task diffing ---
+// The 15s poll needs to know whether anything actually changed. It used to answer
+// that with JSON.stringify on both sides of every task, every tick -- hundreds of
+// full serializations on the main thread. Comparing the fields we care about is
+// far cheaper and, unlike stringify, isn't sensitive to key order.
+const TASK_SCALAR_KEYS = [
+  'title', 'description', 'workspace', 'energy', 'status', 'estimatedTime',
+  'meetingLink', 'createdAt', 'completedAt', 'dueDate', 'snoozedUntil',
+  'originalRecurrenceId',
+] as const;
+
+const shallowArrayEqual = (a?: readonly unknown[], b?: readonly unknown[]) => {
+  if (a === b) return true;
+  if (!a || !b) return (a?.length ?? 0) === (b?.length ?? 0);
+  if (a.length !== b.length) return false;
+  return a.every((v, i) => v === b[i]);
+};
+
+const tasksEqual = (a: Task, b: Task): boolean => {
+  for (const k of TASK_SCALAR_KEYS) {
+    if (a[k] !== b[k]) return false;
+  }
+  if (!shallowArrayEqual(a.tags, b.tags)) return false;
+  if (!shallowArrayEqual(a.dependencies, b.dependencies)) return false;
+  // Nested shapes are small and usually absent; serialize only these two.
+  if (JSON.stringify(a.subtasks ?? null) !== JSON.stringify(b.subtasks ?? null)) return false;
+  if (JSON.stringify(a.recurrence ?? null) !== JSON.stringify(b.recurrence ?? null)) return false;
+  return true;
+};
 
 // --- Sound Utils ---
 const playSound = (type: 'complete' | 'levelUp' | 'newTask') => {
@@ -611,7 +645,7 @@ const TaskCard: React.FC<{
   task: Task; 
   blockingTasks: Task[];
   token: string;
-  onComplete: (id: string) => void;
+  onComplete: (id: string, sendEmailReply?: boolean) => void;
   onUpdate: (task: Task) => void;
   onStartFocus: (task: Task) => void;
   onAddDependency: (taskId: string) => void;
@@ -619,10 +653,11 @@ const TaskCard: React.FC<{
   onDelete: (id: string) => void;
   onSnooze: (id: string, duration: 'hour' | 'day' | 'week') => void;
   onSetWaiting: (id: string) => void;
+  onViewDetails: (task: Task) => void;
   isSelected?: boolean;
   onSelect?: (id: string, selected: boolean) => void;
   selectionMode?: boolean;
-}> = ({ 
+}> = ({
   task, 
   blockingTasks,
   token,
@@ -680,7 +715,11 @@ const TaskCard: React.FC<{
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
+  // Only listen while this card's menu is actually open. With empty deps every
+  // rendered card kept a document-level listener alive forever -- 200 tasks meant
+  // 200 handlers each running contains() on every click anywhere in the app.
   useEffect(() => {
+    if (!showActions) return;
     const handleClickOutside = (event: MouseEvent) => {
       if (actionsRef.current && !actionsRef.current.contains(event.target as Node)) {
         setShowActions(false);
@@ -688,7 +727,7 @@ const TaskCard: React.FC<{
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [showActions]);
 
   const handleGenerateFollowUp = async () => {
     if (followUpText) {
@@ -1398,121 +1437,9 @@ const DependencyModal = ({
 
 // --- Analytics Components ---
 
-const AnalyticsScreen = ({ tasks, onBack }: { tasks: Task[], onBack: () => void }) => {
-  const completedTasks = tasks.filter(t => t.status === 'done');
-  const highEnergyDone = completedTasks.filter(t => t.energy === 'high').length;
-  const medEnergyDone = completedTasks.filter(t => t.energy === 'medium').length;
-  const lowEnergyDone = completedTasks.filter(t => t.energy === 'low').length;
-  
-  // Last 7 days chart data
-  const getLast7DaysData = () => {
-    const data = [];
-    const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const dayStr = d.toDateString();
-      const count = completedTasks.filter(t => t.completedAt && new Date(t.completedAt).toDateString() === dayStr).length;
-      data.push({ day: d.toLocaleDateString('en-US', { weekday: 'short' }), count });
-    }
-    return data;
-  };
-
-  const weeklyData = getLast7DaysData();
-  const maxVal = Math.max(...weeklyData.map(d => d.count), 1); // Avoid div by zero
-
-  const totalEstimatedTime = completedTasks.reduce((acc, t) => acc + (t.estimatedTime || 0), 0);
-  const hoursFocused = (totalEstimatedTime / 60).toFixed(1);
-
-  return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex items-center gap-4">
-        <button onClick={onBack} className="md:hidden p-2 -ml-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800">
-          <ArrowLeft className="w-6 h-6" />
-        </button>
-        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-          <BarChart2 className="w-6 h-6 text-primary" /> Analytics
-        </h2>
-      </div>
-
-      {/* Overview Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-surface p-4 rounded-xl border border-slate-700">
-          <div className="text-slate-400 text-xs uppercase mb-1">Total Completed</div>
-          <div className="text-2xl font-bold text-white">{completedTasks.length}</div>
-        </div>
-        <div className="bg-surface p-4 rounded-xl border border-slate-700">
-           <div className="text-slate-400 text-xs uppercase mb-1">Focus Hours</div>
-           <div className="text-2xl font-bold text-emerald-400">{hoursFocused}h</div>
-        </div>
-        <div className="bg-surface p-4 rounded-xl border border-slate-700">
-           <div className="text-slate-400 text-xs uppercase mb-1">High Energy</div>
-           <div className="text-2xl font-bold text-accent">{highEnergyDone}</div>
-        </div>
-        <div className="bg-surface p-4 rounded-xl border border-slate-700">
-           <div className="text-slate-400 text-xs uppercase mb-1">Completion Rate</div>
-           <div className="text-2xl font-bold text-blue-400">
-             {tasks.length > 0 ? Math.round((completedTasks.length / tasks.length) * 100) : 0}%
-           </div>
-        </div>
-      </div>
-
-      {/* Weekly Chart */}
-      <div className="bg-surface p-6 rounded-xl border border-slate-700">
-        <h3 className="text-sm font-semibold text-slate-400 mb-6 uppercase tracking-wider">Weekly Activity</h3>
-        <div className="flex items-end justify-between h-40 gap-2">
-          {weeklyData.map((d, i) => (
-            <div key={i} className="flex flex-col items-center gap-2 w-full">
-               <div className="w-full bg-slate-800 rounded-t-lg relative group overflow-hidden" style={{ height: '100%' }}>
-                  <div 
-                    className="absolute bottom-0 left-0 w-full bg-primary transition-all duration-1000 ease-out group-hover:bg-blue-400"
-                    style={{ height: `${(d.count / maxVal) * 100}%` }}
-                  />
-               </div>
-               <span className="text-xs text-slate-500">{d.day}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Energy Distribution */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-surface p-6 rounded-xl border border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-400 mb-6 uppercase tracking-wider">Energy Distribution</h3>
-          <div className="space-y-4">
-             <div className="flex items-center gap-3">
-                <Zap className="w-5 h-5 text-accent" />
-                <div className="flex-1 h-3 bg-slate-800 rounded-full overflow-hidden">
-                   <div className="h-full bg-accent" style={{ width: `${(highEnergyDone / (completedTasks.length || 1)) * 100}%` }} />
-                </div>
-                <span className="text-sm text-slate-300 font-mono w-8 text-right">{highEnergyDone}</span>
-             </div>
-             <div className="flex items-center gap-3">
-                <Brain className="w-5 h-5 text-warning" />
-                <div className="flex-1 h-3 bg-slate-800 rounded-full overflow-hidden">
-                   <div className="h-full bg-warning" style={{ width: `${(medEnergyDone / (completedTasks.length || 1)) * 100}%` }} />
-                </div>
-                <span className="text-sm text-slate-300 font-mono w-8 text-right">{medEnergyDone}</span>
-             </div>
-             <div className="flex items-center gap-3">
-                <Coffee className="w-5 h-5 text-success" />
-                <div className="flex-1 h-3 bg-slate-800 rounded-full overflow-hidden">
-                   <div className="h-full bg-success" style={{ width: `${(lowEnergyDone / (completedTasks.length || 1)) * 100}%` }} />
-                </div>
-                <span className="text-sm text-slate-300 font-mono w-8 text-right">{lowEnergyDone}</span>
-             </div>
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-primary/20 to-surface border border-primary/20 p-6 rounded-xl flex flex-col justify-center items-center text-center">
-            <Trophy className="w-12 h-12 text-yellow-400 mb-3" />
-            <h3 className="text-xl font-bold text-white mb-1">Top Performer</h3>
-            <p className="text-sm text-slate-400">You're in the top 10% of users this week!</p>
-        </div>
-      </div>
-    </div>
-  );
-};
+// AnalyticsScreen now lives in components/AnalyticsScreen.tsx and reads from
+// GET /api/analytics/summary rather than deriving everything from the in-memory
+// task array on every render.
 
 const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onLogout: () => void, onBack: () => void, token: string }) => {
   const [notifications, setNotifications] = useState(() => {
@@ -1695,6 +1622,8 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
            <div>
               <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Integrations</h4>
               <div className="space-y-4">
+                 <GitHubSettings token={token} />
+                 <ReportSettings token={token} />
                  <GmailSettings token={token} />
                  <TelegramSettings token={token} />
                  <SlackSettings token={token} />
@@ -2075,6 +2004,8 @@ export default function App() {
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [notifications, setNotifications] = useState<{id: string, message: string}[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // A non-destructive AI suggestion to move a just-added task to another workspace.
+  const [workspaceSuggestion, setWorkspaceSuggestion] = useState<{ taskId: string; workspace: WorkspaceType } | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
@@ -2085,6 +2016,12 @@ export default function App() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const previousTasksCountRef = useRef<number>(0);
+  // Mirror of `tasks` for intervals/callbacks that need the latest value without
+  // taking a dependency on it (which would tear down and recreate them on every poll).
+  const tasksRef = useRef<Task[]>(tasks);
+  tasksRef.current = tasks;
+  const userRef = useRef<UserType | null>(user);
+  userRef.current = user;
   const [syncingSources, setSyncingSources] = useState(false);
   const [showFreelanceTab, setShowFreelanceTab] = useState(false);
   const [showPersonalTab, setShowPersonalTab] = useState(false);
@@ -2099,32 +2036,42 @@ export default function App() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; taskId: string | null; taskTitle: string }>({ isOpen: false, taskId: null, taskTitle: '' });
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ isOpen: false, title: '', message: '', type: 'info' });
 
-  // Snooze background checker
+  // Snooze background checker.
+  //
+  // This used to depend on [tasks], so the 15s poll tore the interval down and
+  // recreated it before it could ever reach 30s -- the check effectively never
+  // ran. It also only unsnoozed locally, so the next poll pulled the still-snoozed
+  // task back from the server and resurrected the snooze. Now: empty deps (the
+  // interval is created once), a functional update to read fresh tasks without
+  // depending on them, and the unsnooze is persisted.
   useEffect(() => {
+    if (!token) return;
     const interval = setInterval(() => {
       const now = Date.now();
-      let changed = false;
-      const updatedTasks = tasks.map(t => {
-        if (t.snoozedUntil && t.snoozedUntil < now) {
-          changed = true;
-          // Trigger toast notification for unsnoozed task
-          addToast(`Task Ready! "${t.title}"`, 'info');
-          const { snoozedUntil, ...rest } = t;
-          return rest;
-        }
-        return t;
-      });
+      // Read via ref so the effect needn't depend on `tasks`. Side effects stay
+      // out of the state updater, which React may invoke more than once.
+      const expired = tasksRef.current.filter(t => t.snoozedUntil && t.snoozedUntil < now);
+      if (expired.length === 0) return; // no state write => no re-render
 
-      if (changed) {
-        setTasks(updatedTasks);
-        // Note: This local change isn't synced back to the server immediately
-        // to avoid constant API calls. It will sync next time the task is updated.
-        // A more robust solution would be a debounced batch update.
+      const expiredIds = new Set(expired.map(t => t.id));
+      for (const t of expired) {
+        addToast(`Task Ready! "${t.title}"`, 'info');
+        // Persist so the next poll doesn't bring the snooze back.
+        const { snoozedUntil, ...rest } = t;
+        api.syncTask(token, rest as Task).catch(err =>
+          console.error('Failed to sync unsnoozed task', t.id, err)
+        );
       }
+
+      setTasks(prev => prev.map(t => {
+        if (!expiredIds.has(t.id)) return t;
+        const { snoozedUntil, ...rest } = t;
+        return rest as Task;
+      }));
     }, 30000); // Check every 30 seconds
 
     return () => clearInterval(interval);
-  }, [tasks]);
+  }, [token]);
 
   // Shortcuts
   useEffect(() => {
@@ -2255,48 +2202,47 @@ export default function App() {
           };
         });
 
-        // Update tasks gracefully - merge new tasks and update existing ones
-        setTasks(prevTasks => {
-          const taskMap = new Map(prevTasks.map(t => [t.id, t]));
-          const newTasks: Task[] = [];
-          let hasNewTasks = false;
+        // Merge the poll result into local state.
+        //
+        // This previously returned a brand-new array on every tick regardless of
+        // whether anything had changed, so the whole app re-rendered every 15s. It
+        // also computed `removedTasks` and never used it (server-deleted tasks
+        // lingered until reload) and appended new tasks to the end, discarding the
+        // server's created_at DESC ordering.
+        const prevTasks = tasksRef.current;
+        const prevById = new Map(prevTasks.map(t => [t.id, t]));
 
-          fetchedTasks.forEach(fetchedTask => {
-            const existingTask = taskMap.get(fetchedTask.id);
-            if (existingTask) {
-              // Update existing task if it changed
-              if (JSON.stringify(existingTask) !== JSON.stringify(fetchedTask)) {
-                taskMap.set(fetchedTask.id, fetchedTask);
-              }
-            } else {
-              // New task
-              newTasks.push(fetchedTask);
-              hasNewTasks = true;
-            }
-          });
+        const fetchedIds = new Set(fetchedTasks.map(t => t.id));
+        const newTasks = fetchedTasks.filter(t => !prevById.has(t.id));
+        const removedCount = prevTasks.reduce((n, t) => (fetchedIds.has(t.id) ? n : n + 1), 0);
+        const changedCount = fetchedTasks.reduce((n, fetched) => {
+          const existing = prevById.get(fetched.id);
+          return existing && !tasksEqual(existing, fetched) ? n + 1 : n;
+        }, 0);
 
-          // Remove tasks that no longer exist
-          const fetchedTaskIds = new Set(fetchedTasks.map(t => t.id));
-          const removedTasks = prevTasks.filter(t => !fetchedTaskIds.has(t.id));
+        const isFirstPoll = previousTasksCountRef.current === 0;
+        if (newTasks.length > 0 && !isFirstPoll) {
+          playSound('newTask'); // Louder DING sound
+          addToast(`✨ ${newTasks.length} new task${newTasks.length > 1 ? 's' : ''} added!`, 'success');
+          setNewTasksCount(prev => prev + newTasks.length);
+        }
+        previousTasksCountRef.current = fetchedTasks.length;
 
-          // Notify about new tasks
-          if (hasNewTasks && newTasks.length > 0 && previousTasksCountRef.current > 0) {
-            playSound('newTask'); // Louder DING sound
-            addToast(`✨ ${newTasks.length} new task${newTasks.length > 1 ? 's' : ''} added!`, 'success');
-            // Update new tasks counter (will be cleared when viewing tasks page)
-            setNewTasksCount(prev => prev + newTasks.length);
-          }
-
-          // Update count
-          previousTasksCountRef.current = fetchedTasks.length;
-
-          // Return merged array
-          return Array.from(taskMap.values()).concat(newTasks);
-        });
+        if (newTasks.length === 0 && removedCount === 0 && changedCount === 0) {
+          // Nothing moved: keep the existing array identity so React bails out of
+          // re-rendering the tree entirely. This is the whole point of the diff.
+        } else {
+          // Rebuild in the server's order, reusing unchanged object identities so
+          // memoized rows don't re-render.
+          setTasks(fetchedTasks.map(fetched => {
+            const existing = prevById.get(fetched.id);
+            return existing && tasksEqual(existing, fetched) ? existing : fetched;
+          }));
+        }
 
         // Update stats
-        const lastResetTime = user?.last_reset_at 
-          ? new Date(String(user.last_reset_at).replace(' ', 'T')).getTime() 
+        const lastResetTime = userRef.current?.last_reset_at
+          ? new Date(String(userRef.current.last_reset_at).replace(' ', 'T')).getTime()
           : 0;
         const todayString = new Date().toDateString();
         const completedToday = fetchedTasks.filter(t => {
@@ -2308,10 +2254,9 @@ export default function App() {
           }
         }).length;
 
-        setStats(prev => ({
-          ...prev,
-          completedToday
-        }));
+        // Same reasoning as the merge above: only write when the value actually
+        // moved, otherwise a new object identity forces a re-render every 15s.
+        setStats(prev => (prev.completedToday === completedToday ? prev : { ...prev, completedToday }));
       } catch (error) {
         console.error('Failed to poll tasks:', error);
       }
@@ -2322,7 +2267,10 @@ export default function App() {
     const interval = setInterval(pollTasks, 15000);
     
     return () => clearInterval(interval);
-  }, [token, view, user]);
+    // `view` and `user` used to be dependencies, so every navigation tore down the
+    // interval and fired an immediate refetch, and the timer never settled. Both
+    // are now read through refs; only auth identity should restart polling.
+  }, [token]);
 
   // Fetch Data on Auth
   useEffect(() => {
@@ -2430,37 +2378,80 @@ export default function App() {
   };
 
   // Derived State
-  const pendingTasksAll = tasks.filter(t => t.status !== 'done');
-  const completedTasksAll = tasks.filter(t => t.status === 'done');
-  
-  const now = Date.now();
-  const activeTasks = tasks.filter(t => t.workspace === activeWorkspace && t.status !== 'done' && (!t.snoozedUntil || t.snoozedUntil < now));
-  
-  const waitingTasks = activeTasks.filter(t => t.status === 'waiting');
-  let currentTasks = activeTasks.filter(t => t.status !== 'waiting');
+  //
+  // Every one of these used to run inline on each render -- six filter passes plus
+  // a flatMap/Set rebuild, on every keystroke in the search box and on every poll
+  // tick. They're memoized so a render that changes nothing costs nothing.
+  const pendingTasksAll = useMemo(() => tasks.filter(t => t.status !== 'done'), [tasks]);
+  const completedTasksAll = useMemo(() => tasks.filter(t => t.status === 'done'), [tasks]);
 
-  // Search Filter
-  if (searchQuery) {
-    currentTasks = currentTasks.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()));
-  }
+  // Open tasks whose workspace tab is currently hidden. These are unreachable in
+  // the UI, so they get surfaced as a badge rather than silently lost.
+  const hiddenWorkspaceTasks = useMemo(() => pendingTasksAll.filter(t =>
+    (t.workspace === 'personal' && !showPersonalTab) ||
+    (t.workspace === 'freelance' && !showFreelanceTab)
+  ), [pendingTasksAll, showPersonalTab, showFreelanceTab]);
 
-  // Energy Mode Filter
-  if (energyFilter === 'focus') {
-    currentTasks = currentTasks.filter(t => t.energy === 'high' || t.energy === 'medium');
-  } else if (energyFilter === 'chill') {
-    currentTasks = currentTasks.filter(t => t.energy === 'low' || t.energy === 'medium');
-  }
+  // `now` is captured per recompute rather than per render. Snoozed tasks are
+  // woken by the 30s checker (which strips snoozedUntil and thus changes `tasks`),
+  // so this staying fixed between recomputes cannot hide a task indefinitely.
+  const activeTasks = useMemo(() => {
+    const now = Date.now();
+    return tasks.filter(t =>
+      t.workspace === activeWorkspace &&
+      t.status !== 'done' &&
+      (!t.snoozedUntil || t.snoozedUntil < now)
+    );
+  }, [tasks, activeWorkspace]);
 
-  // Tag Filter
-  if (tagFilter) {
-    currentTasks = currentTasks.filter(t => t.tags.includes(tagFilter));
-  }
-  
+  const waitingTasks = useMemo(() => activeTasks.filter(t => t.status === 'waiting'), [activeTasks]);
+
+  const currentTasks = useMemo(() => {
+    let list = activeTasks.filter(t => t.status !== 'waiting');
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(t => t.title.toLowerCase().includes(q));
+    }
+
+    if (energyFilter === 'focus') {
+      list = list.filter(t => t.energy === 'high' || t.energy === 'medium');
+    } else if (energyFilter === 'chill') {
+      list = list.filter(t => t.energy === 'low' || t.energy === 'medium');
+    }
+
+    if (tagFilter) {
+      list = list.filter(t => t.tags.includes(tagFilter));
+    }
+
+    return list;
+  }, [activeTasks, searchQuery, energyFilter, tagFilter]);
+
   // Get all unique tags for the filter bar
-  const availableTags = Array.from(new Set(
-    tasks.filter(t => t.workspace === activeWorkspace && t.status !== 'done' && (!t.snoozedUntil || t.snoozedUntil < now))
-         .flatMap(t => t.tags)
-  ));
+  const availableTags = useMemo(
+    () => Array.from(new Set(activeTasks.flatMap(t => t.tags))),
+    [activeTasks]
+  );
+
+  // Blocker lookup. This used to be `tasks.filter(...)` evaluated *inside* the map
+  // over tasks -- a full scan per rendered card, i.e. O(n^2) (40k comparisons at 200
+  // tasks) allocating a fresh array each time, which also defeated any memo on the
+  // card. Built once per task change instead.
+  const tasksById = useMemo(() => new Map(tasks.map(t => [t.id, t])), [tasks]);
+  const blockersByTaskId = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const task of tasks) {
+      if (!task.dependencies?.length) continue;
+      const blockers = task.dependencies
+        .map(id => tasksById.get(id))
+        .filter((t): t is Task => !!t && t.status !== 'done');
+      if (blockers.length) map.set(task.id, blockers);
+    }
+    return map;
+  }, [tasks, tasksById]);
+  // Stable identity for the common "nothing blocks this" case, so memoized cards
+  // don't see a new [] prop on every render.
+  const NO_BLOCKERS = useMemo<Task[]>(() => [], []);
 
   // Handlers
   const addNotification = (message: string) => {
@@ -2479,6 +2470,40 @@ export default function App() {
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
+
+  // Surface OAuth callback results. The backend redirects to
+  // `${FRONTEND_URL}/settings?<service>=connected|error`, but nothing ever read
+  // these params, so every connect/failure outcome was silently discarded and the
+  // user landed on the dashboard wondering whether it worked. Netlify already
+  // serves index.html for /settings, so this needs no router.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const services: { key: string; label: string }[] = [
+      { key: 'github', label: 'GitHub' },
+      { key: 'gmail', label: 'Gmail' },
+      { key: 'slack', label: 'Slack' },
+      { key: 'telegram', label: 'Telegram' },
+    ];
+
+    let matched = false;
+    for (const { key, label } of services) {
+      const status = params.get(key);
+      if (!status) continue;
+      matched = true;
+      if (status === 'connected') {
+        const email = params.get('email');
+        addToast(`${label} connected${email ? ` as ${email}` : ''}!`, 'success');
+      } else {
+        addToast(`${label} connection failed: ${params.get('message') || 'unknown error'}`, 'error');
+      }
+    }
+
+    if (matched) {
+      setView(AppView.SETTINGS);
+      // Strip the params so a refresh doesn't re-toast.
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   const addTask = async (title: string, description?: string) => {
     if (!token) return;
@@ -2500,7 +2525,7 @@ export default function App() {
       estimatedTime: 15,
     };
 
-    const aiResult = await parseTaskWithGemini(combinedInput, token);
+    const aiResult = await parseTaskWithGemini(combinedInput, token, 'openai', { activeWorkspace });
     
     if (aiResult) {
       newTask = {
@@ -2510,11 +2535,23 @@ export default function App() {
         energy: aiResult.energy,
         estimatedTime: aiResult.estimatedTime,
         tags: aiResult.tags,
-        // Respect the current tab for Personal/Freelance; allow AI to shift only from default Work
-        workspace: activeWorkspace === 'job' && aiResult.workspaceSuggestions
-          ? aiResult.workspaceSuggestions 
-          : activeWorkspace,
+        // workspace is deliberately NOT taken from the AI. It used to be, but only
+        // when the active tab was 'job' -- so a task typed into Work could silently
+        // land in Personal (which is hidden by default, making it vanish entirely).
+        // The tab the user is looking at is an explicit choice; a classifier guess
+        // never overrides it. Suggestions surface as a dismissible chip instead.
+        workspace: activeWorkspace,
       };
+
+      // Only suggest a move to a workspace the user can actually see.
+      const suggested = aiResult.workspaceSuggestions;
+      const canSee =
+        suggested === 'job' ||
+        (suggested === 'freelance' && showFreelanceTab) ||
+        (suggested === 'personal' && showPersonalTab);
+      if (suggested && suggested !== activeWorkspace && canSee) {
+        setWorkspaceSuggestion({ taskId: newTask.id, workspace: suggested });
+      }
     }
 
     // Optimistic Update
@@ -2670,7 +2707,7 @@ export default function App() {
 
     // 3. Optimistic UI Update
     setTasks(prev => {
-        const updated = prev.map(t => t.id === id ? { ...t, status: 'done', completedAt: Date.now() } : t);
+        const updated = prev.map(t => t.id === id ? { ...t, status: 'done' as const, completedAt: Date.now() } : t);
         return nextTask ? [nextTask, ...updated] : updated;
     });
     
@@ -2797,90 +2834,17 @@ export default function App() {
         }
       }
 
-      // 2) Send Slack summary of today's completed Job tasks (if enabled)
-      const todayLabel = nowDate.toLocaleDateString();
-      // Calculate start and end of today for precise filtering
-      const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
-      const todayEnd = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1).getTime();
-      
-      // Get all job tasks (not just completed ones) to check for subtask completion
-      const allJobTasks = tasks.filter(t => t.workspace === 'job');
-      
-      // Get tasks that were completed today (main task marked as done)
-      const completedTodayJob = completedTasksAll.filter(
-        (t) =>
-          t.workspace === 'job' &&
-          t.completedAt &&
-          t.completedAt >= todayStart &&
-          t.completedAt < todayEnd
-      );
-
-      // Also include tasks with subtasks that have at least one completed subtask
-      // Check if any subtask was completed today (based on completedAt timestamp)
-      const tasksWithCompletedSubtasks = allJobTasks.filter(task => {
-        if (!task.subtasks || task.subtasks.length === 0) return false;
-        // Check if any subtask was completed today
-        return task.subtasks.some(st => 
-          st.completed && 
-          st.completedAt && 
-          st.completedAt >= todayStart && 
-          st.completedAt < todayEnd
-        );
-      });
-
-      // Combine both: completed tasks and tasks with completed subtasks
-      const allTasksForReport = new Map<string, Task>();
-      completedTodayJob.forEach(t => allTasksForReport.set(t.id, t));
-      tasksWithCompletedSubtasks.forEach(t => {
-        if (!allTasksForReport.has(t.id)) {
-          allTasksForReport.set(t.id, t);
-        }
-      });
-
-      const tasksForReport = Array.from(allTasksForReport.values());
-
-      if (tasksForReport.length > 0) {
-        try {
-          // Check if daily report is enabled in Slack settings
-          const slackStatus = await api.slack.status(token);
-          if (slackStatus.connected && slackStatus.dailyReportEnabled !== false) {
-            // Transform tasks for report
-            const reportItems: Array<{ title: string; subtasks?: any[] }> = [];
-            
-            tasksForReport.forEach(task => {
-              if (task.subtasks && task.subtasks.length > 0) {
-                const completedSubtasks = task.subtasks.filter(st => st.completed);
-                const allSubtasksCompleted = completedSubtasks.length === task.subtasks.length;
-                
-                if (allSubtasksCompleted) {
-                  // All subtasks done, include the whole task with all subtasks
-                  reportItems.push(task);
-                } else if (completedSubtasks.length > 0) {
-                  // Some subtasks done: include main task title with ALL subtasks (done and undone)
-                  reportItems.push({
-                    ...task,
-                    title: task.title,
-                    subtasks: task.subtasks // Include all subtasks, not just completed ones
-                  });
-                }
-                // If no subtasks are completed, don't include the task
-              } else {
-                // No subtasks, include the task as normal (only if it was completed)
-                if (task.status === 'done' && task.completedAt && 
-                    task.completedAt >= todayStart && task.completedAt < todayEnd) {
-                  reportItems.push(task);
-                }
-              }
-            });
-            
-            if (reportItems.length > 0) {
-              await api.slack.dailySummary(token, reportItems, todayLabel);
-            }
-          }
-        } catch (err) {
-          console.error('Failed to post Slack daily summary', err);
-        }
-      }
+      // 2) The end-of-day report is sent server-side.
+      //
+      // It used to be assembled and posted from right here, inside the manual Daily
+      // Reset flow -- which meant the "daily report" only existed if the user opened
+      // the app and clicked reset. It is now a scheduled job (backend/src/jobs/
+      // dailyReport.js) that fires at the user's configured local time, so it must
+      // NOT also fire from the client or the report would be sent twice.
+      //
+      // The subtask-aware "completed today" rules that lived here now live in
+      // backend/src/services/reportService.js, shared by the job and GET
+      // /api/reports/completed-today.
 
       // 3) Tell backend we've reset the day
       const res = await api.dailyReset(token);
@@ -3354,12 +3318,25 @@ export default function App() {
                     />
                     )}
                     {showPersonalTab && (
-                    <WorkspaceTab 
-                      active={activeWorkspace === 'personal'} 
-                      type="personal" 
-                      onClick={() => setActiveWorkspace('personal')} 
-                        icon={<User className="w-3.5 h-3.5" />} 
+                    <WorkspaceTab
+                      active={activeWorkspace === 'personal'}
+                      type="personal"
+                      onClick={() => setActiveWorkspace('personal')}
+                        icon={<User className="w-3.5 h-3.5" />}
                     />
+                    )}
+                    {/* Open tasks sitting in a hidden workspace would otherwise be
+                        invisible with no way to reach them -- which is how the old
+                        AI-override bug lost tasks. Surface them and offer the tab. */}
+                    {hiddenWorkspaceTasks.length > 0 && (
+                      <button
+                        onClick={() => setView(AppView.SETTINGS)}
+                        title={`${hiddenWorkspaceTasks.length} open task(s) are in a workspace whose tab is hidden. Enable the tab in Settings to see them.`}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-amber-300 hover:text-amber-100 hover:bg-amber-500/10 transition-colors"
+                      >
+                        <EyeOff className="w-3.5 h-3.5" />
+                        {hiddenWorkspaceTasks.length} hidden
+                      </button>
                     )}
                   </div>
                   <div className="md:hidden flex gap-2">
@@ -3600,6 +3577,33 @@ export default function App() {
                 </div>
               )}
 
+              {/* AI workspace suggestion. Purely advisory -- the task already lives
+                  in the tab the user chose, and stays there unless they act here. */}
+              {workspaceSuggestion && (
+                <div className="mb-4 flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/10 px-4 py-2.5 animate-in slide-in-from-top-2 duration-300">
+                  <Sparkles className="w-4 h-4 text-primary shrink-0" />
+                  <span className="text-sm text-slate-300 flex-1">
+                    This looks like a <span className="font-semibold capitalize">{workspaceSuggestion.workspace}</span> task. Move it?
+                  </span>
+                  <button
+                    onClick={() => {
+                      const t = tasks.find(x => x.id === workspaceSuggestion.taskId);
+                      if (t) updateTask({ ...t, workspace: workspaceSuggestion.workspace });
+                      setWorkspaceSuggestion(null);
+                    }}
+                    className="text-xs font-semibold text-primary hover:text-white transition-colors px-2 py-1 rounded"
+                  >
+                    Move
+                  </button>
+                  <button
+                    onClick={() => setWorkspaceSuggestion(null)}
+                    className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-2 py-1 rounded"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
               {/* Task Lists */}
               <div className="space-y-8">
                  {/* Awaiting Section */}
@@ -3611,9 +3615,7 @@ export default function App() {
                      </div>
                      <div className="grid gap-3">
                        {waitingTasks.map(task => {
-                         const blockers = tasks.filter(t => 
-                           task.dependencies?.includes(t.id) && t.status !== 'done'
-                         );
+                         const blockers = blockersByTaskId.get(task.id) ?? NO_BLOCKERS;
                          return (
                            <TaskCard 
                              key={task.id} 
@@ -3673,9 +3675,7 @@ export default function App() {
                       </div>
                       <div className="grid gap-3">
                         {sortedEnergyTasks.map(task => {
-                          const blockers = tasks.filter(t => 
-                            task.dependencies?.includes(t.id) && t.status !== 'done'
-                          );
+                          const blockers = blockersByTaskId.get(task.id) ?? NO_BLOCKERS;
 
                           return (
                             <TaskCard 
@@ -3714,7 +3714,7 @@ export default function App() {
           )}
 
           {/* Analytics View */}
-          {view === AppView.ANALYTICS && <AnalyticsScreen tasks={tasks} onBack={() => setView(AppView.DASHBOARD)} />}
+          {view === AppView.ANALYTICS && <AnalyticsScreen token={token} onBack={() => setView(AppView.DASHBOARD)} />}
           
           {/* Completed Tasks View */}
           {view === AppView.COMPLETED_TASKS && <CompletedTasksScreen tasks={completedTasksAll} onBack={() => setView(AppView.DASHBOARD)} onExport={handleExport} onUncomplete={uncompleteTask} />}

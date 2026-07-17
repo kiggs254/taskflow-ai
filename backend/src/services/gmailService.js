@@ -3,7 +3,11 @@ import { query } from '../config/database.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
 import { parseTask, parseEmailThread, checkEmailRelevance } from './aiService.js';
-import { createDraftTask, draftTaskExists, taskExistsForSource } from './draftTaskService.js';
+import { createDraftTask } from './draftTaskService.js';
+import {
+  filterUnprocessedGmailIds,
+  markGmailMessageProcessed,
+} from './processedMessageService.js';
 import { syncTask } from './taskService.js';
 import { config } from '../config/env.js';
 
@@ -254,22 +258,26 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     const createdTasks = [];
     let tasksCreated = 0;
 
+    // === DUPLICATE CHECK ===
+    // Consult the immutable ledger up front, in one batched query, and drop
+    // already-seen messages before we fetch or bill any AI work for them.
+    //
+    // This replaces two guards that inferred "processed" from "an artifact still
+    // exists": draftTaskExists (which ignored status='rejected', so rejecting a
+    // draft guaranteed its return) and taskExistsForSource (an unindexed
+    // description LIKE scan that broke as soon as the task was deleted or edited).
+    const unprocessedIds = new Set(
+      await filterUnprocessedGmailIds(userId, messages.map(m => m.id))
+    );
+    const skipped = messages.length - unprocessedIds.size;
+    if (skipped > 0) {
+      console.log(`Gmail scan: skipping ${skipped} already-processed message(s) for user ${userId}`);
+    }
+
     // Process each email
     for (const message of messages) {
+      if (!unprocessedIds.has(message.id)) continue;
       try {
-        // === DUPLICATE CHECK: Skip if already processed ===
-        const draftExists = await draftTaskExists(userId, 'gmail', message.id);
-        if (draftExists) {
-          console.log(`Skipping email ${message.id}: draft already exists`);
-          continue;
-        }
-        
-        const taskExists = await taskExistsForSource(userId, message.id);
-        if (taskExists) {
-          console.log(`Skipping email ${message.id}: task already exists`);
-          continue;
-        }
-
         // Get full message
         const messageData = await gmail.users.messages.get({
           userId: 'me',
@@ -394,6 +402,9 @@ export const scanEmails = async (userId, maxEmails = 50) => {
           
           if (!relevanceCheck.isRelevant) {
             console.log(`Skipping email ${message.id} (${subject}): Not relevant - ${relevanceCheck.reason}`);
+            // Record the verdict. Without this the AI re-judges (and re-bills for)
+            // every irrelevant email on every single scan, forever.
+            await markGmailMessageProcessed(userId, message.id, { outcome: 'irrelevant' });
             continue;
           }
           console.log(`Email ${message.id} (${subject}) approved: ${relevanceCheck.reason}`);
@@ -444,7 +455,10 @@ export const scanEmails = async (userId, maxEmails = 50) => {
             energy: aiResult?.energy || 'medium',
             estimatedTime: aiResult?.estimatedTime || 15,
             tags: [...(aiResult?.tags || []), 'gmail'],
-            aiConfidence: 0.8,
+            // Reported by the model. This was hardcoded to 0.8, so the "80% confident"
+            // shown on every draft card actually meant "this came from Gmail" -- a
+            // fabricated number rendered with the authority of a real one.
+            aiConfidence: aiResult?.confidence ?? null,
             subtasks, // Include AI-extracted subtasks
             meetingLink, // Include meeting link if found
           };
@@ -478,6 +492,14 @@ export const scanEmails = async (userId, maxEmails = 50) => {
             };
 
             await syncTask(userId, newTask);
+            // Record immediately after the write. This path never wrote a
+            // draft_tasks row, so before the ledger existed its only trace was an
+            // HTML comment inside the task description -- which vanished the moment
+            // the user edited or deleted the task, re-importing the email forever.
+            await markGmailMessageProcessed(userId, message.id, {
+              taskId: newTask.id,
+              outcome: 'task',
+            });
             createdTasks.push(newTask);
             tasksCreated++;
           } else {
@@ -488,6 +510,8 @@ export const scanEmails = async (userId, maxEmails = 50) => {
               ...baseTaskData,
             });
 
+            await markGmailMessageProcessed(userId, message.id, { outcome: 'draft' });
+
             // Only add to array if task was actually created (not skipped as duplicate)
             if (draftTask) {
               draftTasks.push(draftTask);
@@ -495,6 +519,8 @@ export const scanEmails = async (userId, maxEmails = 50) => {
           }
         } catch (aiError) {
           console.error(`AI parsing error for email ${message.id}:`, aiError);
+          // Deliberately NOT marked processed: a transient AI failure should be
+          // retried on the next scan, not silently swallowed forever.
           // Continue with next email
         }
 

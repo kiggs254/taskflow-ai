@@ -1,6 +1,4 @@
 import express from 'express';
-import fs from 'fs';
-import path from 'path';
 import { registerUser, loginUser } from '../services/userService.js';
 import {
   getUserTasks,
@@ -20,30 +18,8 @@ const router = express.Router();
 
 // Auth routes (NO authentication required)
 router.post('/', asyncHandler(async (req, res, next) => {
-  // #region agent log
-  try {
-    const logPath = process.env.DEBUG_LOG_PATH || path.join(process.cwd(), '.cursor', 'debug.log');
-    const logDir = path.dirname(logPath);
-    if (!fs.existsSync(logDir)) {
-      fs.mkdirSync(logDir, { recursive: true });
-    }
-    const logEntry = JSON.stringify({location:'queryParams.js:20',message:'queryParams POST route entered',data:{action:req.query.action,hasAuthHeader:!!req.headers.authorization,method:req.method,path:req.path},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})+'\n';
-    fs.appendFileSync(logPath, logEntry);
-  } catch (err) {
-    // Silently fail - debug logging shouldn't break the app
-    console.error('Debug log write failed (non-critical):', err.message);
-  }
-  // #endregion
   const action = req.query.action;
-  
-  // Debug logging
-  console.log('=== QUERY PARAMS ROUTE ===');
-  console.log('Action:', action);
-  console.log('Method:', req.method);
-  console.log('Path:', req.path);
-  console.log('Query:', req.query);
-  console.log('Body keys:', Object.keys(req.body || {}));
-  
+
   if (action === 'register') {
     const { username, email, password } = req.body;
     if (!username || !email || !password) {
@@ -59,27 +35,15 @@ router.post('/', asyncHandler(async (req, res, next) => {
       throw error;
     }
   } else if (action === 'login') {
-    console.log('=== LOGIN REQUEST ===');
     const { email, password } = req.body;
-    console.log('Email provided:', email ? 'Yes' : 'No');
-    console.log('Password provided:', password ? 'Yes' : 'No');
-    
+
     if (!email || !password) {
-      console.log('Missing fields - returning 400');
       return res.status(400).json({ error: 'Missing fields' });
     }
     try {
-      console.log('Calling loginUser...');
       const result = await loginUser(email, password);
-      console.log('Login successful for:', email);
       return res.json(result);
     } catch (error) {
-      // Enhanced logging for debugging
-      console.error('=== LOGIN ERROR ===');
-      console.error('Email:', email);
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-      
       if (error.message === 'User not found') {
         return res.status(404).json({ error: 'User not found' });
       }
@@ -90,56 +54,14 @@ router.post('/', asyncHandler(async (req, res, next) => {
       return res.status(500).json({ error: 'Login failed. Please try again.' });
     }
   } else if (action === 'forgot_password') {
-    // #region agent log
-    try {
-      const logPath = process.env.DEBUG_LOG_PATH || path.join(process.cwd(), '.cursor', 'debug.log');
-      const logDir = path.dirname(logPath);
-      if (!fs.existsSync(logDir)) {
-        fs.mkdirSync(logDir, { recursive: true });
-      }
-      const logEntry = JSON.stringify({location:'queryParams.js:76',message:'forgot_password route handler entered',data:{hasEmail:!!req.body.email,hasAuthHeader:!!req.headers.authorization,method:req.method,path:req.path},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})+'\n';
-      fs.appendFileSync(logPath, logEntry);
-    } catch (err) {
-      // Silently fail - debug logging shouldn't break the app
-      console.error('Debug log write failed (non-critical):', err.message);
-    }
-    // #endregion
     const { email } = req.body;
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
     try {
       const result = await requestPasswordReset(email);
-      // #region agent log
-      try {
-        const logPath = process.env.DEBUG_LOG_PATH || path.join(process.cwd(), '.cursor', 'debug.log');
-        const logDir = path.dirname(logPath);
-        if (!fs.existsSync(logDir)) {
-          fs.mkdirSync(logDir, { recursive: true });
-        }
-        const logEntry2 = JSON.stringify({location:'queryParams.js:83',message:'forgot_password success',data:{success:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})+'\n';
-        fs.appendFileSync(logPath, logEntry2);
-      } catch (err) {
-        // Silently fail - debug logging shouldn't break the app
-        console.error('Debug log write failed (non-critical):', err.message);
-      }
-      // #endregion
       return res.json(result);
     } catch (error) {
-      // #region agent log
-      try {
-        const logPath = process.env.DEBUG_LOG_PATH || path.join(process.cwd(), '.cursor', 'debug.log');
-        const logDir = path.dirname(logPath);
-        if (!fs.existsSync(logDir)) {
-          fs.mkdirSync(logDir, { recursive: true });
-        }
-        const logEntry3 = JSON.stringify({location:'queryParams.js:86',message:'forgot_password error',data:{error:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})+'\n';
-        fs.appendFileSync(logPath, logEntry3);
-      } catch (err) {
-        // Silently fail - debug logging shouldn't break the app
-        console.error('Debug log write failed (non-critical):', err.message);
-      }
-      // #endregion
       console.error('Forgot password error:', error.message);
       return res.status(500).json({ error: error.message || 'Failed to process password reset request' });
     }

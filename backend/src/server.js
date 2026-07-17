@@ -11,9 +11,14 @@ import gmailRoutes from './routes/gmail.js';
 import telegramRoutes from './routes/telegram.js';
 import slackRoutes from './routes/slack.js';
 import draftTasksRoutes from './routes/draftTasks.js';
+import githubRoutes from './routes/github.js';
+import reportsRoutes from './routes/reports.js';
+import analyticsRoutes from './routes/analytics.js';
 import { initializeBot } from './services/telegramService.js';
+import { startDailyReport } from './jobs/dailyReport.js';
 import { startEmailScanner } from './jobs/emailScanner.js';
 import { startSlackScanner } from './jobs/slackScanner.js';
+import { startGithubScanner } from './jobs/githubScanner.js';
 import { startOverdueNotifier, startDailySummary } from './jobs/overdueNotifier.js';
 
 const app = express();
@@ -40,11 +45,21 @@ app.use('/api/telegram', telegramRoutes);
 // Slack routes (callback doesn't require auth - routes handle auth individually)
 app.use('/api/slack', slackRoutes);
 
+// GitHub routes (callback doesn't require auth - it redirects, and the user id
+// comes from the signed state)
+app.use('/api/github', githubRoutes);
+
 // AI routes (require authentication - already has authenticate in router)
 app.use('/api/ai', aiRoutes);
 
 // Draft tasks routes (require authentication)
 app.use('/api/draft-tasks', authenticate, draftTasksRoutes);
+
+// Daily report routes (require authentication - already in the router)
+app.use('/api/reports', reportsRoutes);
+
+// Analytics routes (require authentication - already in the router)
+app.use('/api/analytics', analyticsRoutes);
 
 // Auth routes (no authentication required)
 app.use('/api', authRoutes);
@@ -92,8 +107,10 @@ process.on('uncaughtException', (error) => {
 if (config.nodeEnv === 'production' || process.env.ENABLE_JOBS === 'true') {
   startEmailScanner();
   startSlackScanner();
+  startGithubScanner();
   startOverdueNotifier();
   startDailySummary();
+  startDailyReport();
   console.log('Scheduled jobs started');
 }
 

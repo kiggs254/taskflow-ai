@@ -29,16 +29,19 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
       button: 'bg-red-600 hover:bg-red-500 text-white',
       icon: 'text-red-400',
       border: 'border-red-500/50',
+      tint: 'bg-red-900/20',
     },
     warning: {
       button: 'bg-amber-600 hover:bg-amber-500 text-white',
       icon: 'text-amber-400',
       border: 'border-amber-500/50',
+      tint: 'bg-amber-900/20',
     },
     info: {
       button: 'bg-blue-600 hover:bg-blue-500 text-white',
       icon: 'text-blue-400',
       border: 'border-blue-500/50',
+      tint: 'bg-blue-900/20',
     },
   };
 
@@ -49,7 +52,10 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
       <div className={`bg-surface border ${colors.border} rounded-xl shadow-2xl max-w-md w-full`}>
         <div className="p-6">
           <div className="flex items-start gap-4 mb-4">
-            <div className={`p-2 rounded-full bg-${variant === 'danger' ? 'red' : variant === 'warning' ? 'amber' : 'blue'}-900/20`}>
+            {/* Must be a whole class name, not built from fragments: Tailwind's
+                scanner reads source text, so `bg-${x}-900/20` is invisible to it and
+                the style silently disappears from the build. */}
+            <div className={`p-2 rounded-full ${colors.tint}`}>
               <AlertTriangle className={`w-6 h-6 ${colors.icon}`} />
             </div>
             <div className="flex-1">

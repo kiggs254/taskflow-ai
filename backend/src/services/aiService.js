@@ -1,5 +1,10 @@
 import OpenAI from 'openai';
 import { config } from '../config/env.js';
+import { modelFor } from '../config/aiModels.js';
+import { DEFAULT_TIMEZONE } from '../utils/time.js';
+import { callAI } from './ai/callAI.js';
+import { buildTaskContext, renderSystemPrompt } from './ai/context.js';
+import { PARSE_TASK_SCHEMA, validateAndCoerceTask } from './ai/taskSchema.js';
 
 // Initialize OpenAI client (only if API key exists)
 const openaiClient = config.ai.openai.apiKey 
@@ -99,73 +104,84 @@ const tryWithFallback = async (fn, ...args) => {
 };
 
 /**
- * Parse task input using AI
- * Returns structured task data: title, energy, estimatedTime, tags, workspaceSuggestions
+ * Parse task input using AI.
+ *
+ * Returns { title, energy, estimatedTime, tags, workspaceSuggestions,
+ *           workspaceConfidence, confidence, dueDate, subtasks }
+ *
+ * Rewritten from a context-free, temperature-0.3 guess into a grounded,
+ * deterministic classification:
+ *  - temperature 0 (this is classification, not prose -- 0.3 is why the same input
+ *    could land in a different workspace on different tries)
+ *  - max_tokens set (it was the only JSON-mode call without one, so a runaway
+ *    generation could not be truncated and would surface as invalid JSON)
+ *  - real context: the active tab, the user's tags/history, their instructions
+ *  - structured output via schema, with coercion rather than rejection
+ *  - a provider fallback, which the single most-used AI call in the app never had
+ *
+ * `options.userId` + `options.activeWorkspace` are what make this smarter; without
+ * them it still works, just blind.
  */
 export const parseTask = async (input, provider = 'openai', options = {}) => {
   if (!input || typeof input !== 'string') {
     throw new Error('Invalid input: task input must be a string');
   }
 
-  const promptInstructions = options.promptInstructions
-    ? `Additional instructions from user:\n${options.promptInstructions}\n\n`
-    : '';
+  const { userId = null, activeWorkspace = 'job', timezone } = options;
 
-  const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  let ctx;
+  try {
+    ctx = await buildTaskContext(userId, { activeWorkspace, timezone });
+  } catch (error) {
+    // Context is an enhancement, not a requirement: never fail a task add because
+    // a grounding query was slow or a column was missing.
+    console.error('parseTask: context build failed, continuing unground:', error.message);
+    ctx = {
+      allowedWorkspaces: ['job', 'freelance', 'personal'],
+      topTags: [], recentTitles: [], promptInstructions: '',
+      activeWorkspace, timezone: timezone || DEFAULT_TIMEZONE,
+    };
+  }
+
+  // An explicit override still wins over the stored Gmail instructions.
+  if (options.promptInstructions) ctx.promptInstructions = options.promptInstructions;
 
   try {
-    const response = await client.chat.completions.create({
-      model: model,
+    const { content } = await callAI({
+      taskKind: 'parse_task',
+      provider,
+      tier: 'fast', // interactive path: latency is the feature
+      userId,
+      temperature: 0,
+      maxTokens: 400,
+      schema: PARSE_TASK_SCHEMA,
       messages: [
-        {
-          role: 'system',
-          content: `You are a task parsing assistant. Analyze task inputs and extract structured information.
-Context: User is a busy software developer.
-- "Fix bug" usually implies High energy.
-- "Email" or "Call" usually implies Low energy.
-- Extract time if mentioned (e.g., "20m").
-Return valid JSON only.
-${promptInstructions}`,
-        },
+        { role: 'system', content: renderSystemPrompt(ctx) },
         {
           role: 'user',
-          content: `Analyze this task input: "${input}". Extract: title (cleaned of time estimates), energy (high/medium/low), estimatedTime (minutes, default 15), tags (up to 3 short tags), workspaceSuggestions (job/freelance/personal).`,
+          content: `Task input: "${input}"\n\nExtract the task metadata. Clean any time estimate out of the title. Return JSON.`,
         },
       ],
-      response_format: { type: 'json_object' },
-      temperature: 0.3,
     });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No response from AI');
-    }
+    if (!content) throw new Error('No response from AI');
 
-    const parsed = JSON.parse(content);
-    
-    // Validate and normalize response
-    return {
-      title: parsed.title || input.trim(),
-      energy: ['high', 'medium', 'low'].includes(parsed.energy?.toLowerCase())
-        ? parsed.energy.toLowerCase()
-        : 'medium',
-      estimatedTime: parseInt(parsed.estimatedTime) || 15,
-      tags: Array.isArray(parsed.tags) ? parsed.tags.slice(0, 3) : [],
-      workspaceSuggestions: ['job', 'freelance', 'personal'].includes(
-        parsed.workspaceSuggestions?.toLowerCase()
-      )
-        ? parsed.workspaceSuggestions.toLowerCase()
-        : undefined,
-    };
+    return validateAndCoerceTask(JSON.parse(content), {
+      allowedWorkspaces: ctx.allowedWorkspaces,
+      fallbackTitle: input.trim(),
+    });
   } catch (error) {
     console.error('AI parseTask error:', error);
-    // Fallback to basic parsing
+    // Degrade to the raw input rather than losing the task. Deliberately omits
+    // workspaceSuggestions so the caller keeps the user's active tab.
     return {
       title: input.trim(),
       energy: 'medium',
       estimatedTime: 15,
       tags: [],
+      confidence: 0,
+      subtasks: [],
+      dueDate: null,
     };
   }
 };
@@ -179,7 +195,7 @@ export const getDailyMotivation = async (
   provider = 'openai'
 ) => {
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   try {
     const response = await client.chat.completions.create({
@@ -210,7 +226,7 @@ export const generateDailyPlan = async (pendingTasks, provider = 'openai') => {
   }
 
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   try {
     const tasksList = pendingTasks
@@ -251,7 +267,7 @@ export const generateClientFollowUp = async (
   }
 
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   try {
     const response = await client.chat.completions.create({
@@ -286,7 +302,7 @@ export const generateCompletionMessage = async (
   }
 
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   try {
     const response = await client.chat.completions.create({
@@ -323,7 +339,7 @@ export const checkEmailRelevance = async (emailSummary, promptInstructions, prov
   }
 
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   try {
     const response = await client.chat.completions.create({
@@ -381,7 +397,7 @@ export const parseEmailThread = async (fullThreadContent, provider = 'openai', p
   }
 
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   const customInstructions = promptInstructions
     ? `\n\nAdditional user instructions for task extraction: ${promptInstructions}`
@@ -502,7 +518,7 @@ For subtasks:
 
 const _generateEmailCompletionReplyInternal = async (provider, taskTitle, taskDescription, userName) => {
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   // Extract context from description (remove metadata comments)
   const cleanDescription = taskDescription
@@ -592,7 +608,7 @@ const _generateEmailDraftInternal = async (
     // Re-throw client initialization errors so fallback can handle them
     throw clientError;
   }
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
   console.log(`_generateEmailDraftInternal: Using model: ${model}`);
 
   // Get first name from full name
@@ -705,7 +721,7 @@ export const generateEmailDraft = async (
  */
 const _enhanceEmailMessageInternal = async (provider, message, style, taskContext, userName) => {
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   const firstName = userName ? userName.split(' ')[0] : '';
   
@@ -811,7 +827,7 @@ export const enhanceEmailMessage = async (
  */
 const _polishEmailReplyInternal = async (provider, message, instructions, userName) => {
   const client = getClient(provider);
-  const model = provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini';
+  const model = modelFor(provider, 'fast');
 
   const firstName = userName ? userName.split(' ')[0] : '';
   

@@ -172,6 +172,20 @@ export const updateDailyReset = async (userId) => {
 };
 
 /**
+ * Look up a user by id. Returns null when absent rather than throwing, so
+ * background jobs can skip a deleted user without aborting the sweep.
+ */
+export const getUserById = async (userId) => {
+  const result = await query(
+    `SELECT id, username, email, xp, level, streak, last_active_date, last_reset_at,
+            show_freelance_tab, show_personal_tab
+     FROM users WHERE id = $1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+};
+
+/**
  * Get user preferences
  */
 export const getUserPreferences = async (userId) => {

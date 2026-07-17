@@ -46,7 +46,8 @@ const aiRequest = async (
 export const parseTaskWithGemini = async (
   input: string,
   token: string,
-  provider: 'openai' | 'deepseek' = 'openai'
+  provider: 'openai' | 'deepseek' = 'openai',
+  options: { activeWorkspace?: string } = {}
 ): Promise<AIParsedTask | null> => {
   if (!token) {
     console.warn("Token is missing. Returning default task structure.");
@@ -54,7 +55,18 @@ export const parseTaskWithGemini = async (
   }
 
   try {
-    const result = await aiRequest('parse-task', { input }, token, provider);
+    // activeWorkspace grounds the model's workspace guess in the tab the user is
+    // actually looking at. It is advisory only -- the caller decides placement.
+    const result = await aiRequest(
+      'parse-task',
+      {
+        input,
+        activeWorkspace: options.activeWorkspace,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      token,
+      provider
+    );
     return result;
   } catch (error) {
     console.error("AI parsing failed:", error);

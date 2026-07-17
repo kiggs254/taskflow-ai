@@ -16,17 +16,25 @@ router.use(authenticate);
 /**
  * POST /api/ai/parse-task
  * Parse task input using AI
- * Body: { input: string, provider?: 'openai' | 'deepseek' }
+ * Body: { input: string, provider?: 'openai' | 'deepseek', activeWorkspace?, timezone? }
  */
 router.post('/parse-task', asyncHandler(async (req, res) => {
-  const { input, provider = 'openai' } = req.body;
+  const { input, provider = 'openai', activeWorkspace, timezone } = req.body;
 
   if (!input) {
     return res.status(400).json({ error: 'Input is required' });
   }
 
   try {
-    const result = await parseTask(input, provider);
+    // This call used to be `parseTask(input, provider)` -- no options at all. The
+    // service accepted promptInstructions the route never sent (a dead feature), and
+    // the model was never told which workspace tab the user was on, which is what
+    // made its workspace guess a coin flip.
+    const result = await parseTask(input, provider, {
+      userId: req.user.id,
+      activeWorkspace,
+      timezone,
+    });
     res.json(result);
   } catch (error) {
     console.error('Parse task error:', error);

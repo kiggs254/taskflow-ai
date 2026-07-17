@@ -22,7 +22,7 @@ export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(draft.title);
   const [editDescription, setEditDescription] = useState(draft.description || '');
-  const [editWorkspace, setEditWorkspace] = useState<WorkspaceType>(draft.workspace || 'personal');
+  const [editWorkspace, setEditWorkspace] = useState<WorkspaceType>(draft.workspace || 'job');
   const [editEnergy, setEditEnergy] = useState<EnergyLevel>(draft.energy || 'medium');
   const [editEstimatedTime, setEditEstimatedTime] = useState(draft.estimatedTime?.toString() || '');
   const [editTags, setEditTags] = useState(draft.tags.join(', ') || '');
@@ -49,7 +49,7 @@ export const DraftTaskCard: React.FC<DraftTaskCardProps> = ({
   const handleCancel = () => {
     setEditTitle(draft.title);
     setEditDescription(draft.description || '');
-    setEditWorkspace(draft.workspace || 'personal');
+    setEditWorkspace(draft.workspace || 'job');
     setEditEnergy(draft.energy || 'medium');
     setEditEstimatedTime(draft.estimatedTime?.toString() || '');
     setEditTags(draft.tags.join(', ') || '');

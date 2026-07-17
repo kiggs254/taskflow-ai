@@ -684,11 +684,16 @@ const setupBotHandlers = () => {
         sourceId: msg.message_id.toString(),
         title: aiResult?.title || msg.text.substring(0, 100),
         description: msg.text,
-        workspace: aiResult?.workspaceSuggestions || 'personal',
+        // Defaults to 'job' like every other integration (Gmail and Slack both
+        // hardcode 'job'). This used to fall back to 'personal' whenever the AI
+        // returned nothing, quietly filing work messages into a tab that is hidden
+        // by default -- the same way tasks went missing from the Work tab.
+        workspace: aiResult?.workspaceSuggestions || 'job',
         energy: aiResult?.energy || 'medium',
         estimatedTime: aiResult?.estimatedTime || 15,
         tags: aiResult?.tags || [],
-        aiConfidence: 0.7,
+        // Model-reported rather than the previous hardcoded 0.7.
+        aiConfidence: aiResult?.confidence ?? null,
       });
 
       await bot.sendMessage(

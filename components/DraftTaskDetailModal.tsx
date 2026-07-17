@@ -19,7 +19,7 @@ export const DraftTaskDetailModal: React.FC<DraftTaskDetailModalProps> = ({
 }) => {
   const [title, setTitle] = useState(draft.title);
   const [description, setDescription] = useState(draft.description || '');
-  const [workspace, setWorkspace] = useState<WorkspaceType>(draft.workspace || 'personal');
+  const [workspace, setWorkspace] = useState<WorkspaceType>(draft.workspace || 'job');
   const [energy, setEnergy] = useState<EnergyLevel>(draft.energy || 'medium');
   const [estimatedTime, setEstimatedTime] = useState(draft.estimatedTime?.toString() || '');
   const [tags, setTags] = useState((draft.tags || []).join(', '));
@@ -28,7 +28,7 @@ export const DraftTaskDetailModal: React.FC<DraftTaskDetailModalProps> = ({
   useEffect(() => {
     setTitle(draft.title);
     setDescription(draft.description || '');
-    setWorkspace(draft.workspace || 'personal');
+    setWorkspace(draft.workspace || 'job');
     setEnergy(draft.energy || 'medium');
     setEstimatedTime(draft.estimatedTime?.toString() || '');
     setTags((draft.tags || []).join(', '));
