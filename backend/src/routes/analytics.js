@@ -98,7 +98,7 @@ router.get('/narrative', asyncHandler(async (req, res) => {
       tier: 'smart',
       userId: req.user.id,
       temperature: 0.4,
-      maxTokens: 600,
+      maxTokens: 1500,
       schema: NARRATIVE_SCHEMA,
       messages: [
         {

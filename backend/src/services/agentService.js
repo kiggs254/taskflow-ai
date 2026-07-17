@@ -208,7 +208,7 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
       tier: 'smart',
       userId,
       temperature: 0.2,
-      maxTokens: 400,
+      maxTokens: 800,
       schema: SUMMARY_SCHEMA,
       messages: [
         {

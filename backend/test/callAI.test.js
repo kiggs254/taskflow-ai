@@ -24,8 +24,14 @@ const listen = (handler) =>
   });
 
 const okBody = (who) => ({
-  choices: [{ message: { content: JSON.stringify({ from: who }) } }],
+  choices: [{ message: { content: JSON.stringify({ from: who }) }, finish_reason: 'stop' }],
   usage: { prompt_tokens: 10, completion_tokens: 5 },
+});
+
+// A truncated response: HTTP 200, but the JSON is cut off mid-emit.
+const truncatedBody = () => ({
+  choices: [{ message: { content: '{"summary":"half a sen' }, finish_reason: 'length' }],
+  usage: { prompt_tokens: 10, completion_tokens: 400 },
 });
 
 const hits = { openai: [], deepseek: [] };
@@ -52,6 +58,7 @@ const srvOpenai = await listen((req, res) => {
   hits.openai.push(Date.now());
   capture('openai', req, () => {
     if (openaiMode === 'ok') return send(res, 200, okBody('openai'));
+    if (openaiMode === 'truncated') return send(res, 200, truncatedBody());
     return send(res, Number(openaiMode), { error: { message: openaiMode } });
   });
 });
@@ -59,6 +66,7 @@ const srvDeepseek = await listen((req, res) => {
   hits.deepseek.push(Date.now());
   capture('deepseek', req, () => {
     if (deepseekMode === 'ok') return send(res, 200, okBody('deepseek'));
+    if (deepseekMode === 'truncated') return send(res, 200, truncatedBody());
     return send(res, Number(deepseekMode), { error: { message: deepseekMode } });
   });
 });
@@ -187,6 +195,55 @@ test('a schemaless call is left completely alone', async () => {
   assert.equal(body.response_format, undefined);
   assert.equal(body.messages.length, 1);
 });
+
+/**
+ * Truncation and thinking mode.
+ *
+ * DeepSeek V4 reasons before answering and the chain-of-thought is billed against
+ * max_tokens. Left enabled, deepseek-v4-pro spent the entire budget reasoning about a
+ * one-line summary and never emitted JSON — the response came back HTTP 200 with
+ * finish_reason 'length', telemetry logged ok=true, and the caller just saw JSON.parse
+ * fail and fall back to a generic title. Nothing anywhere said "truncated".
+ */
+
+test('a truncated response is an error, not silently-broken JSON', async () => {
+  reset(); openaiMode = 'truncated'; deepseekMode = 'truncated';
+  await assert.rejects(() => call({ maxTokens: 400 }), /truncated at max_tokens=400/);
+});
+
+test('truncation does not retry the same provider, but does try the next', async () => {
+  // Retrying with the same budget and model truncates identically; the other provider
+  // may not reason first.
+  reset(); openaiMode = 'truncated'; deepseekMode = 'ok';
+  const r = await call({ maxTokens: 400 });
+  assert.equal(r.provider, 'deepseek');
+  assert.equal(hits.openai.length, 1, 'no pointless retry of the same budget');
+});
+
+test('thinking is DISABLED for DeepSeek by default', async () => {
+  reset(); deepseekMode = 'ok';
+  await call({ provider: 'deepseek' });
+  assert.deepEqual(bodies.deepseek[0].thinking, { type: 'disabled' });
+});
+
+test('thinking can be opted into', async () => {
+  reset(); deepseekMode = 'ok';
+  await call({ provider: 'deepseek', thinking: true });
+  assert.deepEqual(bodies.deepseek[0].thinking, { type: 'enabled' });
+});
+
+test('the thinking field is never sent to OpenAI — an unknown field is a 400', async () => {
+  reset(); openaiMode = 'ok';
+  await call({ provider: 'openai' });
+  assert.equal('thinking' in bodies.openai[0], false);
+});
+
+/**
+ * NOTE: everything below this point runs AFTER openai has been marked dead for
+ * the process by the 401 test -- that's the behaviour under test, and
+ * deadProviders is module-level by design. Tests needing a live openai must go
+ * above it.
+ */
 
 test('401 disables the provider for the process instead of retrying bad credentials', async () => {
   reset(); openaiMode = '401'; deepseekMode = 'ok';

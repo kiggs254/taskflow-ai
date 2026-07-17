@@ -235,7 +235,7 @@ const summariseDay = async (userId, repoName, commits) => {
       tier: 'smart', // runs in cron; nobody is waiting on it
       userId,
       temperature: 0.2,
-      maxTokens: 120,
+      maxTokens: 800,
       schema: {
         name: 'commit_summary',
         schema: {

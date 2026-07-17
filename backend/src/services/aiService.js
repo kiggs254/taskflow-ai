@@ -126,7 +126,7 @@ export const parseTask = async (input, provider = primaryProvider(), options = {
       tier: 'fast', // interactive path: latency is the feature
       userId,
       temperature: 0,
-      maxTokens: 400,
+      maxTokens: 800,
       schema: PARSE_TASK_SCHEMA,
       messages: [
         { role: 'system', content: renderSystemPrompt(ctx) },

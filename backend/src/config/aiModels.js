@@ -34,8 +34,13 @@ export const MODELS = {
  * `strict: true` schema enforcement, so it stays on json_object until verified.
  */
 export const CAPS = {
-  openai: { strictSchema: true, toolCalls: true },
-  deepseek: { strictSchema: false, toolCalls: true },
+  openai: { strictSchema: true, toolCalls: true, thinkingToggle: false },
+  // DeepSeek V4 has a thinking toggle, and in thinking mode the chain-of-thought is
+  // returned as `reasoning_content` -- which is billed against max_tokens. Left on,
+  // deepseek-v4-pro burns the whole budget reasoning about a one-line summary and
+  // gets truncated before it emits any JSON. Every call here is extraction or
+  // summarisation, so thinking is off unless a caller asks for it.
+  deepseek: { strictSchema: false, toolCalls: true, thinkingToggle: true },
 };
 
 /**

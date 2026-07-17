@@ -58,6 +58,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * disabled AI everywhere, with no fallback, surfacing only as degraded output.
  */
 const classify = (err) => {
+  // Retrying the same provider would truncate identically -- same budget, same model.
+  // The other provider may not reason first, so it's still worth a try.
+  if (err?.truncated) return 'no_retry';
   const status = err?.status ?? err?.response?.status;
   if (status === 401 || status === 403) return 'auth';       // provider unusable
   if (status === 429) return 'retry';                        // rate limited
@@ -153,6 +156,7 @@ const withSchemaInPrompt = (provider, messages, schema) => {
  * @param {object}  [opts.schema]     { name, schema } -> structured output
  * @param {number}  [opts.temperature]
  * @param {number}  [opts.maxTokens]
+ * @param {boolean} [opts.thinking]   let the model reason first (costs max_tokens)
  * @param {number}  [opts.userId]     for telemetry attribution
  * @returns {Promise<{content: string, provider: string, model: string, usage: object}>}
  */
@@ -164,6 +168,7 @@ export const callAI = async ({
   schema,
   temperature = 0,
   maxTokens,
+  thinking = false,
   userId = null,
 }) => {
   const chain = providerChain(provider).filter(
@@ -195,11 +200,31 @@ export const callAI = async ({
             temperature,
             ...(maxTokens ? { max_tokens: maxTokens } : {}),
             ...(schema ? { response_format: buildResponseFormat(p, schema) } : {}),
+            // Only where the provider understands it -- an unknown field is a 400.
+            ...(CAPS[p]?.thinkingToggle
+              ? { thinking: { type: thinking ? 'enabled' : 'disabled' } }
+              : {}),
           },
           // No request ever had a timeout: a hung provider would hang a cron sweep
           // indefinitely, and node-cron would happily start another one behind it.
           { signal: AbortSignal.timeout(TIMEOUT_MS[tier] ?? TIMEOUT_MS.fast) }
         );
+
+        // Truncation is silent by default and pathological to debug: the HTTP call
+        // succeeds, telemetry says ok=true, and the caller just gets JSON that won't
+        // parse. That cost three rounds of investigation for exactly one reason --
+        // deepseek-v4-pro reasoning past max_tokens before emitting any JSON.
+        // finish_reason tells us outright, so treat it as the error it is.
+        const finishReason = response.choices[0]?.finish_reason;
+        if (finishReason === 'length') {
+          const err = new Error(
+            `AI response truncated at max_tokens=${maxTokens} (${p}/${model}). ` +
+              `The output is incomplete, so it cannot be parsed. Raise maxTokens, or ` +
+              `disable thinking: reasoning tokens are billed against this budget.`
+          );
+          err.truncated = true;
+          throw err;
+        }
 
         const usage = response.usage ?? {};
         recordUsage({
@@ -228,7 +253,11 @@ export const callAI = async ({
       } catch (err) {
         lastError = err;
         const kind = classify(err);
-        const status = err?.status ?? err?.response?.status ?? err?.name;
+        // 'truncated' is worth its own code: it's the difference between "the provider
+        // rejected us" and "we asked for less room than the model needed".
+        const status = err?.truncated
+          ? 'truncated'
+          : err?.status ?? err?.response?.status ?? err?.name;
 
         recordUsage({
           userId,
