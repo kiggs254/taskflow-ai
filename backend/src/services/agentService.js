@@ -231,14 +231,17 @@ const slugify = (value) =>
  * makes the commit scanner idempotent. A re-reported session converges instead of
  * duplicating.
  */
-const rebuildDayTask = async (userId, projectSlug, workspace, dayStartMs, dayEndMs, day) => {
+const rebuildDayTask = async (userId, projectSlug, workspace, day) => {
+  // Selected by the `day` column rather than an ended_at range: `day` is the local
+  // date the work was recorded for, and it's what the unique key is on, so this can't
+  // drift from what was written.
   const sessions = (
     await query(
       `SELECT session_id, summary, started_at, ended_at
        FROM agent_sessions
-       WHERE user_id = $1 AND project_slug = $2 AND ended_at >= $3 AND ended_at < $4
+       WHERE user_id = $1 AND project_slug = $2 AND day = $3
        ORDER BY ended_at ASC`,
-      [userId, projectSlug, dayStartMs, dayEndMs]
+      [userId, projectSlug, day]
     )
   ).rows;
 
@@ -276,8 +279,8 @@ const rebuildDayTask = async (userId, projectSlug, workspace, dayStartMs, dayEnd
 
   await query(
     `UPDATE agent_sessions SET task_id = $3
-     WHERE user_id = $1 AND project_slug = $2 AND ended_at >= $4 AND ended_at < $5`,
-    [userId, projectSlug, taskId, dayStartMs, dayEndMs]
+     WHERE user_id = $1 AND project_slug = $2 AND day = $4`,
+    [userId, projectSlug, taskId, day]
   );
 
   return { taskId, sessions: sessions.length };
@@ -345,15 +348,22 @@ export const logWork = async (userId, payload) => {
 
   const summary = await summariseSession(userId, projectSlug, prompts, uncoveredPaths);
 
-  // DO UPDATE, not DO NOTHING: a session re-reports with more work than its first
-  // report (a /clear fires SessionEnd mid-session), and DO NOTHING would silently
-  // drop everything after the first fire.
+  const day = localDateString(tz, ended);
+
+  // Keyed on (user_id, session_id, day), not just session_id.
+  //
+  // A session_id is stable across resumes, and resuming an old session is the normal
+  // way to work. Keyed on session_id alone, resuming on Wednesday rewrote Monday's
+  // row and moved its ended_at -- Monday's work vanished from the ledger, its task
+  // stopped being backed by anything, and that day silently stopped counting toward
+  // the report gate. Per-day rows mean each day of a long session keeps its own
+  // record, while a /clear on the same day still updates in place.
   await query(
     `INSERT INTO agent_sessions (
-       user_id, session_id, project_slug, project_path, workspace, summary,
+       user_id, session_id, day, project_slug, project_path, workspace, summary,
        prompts, changed_paths, started_at, ended_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-     ON CONFLICT (user_id, session_id) DO UPDATE SET
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     ON CONFLICT (user_id, session_id, day) DO UPDATE SET
        summary = EXCLUDED.summary,
        prompts = EXCLUDED.prompts,
        changed_paths = EXCLUDED.changed_paths,
@@ -361,6 +371,7 @@ export const logWork = async (userId, payload) => {
     [
       userId,
       sessionId,
+      day,
       projectSlug,
       root,
       workspace,
@@ -372,15 +383,7 @@ export const logWork = async (userId, payload) => {
     ]
   );
 
-  const day = localDateString(tz, ended);
-  const rebuilt = await rebuildDayTask(
-    userId,
-    projectSlug,
-    workspace,
-    startOfLocalDayMs(tz, ended),
-    endOfLocalDayMs(tz, ended),
-    day
-  );
+  const rebuilt = await rebuildDayTask(userId, projectSlug, workspace, day);
 
   return {
     logged: true,

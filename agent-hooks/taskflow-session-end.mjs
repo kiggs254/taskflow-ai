@@ -25,6 +25,11 @@ const DIR = path.join(HOME, '.taskflow');
 const SESSIONS = path.join(DIR, 'sessions');
 const POLICY_CACHE = path.join(DIR, 'policy.json');
 const POLICY_TTL_MS = 60 * 60 * 1000;
+// A policy with no work folders means "not set up yet" — re-check often, or adding a
+// folder in Settings appears to do nothing for an hour.
+const UNCONFIGURED_TTL_MS = 2 * 60 * 1000;
+// Logs we couldn't decide on are kept for a retry, but not forever.
+const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const API = (process.env.TASKFLOW_API_URL || '').replace(/\/$/, '');
 const TOKEN = process.env.TASKFLOW_TOKEN;
@@ -49,24 +54,39 @@ const api = async (route, options = {}) => {
 };
 
 /**
- * The allowlist, cached. Fetched rarely; a stale cache is fine — worst case a new
- * work folder isn't logged until the cache expires. Failing closed (returning no
- * paths) is the safe direction: it under-reports rather than leaking.
+ * The allowlist, cached.
+ *
+ * Returns null when the policy can't be established — callers must treat that as
+ * "don't know", not "not work".
+ *
+ * An empty/disabled policy gets a much shorter TTL than a populated one. "No work
+ * folders" means the user hasn't finished setting up, which is exactly when they're
+ * about to change it — caching that for an hour meant adding a folder appeared to do
+ * nothing, and every session in the meantime was silently judged non-work.
  */
 const getPolicy = async () => {
+  const ttlFor = (p) =>
+    p?.enabled && (p.workPaths?.length ?? 0) > 0 ? POLICY_TTL_MS : UNCONFIGURED_TTL_MS;
+
+  let cached = null;
   try {
-    const stat = fs.statSync(POLICY_CACHE);
-    if (Date.now() - stat.mtimeMs < POLICY_TTL_MS) {
-      return JSON.parse(fs.readFileSync(POLICY_CACHE, 'utf8'));
-    }
+    cached = JSON.parse(fs.readFileSync(POLICY_CACHE, 'utf8'));
+    const age = Date.now() - fs.statSync(POLICY_CACHE).mtimeMs;
+    if (age < ttlFor(cached)) return cached;
   } catch {
     /* no cache yet */
   }
 
-  const policy = await api('/agent/policy');
-  fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(POLICY_CACHE, JSON.stringify(policy), { mode: 0o600 });
-  return policy;
+  try {
+    const policy = await api('/agent/policy');
+    fs.mkdirSync(DIR, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(POLICY_CACHE, JSON.stringify(policy), { mode: 0o600 });
+    return policy;
+  } catch {
+    // Backend unreachable. Fall back to a stale cache if we have one, otherwise
+    // admit we don't know rather than guessing "not work" and destroying the log.
+    return cached;
+  }
 };
 
 /**
@@ -116,8 +136,16 @@ const main = async () => {
   // necessarily the project root. CLAUDE_PROJECT_DIR is the documented way to get it.
   const projectDir = process.env.CLAUDE_PROJECT_DIR || input.cwd;
 
+  let decided = false; // did we reach a confident conclusion about this session?
   try {
     const policy = await getPolicy();
+
+    // Couldn't establish the policy (backend down, no cache). Keep the log and try
+    // again next time -- deleting it here would silently destroy the session on a
+    // transient error, which is exactly how a real session was lost to a stale cache.
+    if (!policy) return;
+
+    decided = true;
 
     // THE PRIVACY GATE. Everything below this line only runs for work folders.
     const rule = policy.enabled === false ? null : matchWorkPath(projectDir, policy.workPaths || []);
@@ -170,12 +198,26 @@ const main = async () => {
       }),
     });
   } finally {
-    // Always clean up, including for personal sessions that returned early — their
-    // prompts should not sit on disk in our directory.
+    // Only discard the log once we actually decided. A confident "not work" should
+    // delete it (a personal session's prompts shouldn't linger here); an *undecided*
+    // session must keep it, or a transient backend blip silently destroys real work.
+    if (decided) {
+      try {
+        fs.unlinkSync(logFile);
+      } catch {
+        /* already gone */
+      }
+    }
+
+    // Undecided logs would otherwise accumulate forever if the backend stays down.
     try {
-      fs.unlinkSync(logFile);
+      const now = Date.now();
+      for (const f of fs.readdirSync(SESSIONS)) {
+        const p = path.join(SESSIONS, f);
+        if (now - fs.statSync(p).mtimeMs > LOG_MAX_AGE_MS) fs.unlinkSync(p);
+      }
     } catch {
-      /* already gone */
+      /* best effort */
     }
   }
 };
