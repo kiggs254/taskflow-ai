@@ -242,7 +242,18 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
 
     const parsed = JSON.parse(content);
     const summary = typeof parsed?.summary === 'string' ? parsed.summary.trim() : '';
-    if (!summary) return fallback;
+
+    if (!summary) {
+      // The call succeeded but the shape is wrong -- the single hardest failure to
+      // diagnose here, because telemetry records ok=true and the only symptom is a
+      // generic title. Say exactly what came back instead of silently degrading.
+      console.error(
+        'Agent: model returned no `summary` field; falling back. ' +
+          `Keys received: [${Object.keys(parsed ?? {}).join(', ') || 'none'}]. ` +
+          `Raw (first 300): ${String(content).slice(0, 300)}`
+      );
+      return fallback;
+    }
 
     const items = Array.isArray(parsed?.items)
       ? parsed.items.filter((i) => typeof i === 'string' && i.trim()).map((i) => i.trim().slice(0, 120)).slice(0, 6)

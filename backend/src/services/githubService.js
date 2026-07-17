@@ -262,8 +262,18 @@ const summariseDay = async (userId, repoName, commits) => {
       ],
     });
 
-    const summary = JSON.parse(content)?.summary;
-    if (!summary || typeof summary !== 'string') return fallback;
+    const parsed = JSON.parse(content);
+    const summary = parsed?.summary;
+    if (!summary || typeof summary !== 'string') {
+      // Succeeded but wrong shape. Without this the only symptom is a task titled
+      // "repo — N commits" while telemetry cheerfully reports ok=true.
+      console.error(
+        'GitHub: model returned no `summary` field; falling back. ' +
+          `Keys received: [${Object.keys(parsed ?? {}).join(', ') || 'none'}]. ` +
+          `Raw (first 300): ${String(content).slice(0, 300)}`
+      );
+      return fallback;
+    }
     return `${repoName} — ${summary.trim().slice(0, 70)}`;
   } catch (error) {
     // A summary is a nicety; never lose the commit record over it.
