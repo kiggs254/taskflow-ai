@@ -23,9 +23,18 @@ interface ApiToken {
 
 const WORKSPACES = ['job', 'freelance', 'personal'];
 
-// Shown in the setup snippet so the user can copy a working value rather than
-// guess their own backend URL.
-const apiOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+// The backend base URL, for the setup snippet.
+//
+// Must come from VITE_API_BASE_URL, not window.location.origin: the frontend is on
+// Netlify and the API is on a different host entirely. Using the page origin
+// produced a URL that *looks* right and returns HTTP 200 for everything, because
+// Netlify's SPA fallback serves index.html for /api/* -- so the hook would silently
+// parse HTML as JSON and never log a thing.
+const apiBase = (() => {
+  const configured = process.env.VITE_API_BASE_URL;
+  if (!configured) return '';
+  return configured.endsWith('/api') ? configured : `${configured.replace(/\/$/, '')}/api`;
+})();
 
 export const AgentSettings: React.FC<AgentSettingsProps> = ({ token }) => {
   const [enabled, setEnabled] = useState(true);
@@ -263,7 +272,7 @@ export const AgentSettings: React.FC<AgentSettingsProps> = ({ token }) => {
           <div className="mt-3 text-xs text-slate-400 space-y-2">
             <p>1. Add to your shell profile:</p>
             <pre className="bg-slate-900 rounded p-2.5 overflow-x-auto text-slate-300">
-              {`export TASKFLOW_API_URL=${apiOrigin}/api\nexport TASKFLOW_TOKEN=tf_...`}
+              {`export TASKFLOW_API_URL=${apiBase || 'https://your-backend/api'}\nexport TASKFLOW_TOKEN=tf_...`}
             </pre>
             <p>2. Copy the hooks and register them:</p>
             <pre className="bg-slate-900 rounded p-2.5 overflow-x-auto text-slate-300">{`cp agent-hooks/*.mjs ~/.claude/hooks/
