@@ -99,9 +99,9 @@ const recordUsage = (row) => {
 
 const buildResponseFormat = (provider, schema) => {
   if (!schema) return undefined;
-  // Only OpenAI guarantees the response matches the schema (`strict: true`).
-  // DeepSeek documents JSON output but not schema enforcement, so it gets
-  // json_object and the caller's validator does the real work.
+  // Only OpenAI enforces the schema server-side (`strict: true`). DeepSeek's
+  // json_object mode guarantees *valid JSON*, not *this* JSON -- see
+  // withSchemaInPrompt for how the shape gets conveyed instead.
   if (CAPS[provider]?.strictSchema) {
     return {
       type: 'json_schema',
@@ -109,6 +109,39 @@ const buildResponseFormat = (provider, schema) => {
     };
   }
   return { type: 'json_object' };
+};
+
+/**
+ * Put the schema in the prompt for providers that don't enforce it.
+ *
+ * This is not a nicety. Under `json_object` the model is only told "emit JSON" --
+ * never which fields. It happily returns valid JSON with its own key names, the
+ * caller reads `parsed.summary` (or `.title`, `.energy`...), gets undefined, and
+ * silently falls back to a default. That failure is invisible: the API call
+ * succeeds, telemetry records ok=true, and the only symptom is mysteriously generic
+ * output -- e.g. commit tasks titled "repo — N commits" while every rollup call
+ * reported success.
+ *
+ * DeepSeek's own JSON-mode docs require the word "json" in the prompt and recommend
+ * showing the expected shape; this does both.
+ */
+const withSchemaInPrompt = (provider, messages, schema) => {
+  if (!schema || CAPS[provider]?.strictSchema) return messages;
+
+  const instruction =
+    `\n\nRespond with a json object matching this exact schema. Use these exact ` +
+    `field names, and include every required field:\n${JSON.stringify(schema.schema)}`;
+
+  const systemIndex = messages.findIndex((m) => m.role === 'system');
+  if (systemIndex === -1) {
+    return [{ role: 'system', content: instruction.trim() }, ...messages];
+  }
+
+  // Appended to the system message rather than added as a new one: DeepSeek's prompt
+  // cache keys on the message prefix, and inserting a message would shift it.
+  return messages.map((m, i) =>
+    i === systemIndex ? { ...m, content: m.content + instruction } : m
+  );
 };
 
 /**
@@ -156,7 +189,9 @@ export const callAI = async ({
         const response = await clients[p].chat.completions.create(
           {
             model,
-            messages,
+            // Per-provider: only providers that can't enforce the schema get told
+            // about it in the prompt.
+            messages: withSchemaInPrompt(p, messages, schema),
             temperature,
             ...(maxTokens ? { max_tokens: maxTokens } : {}),
             ...(schema ? { response_format: buildResponseFormat(p, schema) } : {}),

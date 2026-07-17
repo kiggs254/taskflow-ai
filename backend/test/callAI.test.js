@@ -29,6 +29,7 @@ const okBody = (who) => ({
 });
 
 const hits = { openai: [], deepseek: [] };
+const bodies = { openai: [], deepseek: [] };
 let openaiMode = 'ok';
 let deepseekMode = 'ok';
 
@@ -37,15 +38,29 @@ const send = (res, code, body) => {
   res.end(JSON.stringify(body));
 };
 
+// Capture the request body: what we actually send is the thing worth asserting on.
+const capture = (who, req, then) => {
+  let raw = '';
+  req.on('data', (c) => (raw += c));
+  req.on('end', () => {
+    try { bodies[who].push(JSON.parse(raw)); } catch { /* ignore */ }
+    then();
+  });
+};
+
 const srvOpenai = await listen((req, res) => {
   hits.openai.push(Date.now());
-  if (openaiMode === 'ok') return send(res, 200, okBody('openai'));
-  return send(res, Number(openaiMode), { error: { message: openaiMode } });
+  capture('openai', req, () => {
+    if (openaiMode === 'ok') return send(res, 200, okBody('openai'));
+    return send(res, Number(openaiMode), { error: { message: openaiMode } });
+  });
 });
 const srvDeepseek = await listen((req, res) => {
   hits.deepseek.push(Date.now());
-  if (deepseekMode === 'ok') return send(res, 200, okBody('deepseek'));
-  return send(res, Number(deepseekMode), { error: { message: deepseekMode } });
+  capture('deepseek', req, () => {
+    if (deepseekMode === 'ok') return send(res, 200, okBody('deepseek'));
+    return send(res, Number(deepseekMode), { error: { message: deepseekMode } });
+  });
 });
 
 const envMod = await import('../src/config/env.js');
@@ -56,7 +71,17 @@ process.env.OPENAI_BASE_URL = `http://127.0.0.1:${srvOpenai.address().port}/v1`;
 
 const { callAI } = await import('../src/services/ai/callAI.js');
 const call = (o = {}) => callAI({ taskKind: 'test', messages: [{ role: 'user', content: 'hi' }], ...o });
-const reset = () => { hits.openai = []; hits.deepseek = []; };
+const reset = () => { hits.openai = []; hits.deepseek = []; bodies.openai = []; bodies.deepseek = []; };
+
+const SCHEMA = {
+  name: 'thing',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['summary'],
+    properties: { summary: { type: 'string' } },
+  },
+};
 
 test.after(() => { srvOpenai.close(); srvDeepseek.close(); });
 
@@ -103,6 +128,64 @@ test('5xx retries then falls back', async () => {
 test('throws when every provider is down', async () => {
   reset(); openaiMode = '500'; deepseekMode = '500';
   await assert.rejects(() => call());
+});
+
+/**
+ * Structured output. The bug these guard against was invisible in production: the
+ * API call succeeded, telemetry said ok=true, and the only symptom was inexplicably
+ * generic output, because the model was never told what fields to emit and the
+ * caller read `undefined` off valid-but-differently-shaped JSON.
+ */
+
+test('OpenAI gets the schema enforced server-side via json_schema', async () => {
+  reset(); openaiMode = 'ok';
+  await call({ provider: 'openai', schema: SCHEMA });
+  const body = bodies.openai[0];
+  assert.equal(body.response_format.type, 'json_schema');
+  assert.equal(body.response_format.json_schema.strict, true);
+  assert.deepEqual(body.response_format.json_schema.schema, SCHEMA.schema);
+  // It's enforced, so don't waste prompt tokens restating it.
+  assert.ok(!JSON.stringify(body.messages).includes('exact schema'));
+});
+
+test('DeepSeek is TOLD the schema, since json_object only guarantees valid JSON', async () => {
+  reset(); deepseekMode = 'ok';
+  await call({ provider: 'deepseek', schema: SCHEMA, messages: [
+    { role: 'system', content: 'You summarise.' },
+    { role: 'user', content: 'go' },
+  ]});
+  const body = bodies.deepseek[0];
+  assert.equal(body.response_format.type, 'json_object');
+
+  const system = body.messages.find((m) => m.role === 'system').content;
+  // The field name has to reach the model, or the caller reads undefined and
+  // silently falls back to a default.
+  assert.ok(system.includes('summary'), 'schema field names must be in the prompt');
+  assert.ok(system.includes('You summarise.'), 'original system prompt preserved');
+  // DeepSeek's JSON mode requires the literal word "json" in the prompt.
+  assert.ok(/json/i.test(system));
+});
+
+test('the schema is appended to the existing system message, not prepended as a new one', async () => {
+  // DeepSeek's prompt cache keys on the message prefix; inserting a message would
+  // shift it and lose the cache on every call.
+  reset(); deepseekMode = 'ok';
+  await call({ provider: 'deepseek', schema: SCHEMA, messages: [
+    { role: 'system', content: 'STABLE PREFIX' },
+    { role: 'user', content: 'go' },
+  ]});
+  const msgs = bodies.deepseek[0].messages;
+  assert.equal(msgs.length, 2, 'no extra message inserted');
+  assert.equal(msgs[0].role, 'system');
+  assert.ok(msgs[0].content.startsWith('STABLE PREFIX'), 'prefix must stay first');
+});
+
+test('a schemaless call is left completely alone', async () => {
+  reset(); deepseekMode = 'ok';
+  await call({ provider: 'deepseek', messages: [{ role: 'user', content: 'hi' }] });
+  const body = bodies.deepseek[0];
+  assert.equal(body.response_format, undefined);
+  assert.equal(body.messages.length, 1);
 });
 
 test('401 disables the provider for the process instead of retrying bad credentials', async () => {
