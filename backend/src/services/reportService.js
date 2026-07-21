@@ -112,7 +112,21 @@ export const getCompletedToday = async (
      ) ag ON true
      WHERE t.user_id = $1
        AND (
-         (t.status = 'done' AND t.completed_at >= $2 AND t.completed_at < $3)
+         (
+           t.status = 'done' AND t.completed_at >= $2 AND t.completed_at < $3
+           -- ...but only for tasks that carry NO per-subtask timestamps. Integration
+           -- day-tasks (GitHub, agent) accrete: completed_at advances to the latest
+           -- commit/session all day, so a task reported at 16:30 re-qualifies the next
+           -- day the moment one more commit lands -- and drags every already-reported
+           -- subtask back in with it. Those tasks qualify below, on their immutable
+           -- per-subtask timestamps, which partition time cleanly.
+           AND NOT EXISTS (
+             SELECT 1 FROM jsonb_array_elements(
+               CASE WHEN jsonb_typeof(t.subtasks) = 'array' THEN t.subtasks ELSE '[]'::jsonb END
+             ) st2
+             WHERE (st2->>'completedAt') ~ '^[0-9]+$'
+           )
+         )
          OR EXISTS (
            SELECT 1 FROM jsonb_array_elements(
              CASE WHEN jsonb_typeof(t.subtasks) = 'array' THEN t.subtasks ELSE '[]'::jsonb END
@@ -127,15 +141,40 @@ export const getCompletedToday = async (
     [userId, windowStart, windowEnd]
   );
 
+  // A subtask's completedAt as a number, or null if it doesn't carry one.
+  const numAt = (s) => {
+    const v = s?.completedAt;
+    if (typeof v === 'number') return v;
+    return /^[0-9]+$/.test(String(v)) ? Number(v) : null;
+  };
+
   const items = [];
   for (const row of result.rows) {
     const subtasks = Array.isArray(row.subtasks) ? row.subtasks : [];
+    const timestamped = subtasks.filter((s) => s.completed && numAt(s) !== null);
 
-    if (subtasks.length > 0) {
-      const done = subtasks.filter((s) => s.completed);
-      if (done.length === 0) continue; // nothing actually progressed
-      // Show every subtask, not just the completed ones: a half-finished task should
-      // read as progress, not as a shorter finished task.
+    if (timestamped.length > 0) {
+      // Show ONLY the subtasks completed in this window, not all of them.
+      //
+      // This is the fix for the same commits appearing in consecutive reports. The
+      // parent task is a mutable daily aggregate whose completed_at keeps advancing,
+      // but each subtask's completedAt is the immutable commit/session time, and the
+      // windows partition time -- so every subtask lands in exactly one report.
+      // Showing all subtasks re-sent yesterday's work every time a new commit extended
+      // the task into today.
+      const inWindow = timestamped.filter((s) => {
+        const t = numAt(s);
+        return t >= windowStart && t < windowEnd;
+      });
+      if (inWindow.length === 0) continue; // its in-window work was already reported
+      items.push({ ...row, subtasks: inWindow });
+    } else if (subtasks.length > 0) {
+      // Subtasks without timestamps: a hand-made task. Fall back to task-level
+      // completion and show all of them, preserving the manual-task reading (a
+      // half-finished task shows as progress, not a shorter finished one).
+      const completedInWindow =
+        row.status === 'done' && row.completedAt >= windowStart && row.completedAt < windowEnd;
+      if (!completedInWindow) continue;
       items.push({ ...row, subtasks });
     } else {
       const completedInWindow =
