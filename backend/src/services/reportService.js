@@ -1,5 +1,8 @@
+import crypto from 'crypto';
 import { query } from '../config/database.js';
 import { DEFAULT_TIMEZONE, startOfLocalDayMs, localDateString, isValidTimezone } from '../utils/time.js';
+import { callAI } from './ai/callAI.js';
+import { truncateAtWord } from '../utils/text.js';
 
 /**
  * "What did I finish today", server-side.
@@ -213,6 +216,123 @@ export const getCompletedToday = async (
       subtasks: items.reduce((n, i) => n + i.subtasks.filter((s) => s.completed).length, 0),
     },
   };
+};
+
+/**
+ * Split a "project — outcome" task title. Titles are built this way upstream (GitHub
+ * and agent summaries both), so the project is the bold anchor and the outcome the
+ * prose.
+ */
+export const splitProjectTitle = (title) => {
+  const raw = String(title ?? '').trim();
+  const i = raw.indexOf(' — ');
+  if (i === -1) return { project: raw, outcome: '' };
+  return { project: raw.slice(0, i).trim(), outcome: raw.slice(i + 3).trim() };
+};
+
+const NARRATIVE_SCHEMA = {
+  name: 'day_narrative',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['narrative'],
+    properties: {
+      narrative: {
+        type: 'string',
+        description:
+          'One or two short past-tense sentences telling the story of what was done ' +
+          'in this project, in plain language a non-technical teammate understands. ' +
+          'No bullet points, no commit prefixes like feat()/fix(), no file names.',
+      },
+    },
+  },
+};
+
+// Same narrative for the same commits, so opening the preview repeatedly and then the
+// real send don't each re-bill a smart-tier call. Content-addressed: identical
+// subtask sets hash the same. Bounded so it can't grow without limit in a long-lived
+// process.
+const narrativeCache = new Map();
+const NARRATIVE_CACHE_MAX = 500;
+
+const narrateItem = async (userId, item) => {
+  const { project, outcome } = splitProjectTitle(item.title);
+  const lines = (item.subtasks || [])
+    .filter((s) => s.completed && s.title)
+    .map((s) => String(s.title).trim());
+
+  // Fallback is the existing AI day-summary's outcome (or the whole title). Never
+  // invent a story; if there's nothing to summarise or the model is down, show what
+  // we already have.
+  const fallback = outcome || String(item.title ?? '').trim();
+  if (!lines.length) return fallback;
+
+  const key = crypto
+    .createHash('sha256')
+    .update(`${project}\n${lines.join('\n')}`)
+    .digest('hex');
+  if (narrativeCache.has(key)) return narrativeCache.get(key);
+
+  let narrative = fallback;
+  try {
+    const { content } = await callAI({
+      taskKind: 'report_narrative',
+      tier: 'smart',
+      userId,
+      temperature: 0.3,
+      maxTokens: 400,
+      schema: NARRATIVE_SCHEMA,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write one short daily-standup paragraph for a single project. Given ' +
+            'the commits made in one work session, tell the story of what was ' +
+            'accomplished and why it matters, in one or two plain past-tense sentences ' +
+            'a teammate who does not read code can follow. Group related commits into ' +
+            'the same thread of work. Do not list the commits, do not keep prefixes ' +
+            'like feat()/fix()/chore(), no bullet points, no markdown, no file names. ' +
+            'Keep it short. Return json.',
+        },
+        {
+          role: 'user',
+          content: `Project: ${project}\n\nCommits in this session:\n${lines
+            .map((l) => `- ${l}`)
+            .join('\n')}`,
+        },
+      ],
+    });
+    const parsed = JSON.parse(content);
+    const n = typeof parsed?.narrative === 'string' ? parsed.narrative.trim() : '';
+    if (n) narrative = truncateAtWord(n, 400);
+  } catch (error) {
+    console.error(`Report narrative failed for "${project}", using fallback:`, error.message);
+  }
+
+  if (narrativeCache.size >= NARRATIVE_CACHE_MAX) {
+    narrativeCache.delete(narrativeCache.keys().next().value);
+  }
+  narrativeCache.set(key, narrative);
+  return narrative;
+};
+
+/**
+ * Attach a `project` and an AI-written `narrative` to every report item, in place.
+ *
+ * Separate from getCompletedToday, which stays pure SQL: this is the one place AI
+ * touches the report, and both the 16:30 send and the Settings preview call it so the
+ * preview shows exactly what will be sent. Items are narrated concurrently, and a
+ * failure on one never rejects the batch -- narrateItem swallows its own errors.
+ */
+export const attachNarratives = async (report, userId) => {
+  await Promise.all(
+    (report.items || []).map(async (item) => {
+      const { project } = splitProjectTitle(item.title);
+      item.project = project;
+      item.narrative = await narrateItem(userId, item);
+    })
+  );
+  return report;
 };
 
 /**

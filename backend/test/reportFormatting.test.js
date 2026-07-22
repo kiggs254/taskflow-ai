@@ -62,40 +62,37 @@ test('weekdays are not skipped', () => {
   assert.equal(localDayOfWeek('Africa/Nairobi', mon), 1, 'Monday');
 });
 
-test('a subtask that merely restates the task title is dropped', async () => {
+test('the project shows a narrative paragraph, not a checklist of raw commits', async () => {
   const { buildDailySummaryMessage } = await import('../src/services/slackService.js');
-  // Exactly what a fallback summary produced: the one line became the title AND its
-  // only subtask, so the reader saw the same sentence twice with a tick next to it.
   const { blocks } = buildDailySummaryMessage('Newton', [
     {
-      title: 'Payment-plan-application-form — updated 2 files',
-      subtasks: [{ title: 'Payment-plan-application-form — updated 2 files', completed: true }],
+      title: 'hotpoint-front — WhatsApp orders and checkout fixes',
+      project: 'hotpoint-front',
+      narrative: 'Wired up paid WhatsApp orders and steadied the checkout and stock flows.',
+      subtasks: [
+        { title: 'feat(orders): receive paid WhatsApp orders over the partner API', completed: true },
+        { title: 'fix(checkout): stop Shopify availableForSale blocking orders', completed: true },
+      ],
     },
-  ], '2026-07-17');
+  ], '2026-07-22');
 
-  const section = blocks.find((b) => b.type === 'section');
-  const occurrences = section.text.text.split('updated 2 files').length - 1;
-  assert.equal(occurrences, 1, 'the same sentence must not appear twice');
+  const body = blocks.find((b) => b.type === 'section').text.text;
+  assert.ok(body.startsWith('*hotpoint-front*'), 'project is the bold anchor');
+  assert.ok(body.includes('Wired up paid WhatsApp orders'), 'the narrative is shown');
+  assert.ok(!body.includes('feat(orders)'), 'raw commit subjects are not listed');
+  assert.ok(!body.includes('✅') && !body.includes('✓'), 'no checkmarks');
 });
 
-test('the project is separated from the outcome so a scan reads as a list of projects', async () => {
+test('with no narrative it falls back to the title outcome rather than showing commits', async () => {
   const { buildDailySummaryMessage } = await import('../src/services/slackService.js');
   const { blocks } = buildDailySummaryMessage('Newton', [
-    { title: 'hotpoint-front — Fixed the checkout dead-end', subtasks: [{ title: 'fix(checkout): stale date', completed: true }] },
+    { title: 'hotpoint-front — Fixed the checkout dead-end', subtasks: [{ title: 'fix(checkout): x', completed: true }] },
   ], '2026-07-17');
 
-  const section = blocks.find((b) => b.type === 'section');
-  assert.ok(section.text.text.startsWith('*hotpoint-front*'), 'project is the bold anchor');
-  assert.ok(section.text.text.includes('Fixed the checkout dead-end'), 'outcome reads as prose beneath it');
-});
-
-test('long subtask lists are capped and the remainder is disclosed, not silently dropped', async () => {
-  const { buildDailySummaryMessage } = await import('../src/services/slackService.js');
-  const subtasks = Array.from({ length: 14 }, (_, i) => ({ title: `Commit number ${i}`, completed: true }));
-  const { blocks } = buildDailySummaryMessage('Newton', [{ title: 'taskflow-ai — Lots', subtasks }], '2026-07-17');
-
-  const section = blocks.find((b) => b.type === 'section');
-  assert.ok(section.text.text.includes('and 6 more'), 'the reader must be told what was hidden');
+  const body = blocks.find((b) => b.type === 'section').text.text;
+  assert.ok(body.startsWith('*hotpoint-front*'));
+  assert.ok(body.includes('Fixed the checkout dead-end'), 'outcome stands in for a missing narrative');
+  assert.ok(!body.includes('fix(checkout)'), 'still no raw commits');
 });
 
 test('the message stays inside Slacks 50-block cap', async () => {
@@ -112,8 +109,9 @@ test('the message stays inside Slacks 50-block cap', async () => {
 
 test('every section stays inside Slacks 3000-char per-section limit', async () => {
   const { buildDailySummaryMessage } = await import('../src/services/slackService.js');
-  const subtasks = Array.from({ length: 8 }, () => ({ title: 'x'.repeat(300), completed: true }));
-  const { blocks } = buildDailySummaryMessage('Newton', [{ title: 'big — one', subtasks }], '2026-07-17');
+  const { blocks } = buildDailySummaryMessage('Newton', [
+    { title: 'big — one', project: 'big', narrative: 'x'.repeat(4000), subtasks: [] },
+  ], '2026-07-17');
   for (const b of blocks.filter((x) => x.type === 'section')) {
     assert.ok(b.text.text.length <= 3000, `section is ${b.text.text.length} chars`);
   }
@@ -127,20 +125,23 @@ test('the header is plain_text, since Slack renders no mrkdwn there', async () =
   assert.ok(!header.text.text.includes('*'), 'a literal asterisk would be shown to the user');
 });
 
-test('identifiers with underscores are not wrapped in Slack italics markup', async () => {
+test('a narrative with underscores is not wrapped in Slack italics markup', async () => {
   const { buildDailySummaryMessage } = await import('../src/services/slackService.js');
-  // Slack mrkdwn has no escape character. Wrapping an outcome in _italics_ when the
-  // outcome itself contains AI_PRIMARY_PROVIDER or migrate_all.sql hands the parser
-  // four underscores to pair up, and it renders something nobody wrote.
+  // Slack mrkdwn has no escape character. Wrapping a narrative in _italics_ when it
+  // contains AI_PRIMARY_PROVIDER or migrate_all.sql hands the parser four underscores
+  // to pair up, and it renders something nobody wrote. Only the project name (ours) is
+  // marked up.
   const { blocks } = buildDailySummaryMessage('Newton', [
     {
-      title: 'taskflow-ai — Fix repo list, and honour AI_PRIMARY_PROVIDER',
-      subtasks: [{ title: 'Add consolidated migrate_all.sql', completed: true }],
+      title: 'taskflow-ai — infra work',
+      project: 'taskflow-ai',
+      narrative: 'Fixed the repo list and made the app honour AI_PRIMARY_PROVIDER; added migrate_all.sql.',
+      subtasks: [],
     },
   ], '2026-07-17');
 
   const body = blocks.find((b) => b.type === 'section').text.text;
   assert.ok(body.includes('AI_PRIMARY_PROVIDER'), 'the identifier survives intact');
   assert.ok(body.includes('migrate_all.sql'), 'the filename survives intact');
-  assert.ok(!/_Fix repo list/.test(body), 'the outcome must not be wrapped in italics markup');
+  assert.ok(!/\n_/.test(body), 'the narrative line must not open with italics markup');
 });

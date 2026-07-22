@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { query } from '../config/database.js';
 import {
   getCompletedToday,
+  attachNarratives,
   claimReportDay,
   releaseReportDay,
 } from '../services/reportService.js';
@@ -42,6 +43,10 @@ export const sendReportForUser = async (userId, settings, { force = false, atMs 
   if (report.items.length === 0) {
     return { sent: false, reason: 'nothing_completed' };
   }
+
+  // Turn each project's commits into a short narrative before rendering. After the
+  // gate and the empty check, so a report that won't send never pays for AI.
+  await attachNarratives(report, userId);
 
   const results = {};
 

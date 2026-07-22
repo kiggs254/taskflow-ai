@@ -636,13 +636,19 @@ export const updateSlackSettings = async (userId, settings) => {
  * Pure and exported so it can be tested without a Slack workspace: the only way to
  * check the old one was to post to a real channel and look.
  *
+ * Each project is one short narrative paragraph, not a checklist of raw commit
+ * subjects. The per-commit list was noise -- `fix(vendor-portal): order detail
+ * selected wrong Order column` means nothing to a teammate -- so the report now tells
+ * the story of the day per project instead, and drops the row of green ticks.
+ *
  * @param {string} userName
- * @param {Array}  tasks     report items, each { title, subtasks[] }
+ * @param {Array}  tasks     report items, each { title, project?, narrative?, subtasks[] }
  * @param {string} dateText
  */
 export const buildDailySummaryMessage = (userName, tasks = [], dateText = '') => {
-  // Titles are built as "project — what happened" upstream. Splitting lets the project
-  // carry the visual weight and the outcome read as prose beneath it.
+  // Titles are built as "project — what happened" upstream. project/narrative are
+  // attached by attachNarratives; fall back to splitting the title if they're absent
+  // (e.g. a caller that didn't narrate).
   const splitTitle = (title) => {
     const raw = String(title ?? '').trim();
     const i = raw.indexOf(' — ');
@@ -667,7 +673,7 @@ export const buildDailySummaryMessage = (userName, tasks = [], dateText = '') =>
         {
           type: 'mrkdwn',
           text: `*${tasks.length}* ${tasks.length === 1 ? 'project' : 'projects'}${
-            totalItems ? ` · *${totalItems}* completed` : ''
+            totalItems ? ` · *${totalItems}* update${totalItems === 1 ? '' : 's'}` : ''
           }`,
         },
       ],
@@ -675,38 +681,20 @@ export const buildDailySummaryMessage = (userName, tasks = [], dateText = '') =>
     { type: 'divider' },
   ];
 
-  // Slack hard-caps a message at 50 blocks and silently rejects more. Two blocks are
-  // spent per project plus the three above, so cap and say so rather than have Slack
-  // drop the tail with no explanation.
-  const MAX_PROJECTS = 20;
+  // One block per project now, plus the three above, so the 50-block cap is far off;
+  // still bounded and disclosed rather than letting Slack silently drop the tail.
+  const MAX_PROJECTS = 25;
   const shown = tasks.slice(0, MAX_PROJECTS);
 
   for (const t of shown) {
-    const { project, outcome } = splitTitle(t.title);
-    const subtasks = Array.isArray(t.subtasks) ? t.subtasks : [];
+    const { project: splitProject, outcome } = splitTitle(t.title);
+    const project = t.project || splitProject;
 
-    // Drop a subtask that just restates the title. That happens whenever a session
-    // summary fell back: the one line became title, sole subtask and description at
-    // once, so the reader saw the same sentence twice with a tick next to it.
-    const meaningful = subtasks.filter((st) => {
-      const s = String(st.title ?? '').trim();
-      return s && s !== String(t.title ?? '').trim() && s !== outcome;
-    });
-
-    const MAX_ITEMS = 8;
-    const lines = meaningful.slice(0, MAX_ITEMS).map((st) => {
-      const mark = st.completed ? '✅' : '⬜';
-      return `${mark} ${truncateAtWord(st.title, 160)}`;
-    });
-    if (meaningful.length > MAX_ITEMS) {
-      lines.push(`…and ${meaningful.length - MAX_ITEMS} more`);
-    }
-
-    // The outcome is NOT wrapped in _italics_. Slack's mrkdwn has no escape, and these
-    // strings are full of identifiers: `_honour AI_PRIMARY_PROVIDER_` gives the parser
-    // four underscores to pair up and it renders something nobody wrote. The bold
-    // project above it already carries the hierarchy.
-    const body = [outcome || null, lines.join('\n') || null].filter(Boolean).join('\n');
+    // The narrative is plain prose and is NOT wrapped in any mrkdwn: Slack has no
+    // escape character, and these paragraphs are full of identifiers (AI_PRIMARY_PROVIDER,
+    // migrate_all.sql) that italics/bold markup would mangle. Only the project name,
+    // which we control, is bold. Fall back to the title's outcome if not narrated.
+    const body = (t.narrative && String(t.narrative).trim()) || outcome || '';
 
     blocks.push({
       type: 'section',
@@ -728,7 +716,7 @@ export const buildDailySummaryMessage = (userName, tasks = [], dateText = '') =>
   // The notification fallback: one line, since this is what shows on a lock screen.
   const text = `${userName} — ${dateText}: ${tasks.length} ${
     tasks.length === 1 ? 'project' : 'projects'
-  }${totalItems ? `, ${totalItems} completed` : ''}`;
+  }${totalItems ? `, ${totalItems} update${totalItems === 1 ? '' : 's'}` : ''}`;
 
   return { blocks, text };
 };

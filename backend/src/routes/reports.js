@@ -1,7 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { getCompletedToday, getReportSettings, updateReportSettings } from '../services/reportService.js';
+import { getCompletedToday, attachNarratives, getReportSettings, updateReportSettings } from '../services/reportService.js';
 import { sendReportForUser } from '../jobs/dailyReport.js';
 
 const router = express.Router();
@@ -31,6 +31,8 @@ router.get('/completed-today', asyncHandler(async (req, res) => {
     timezone: req.query.tz || settings.timezone,
     since: settings.last_sent_at ?? null,
   });
+  // Same narratives the real send renders, so the preview is faithful.
+  await attachNarratives(report, req.user.id);
   res.json(report);
 }));
 

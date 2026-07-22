@@ -105,21 +105,20 @@ export const sendDailyReportEmail = async (to, report) => {
   const { date, items, counts, commitCount } = report;
   const subject = `Your day: ${counts.tasks} task${counts.tasks === 1 ? '' : 's'} completed — ${date}`;
 
+  // One short narrative per project, not a checklist of raw commit subjects. project
+  // and narrative are attached by attachNarratives; fall back to the title if a caller
+  // didn't narrate.
   const renderItem = (item) => {
-    const subs = (item.subtasks || [])
-      .map(
-        (s) =>
-          `<li style="color:${s.completed ? '#333' : '#999'};">${s.completed ? '✓' : '○'} ${escapeHtml(s.title)}</li>`
-      )
-      .join('');
+    const project = item.project || item.title;
+    const narrative = (item.narrative && String(item.narrative).trim()) || '';
 
     return `
       <div style="padding:12px 0;border-bottom:1px solid #eee;">
         <div style="font-weight:600;color:#333;">
-          ${escapeHtml(item.title)}
+          ${escapeHtml(project)}
           ${item.fromCommits ? '<span style="background:#eef2ff;color:#4f46e5;font-size:11px;padding:2px 6px;border-radius:4px;margin-left:6px;">code</span>' : ''}
         </div>
-        ${subs ? `<ul style="margin:8px 0 0;padding-left:20px;font-size:14px;">${subs}</ul>` : ''}
+        ${narrative ? `<div style="margin:4px 0 0;font-size:14px;color:#555;">${escapeHtml(narrative)}</div>` : ''}
       </div>`;
   };
 
@@ -150,12 +149,12 @@ export const sendDailyReportEmail = async (to, report) => {
   const text =
     `Daily report — ${date}\n\n` +
     items
-      .map(
-        (i) =>
-          `- ${i.title}` +
-          (i.subtasks || []).map((s) => `\n    ${s.completed ? '[x]' : '[ ]'} ${s.title}`).join('')
-      )
-      .join('\n');
+      .map((i) => {
+        const project = i.project || i.title;
+        const narrative = (i.narrative && String(i.narrative).trim()) || '';
+        return `- ${project}${narrative ? `\n    ${narrative}` : ''}`;
+      })
+      .join('\n\n');
 
   return sendEmail({ to, subject, html, text });
 };
