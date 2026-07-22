@@ -384,11 +384,11 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
       const task = {
         id: taskId,
         title,
-        description:
-          `${repoName} — ${dayCommits.length} commit${dayCommits.length > 1 ? 's' : ''} on ${day}\n\n` +
-          dayCommits
-            .map((c) => `- ${c.message.split('\n')[0]}${c.html_url ? ` (${c.html_url})` : ''}`)
-            .join('\n'),
+        // One concise line, not a second copy of every commit. The subtasks below
+        // already list every commit message; repeating them here -- each trailed by a
+        // raw https://github.com/... URL that renders as a wall of text -- just showed
+        // the same 14 messages twice. Commit links are kept on the subtasks instead.
+        description: `${dayCommits.length} commit${dayCommits.length > 1 ? 's' : ''} to ${repoName} on ${day}.`,
         // Integration-sourced work is always 'job'.
         workspace: 'job',
         energy: 'medium',
@@ -401,6 +401,10 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
           title: c.message.split('\n')[0].slice(0, 120),
           completed: true,
           completedAt: Number(c.committed_at),
+          // The commit link, carried on the subtask rather than dumped as raw text in
+          // the description. Extra JSONB fields are inert to the current UI but let it
+          // link the commit later without another scan.
+          url: c.html_url || null,
         })),
         // Commit time, not scan time: the work happened when it was committed.
         createdAt: Number(dayCommits[0].committed_at),
