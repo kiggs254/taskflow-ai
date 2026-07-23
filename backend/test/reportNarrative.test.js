@@ -57,15 +57,17 @@ test('sets project and narrative on every item', async () => {
   assert.equal(report.items[0].narrative, 'A short story of the work.');
 });
 
-test('the narrative is asked for in the first person singular, not "we"', async () => {
-  // It's one person's own work log. "We built…" reads wrong for a solo user.
+test('the narrative is asked for in impersonal past tense, no "we" or "I"', async () => {
+  // One person's own log: "We built…" is wrong, and a repeated "I …, I …" reads badly.
+  // Verb-first with no subject pronoun avoids both.
   mode = 'ok'; hits = 0; lastBody = null;
   await attachNarratives({ items: [
-    { title: 'solo-proj — a thing', subtasks: [{ title: 'commit-firstperson-xyz', completed: true }] },
+    { title: 'solo-proj — a thing', subtasks: [{ title: 'commit-impersonal-xyz', completed: true }] },
   ]}, 1);
   const system = lastBody.messages.find((m) => m.role === 'system').content;
-  assert.match(system, /first person singular/i);
-  assert.match(system, /never use "we"/i);
+  assert.match(system, /impersonal past tense/i);
+  assert.match(system, /no subject pronoun/i);
+  assert.match(system, /never use "we" or "I"/i);
 });
 
 test('identical commit sets are cached, so a second pass makes no new call', async () => {
