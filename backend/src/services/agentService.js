@@ -171,8 +171,16 @@ const SUMMARY_SCHEMA = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['summary', 'items'],
+    required: ['project', 'summary', 'items'],
     properties: {
+      project: {
+        type: 'string',
+        description:
+          'A short 2-5 word name for WHAT was worked on -- a feature or project handle, ' +
+          'inferred from the work itself, e.g. "WooCommerce webhook auto-reenabler" or ' +
+          '"Mogo category filtering". Title case, no trailing punctuation. This is the ' +
+          'headline; do NOT use the folder name.',
+      },
       summary: {
         type: 'string',
         description:
@@ -190,14 +198,22 @@ const SUMMARY_SCHEMA = {
   },
 };
 
+// Fallback project label from the folder, only used when the AI is unavailable.
+// De-slugged ("Random-AI-tasks" -> "Random AI tasks") so even the fallback doesn't
+// show a raw slug.
+const labelFromSlug = (slug) => String(slug || 'work').replace(/[-_]+/g, ' ').trim() || 'work';
+
 const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
   const fileCount = changedPaths.length;
+  // The label the title leads with. Prefer what the AI infers from the work; fall back
+  // to the de-slugged folder name, never the raw slug.
+  const folderLabel = labelFromSlug(projectSlug);
   // Deliberately dull: if the model can't tell us what happened, say what we know for
   // certain rather than inventing an accomplishment.
   const fallback = {
     summary: fileCount
-      ? `${projectSlug} — updated ${fileCount} file${fileCount > 1 ? 's' : ''}`
-      : `${projectSlug} — working session`,
+      ? `${folderLabel} — updated ${fileCount} file${fileCount > 1 ? 's' : ''}`
+      : `${folderLabel} — working session`,
     items: [],
   };
 
@@ -215,11 +231,14 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
         {
           role: 'system',
           content:
-            'You turn one coding session into a standup entry: a headline plus the ' +
-            'distinct things that were done.\n\n' +
+            'You turn one coding session into a standup entry: a short project name, a ' +
+            'headline, and the distinct things that were done.\n\n' +
             'The requests are the source of truth for WHAT was wanted and WHY — lead with ' +
             'that outcome, in the requester\'s terms. The file paths only corroborate where ' +
             'it landed; they are not the story.\n\n' +
+            'Name the `project` for what was actually built (e.g. "WooCommerce webhook ' +
+            'auto-reenabler"), inferred from the work — NOT the containing folder, which is ' +
+            'often a catch-all and means nothing.\n\n' +
             'A request like "the client needs submissions saved in the admin so they can be ' +
             'viewed and exported" should read as "admin view and export for form submissions" ' +
             '— with the storage, the view and the export as separate items. Never "updated 4 ' +
@@ -230,7 +249,9 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
         {
           role: 'user',
           content:
-            `Project: ${projectSlug}\n\n` +
+            // The folder is a weak hint only, and explicitly labelled as such so the model
+            // doesn't echo it back as the project name -- that's the whole bug being fixed.
+            `Folder (a hint only, may be a catch-all — do not use as the name): ${projectSlug}\n\n` +
             `What was requested (most important):\n${
               prompts.slice(0, 12).map((p) => `- ${p}`).join('\n') || '(none captured)'
             }\n\n` +
@@ -263,9 +284,16 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
           .slice(0, 6)
       : [];
 
+    // The project label comes from the work, not the folder. Fall back to the
+    // de-slugged folder only if the model didn't provide one.
+    const project =
+      typeof parsed?.project === 'string' && parsed.project.trim()
+        ? truncateAtWord(parsed.project.trim(), 60)
+        : folderLabel;
+
     // truncateAtWord, not slice: a hard cut produced "…added showroom s", which reads
     // as a bug rather than an abbreviation.
-    return { summary: `${projectSlug} — ${truncateAtWord(summary, 80)}`, items };
+    return { summary: `${project} — ${truncateAtWord(summary, 80)}`, items };
   } catch (error) {
     console.error('Agent: session summary failed, using fallback:', error.message);
     return fallback;
@@ -280,96 +308,91 @@ const slugify = (value) =>
   path.basename(value || 'work').replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 60) || 'work';
 
 /**
- * Rebuild the day's task for one project from every session row recorded for it.
+ * Rebuild the task for ONE session on a day, from its ledger row.
  *
- * Rebuilt from the ledger rather than from the payload in hand — the same idiom that
- * makes the commit scanner idempotent. A re-reported session converges instead of
- * duplicating.
+ * One task per session, not per folder. Grouping by folder merged two unrelated pieces
+ * of work done in the same catch-all folder ("Random AI tasks") into a single task with
+ * a run-on narrative -- e.g. a webhook re-enabler and a category-filter change became
+ * one "we built X, and we also refined Y" entry. A session is the natural unit of one
+ * task; resuming the *same* session (same session_id) still updates in place, since the
+ * ledger row and this id are keyed on (session_id, day).
+ *
+ * Rebuilt from the ledger rather than the payload in hand -- the idiom that makes the
+ * commit scanner idempotent: a re-reported session converges instead of duplicating.
  */
-const rebuildDayTask = async (userId, projectSlug, workspace, day) => {
-  // Selected by the `day` column rather than an ended_at range: `day` is the local
-  // date the work was recorded for, and it's what the unique key is on, so this can't
-  // drift from what was written.
-  const sessions = (
+const rebuildSessionTask = async (userId, sessionId, day) => {
+  const row = (
     await query(
-      `SELECT session_id, summary, items, changed_paths, started_at, ended_at
+      `SELECT session_id, project_slug, workspace, summary, items, changed_paths,
+              started_at, ended_at
        FROM agent_sessions
-       WHERE user_id = $1 AND project_slug = $2 AND day = $3
-       ORDER BY ended_at ASC`,
-      [userId, projectSlug, day]
+       WHERE user_id = $1 AND session_id = $2 AND day = $3`,
+      [userId, sessionId, day]
     )
-  ).rows;
+  ).rows[0];
 
-  if (!sessions.length) return null;
+  if (!row) return null;
 
-  // userId in the id: see the cross-tenant note on the gh- ids. Deterministic so a
-  // re-report upserts rather than piling up.
-  const taskId = `agent-${userId}-${projectSlug}-${day}`;
+  // userId in the id: see the cross-tenant note on the gh- ids. session_id + day makes
+  // it deterministic and per-session, so a re-report upserts the same task.
+  const taskId = `agent-${userId}-${sessionId}-${day}`;
 
-  // Subtasks are the work itself, not a restatement of the title. Previously the one
-  // summary line served as title, sole subtask and description at once, so expanding
-  // a row showed you the same sentence three more times.
-  const subtasks = [];
-  for (const s of sessions) {
-    const items = Array.isArray(s.items) ? s.items : [];
-    if (items.length) {
-      for (const item of items) {
-        subtasks.push({
-          id: `${taskId}-${subtasks.length}`,
-          title: String(item).slice(0, 120),
-          completed: true,
-          // Numeric, not ISO: reportService matches subtask completedAt with ~ '^[0-9]+$'.
-          completedAt: Number(s.ended_at),
-        });
-      }
-    } else {
-      // No items (older row, or the AI fell back) -- the summary is all we have.
-      subtasks.push({
-        id: `${taskId}-${subtasks.length}`,
-        title: String(s.summary || 'Session').slice(0, 120),
-        completed: true,
-        completedAt: Number(s.ended_at),
-      });
-    }
-  }
+  // Subtasks are the work itself, not a restatement of the title.
+  const items = Array.isArray(row.items) ? row.items : [];
+  const subtasks = (items.length ? items.map((i) => String(i)) : [String(row.summary || 'Session')]).map(
+    (title, i) => ({
+      id: `${taskId}-${i}`,
+      title: title.slice(0, 120),
+      completed: true,
+      // Numeric, not ISO: reportService matches subtask completedAt with ~ '^[0-9]+$'.
+      completedAt: Number(row.ended_at),
+    })
+  );
 
-  // Multiple sessions on one project in a day are one continuous piece of work, so
-  // lead with the last summary (where it ended up) rather than a bare count.
-  const title =
-    sessions.length === 1
-      ? sessions[0].summary
-      : `${sessions[sessions.length - 1].summary} (+${sessions.length - 1} earlier session${sessions.length > 2 ? 's' : ''})`;
-
-  // The description carries what the title and subtasks don't: where it landed.
-  const files = [...new Set(sessions.flatMap((s) => (Array.isArray(s.changed_paths) ? s.changed_paths : [])))];
+  const files = [...new Set(Array.isArray(row.changed_paths) ? row.changed_paths : [])];
   const description = [
-    `${sessions.length} Claude Code session${sessions.length > 1 ? 's' : ''} on ${day}`,
+    `Claude Code session on ${day}`,
     files.length ? `\nFiles touched (${files.length}):\n${files.slice(0, 30).map((f) => `- ${f}`).join('\n')}` : '',
     files.length > 30 ? `\n…and ${files.length - 30} more` : '',
   ].filter(Boolean).join('\n');
 
   await syncTask(userId, {
     id: taskId,
-    title,
+    title: row.summary,
     description,
-    workspace,
+    workspace: row.workspace,
     energy: 'medium',
     status: 'done',
     estimatedTime: null,
-    tags: ['claude-code', projectSlug],
+    tags: ['claude-code', row.project_slug],
     dependencies: [],
     subtasks,
-    createdAt: Number(sessions[0].started_at),
-    completedAt: Number(sessions[sessions.length - 1].ended_at),
+    createdAt: Number(row.started_at),
+    completedAt: Number(row.ended_at),
   });
 
   await query(
-    `UPDATE agent_sessions SET task_id = $3
-     WHERE user_id = $1 AND project_slug = $2 AND day = $4`,
-    [userId, projectSlug, taskId, day]
+    `UPDATE agent_sessions SET task_id = $4
+     WHERE user_id = $1 AND session_id = $2 AND day = $3`,
+    [userId, sessionId, day, taskId]
   );
 
-  return { taskId, sessions: sessions.length };
+  return { taskId };
+};
+
+/**
+ * Remove agent tasks no longer backed by any session row -- e.g. an old folder-grouped
+ * task orphaned once its sessions were rebuilt as per-session tasks. The task_id FK is
+ * ON DELETE SET NULL, so this can't cascade into the ledger.
+ */
+const pruneOrphanedAgentTasks = async (userId) => {
+  const { rowCount } = await query(
+    `DELETE FROM tasks
+     WHERE user_id = $1 AND id LIKE 'agent-%'
+       AND NOT EXISTS (SELECT 1 FROM agent_sessions WHERE task_id = tasks.id)`,
+    [userId]
+  );
+  return rowCount;
 };
 
 /**
@@ -381,8 +404,8 @@ const rebuildDayTask = async (userId, projectSlug, workspace, day) => {
 /**
  * Re-summarise sessions already in the ledger, from their stored prompts.
  *
- * The summary is computed once at log time and cached on the row; rebuildDayTask
- * reads it rather than recomputing. That's right in the steady state — re-running a
+ * The summary is computed once at log time and cached on the row; the rebuild reads it
+ * rather than recomputing. That's right in the steady state — re-running a
  * smart-tier call on every rebuild would be absurd — but it means a session logged
  * while summarisation was broken keeps its fallback title forever, even after the
  * bug is fixed. Every session logged before the truncation fix is in exactly that
@@ -392,8 +415,9 @@ const rebuildDayTask = async (userId, projectSlug, workspace, day) => {
  * session end, so this row is the last copy of what was asked. Without the column
  * the only repair would be redoing the work.
  *
- * Days are rebuilt once each at the end, not per session, since sessions sharing a
- * (project, day) all rebuild the same task.
+ * Each session is rebuilt as its own task, and any folder-grouped task orphaned by the
+ * switch to per-session tasks is pruned at the end. This is also the migration path:
+ * re-running it over old sessions splits a previously-merged folder task apart.
  */
 export const resummariseSessions = async (userId, { day, sessionId, force = false } = {}) => {
   const filters = ['user_id = $1'];
@@ -414,7 +438,6 @@ export const resummariseSessions = async (userId, { day, sessionId, force = fals
     )
   ).rows;
 
-  const days = new Map();
   const results = [];
 
   for (const s of sessions) {
@@ -437,15 +460,14 @@ export const resummariseSessions = async (userId, { day, sessionId, force = fals
       [summary, JSON.stringify(items), userId, s.session_id, s.day]
     );
 
-    days.set(`${s.project_slug}|${s.day}`, { slug: s.project_slug, workspace: s.workspace, day: s.day });
+    await rebuildSessionTask(userId, s.session_id, s.day);
     results.push({ sessionId: s.session_id, summary, items: items.length });
   }
 
-  for (const d of days.values()) {
-    await rebuildDayTask(userId, d.slug, d.workspace, d.day);
-  }
+  // Drop the old folder-grouped tasks the per-session rebuild replaced.
+  const pruned = await pruneOrphanedAgentTasks(userId);
 
-  return { resummarised: results.length, tasksRebuilt: days.size, results };
+  return { resummarised: results.length, tasksRebuilt: results.length, pruned, results };
 };
 
 export const logWork = async (userId, payload) => {
@@ -541,14 +563,13 @@ export const logWork = async (userId, payload) => {
     ]
   );
 
-  const rebuilt = await rebuildDayTask(userId, projectSlug, workspace, day);
+  const rebuilt = await rebuildSessionTask(userId, sessionId, day);
 
   return {
     logged: true,
     workspace,
     summary,
     taskId: rebuilt?.taskId,
-    sessionsToday: rebuilt?.sessions,
     droppedCoveredPaths: coveredRepo ? changedPaths.length - uncoveredPaths.length : 0,
   };
 };
