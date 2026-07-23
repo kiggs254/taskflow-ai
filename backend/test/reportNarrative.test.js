@@ -15,12 +15,14 @@ process.env.DATABASE_URL = 'postgres://invalid:5432/invalid';
 
 let hits = 0;
 let mode = 'ok';
+let lastBody = null;
 const server = await new Promise((resolve) => {
   const s = http.createServer((req, res) => {
     hits++;
     let raw = '';
     req.on('data', (c) => (raw += c));
     req.on('end', () => {
+      try { lastBody = JSON.parse(raw); } catch { /* ignore */ }
       if (mode === 'fail') {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: { message: 'boom' } }));
@@ -53,6 +55,17 @@ test('sets project and narrative on every item', async () => {
   await attachNarratives(report, 1);
   assert.equal(report.items[0].project, 'hotpoint-front');
   assert.equal(report.items[0].narrative, 'A short story of the work.');
+});
+
+test('the narrative is asked for in the first person singular, not "we"', async () => {
+  // It's one person's own work log. "We built…" reads wrong for a solo user.
+  mode = 'ok'; hits = 0; lastBody = null;
+  await attachNarratives({ items: [
+    { title: 'solo-proj — a thing', subtasks: [{ title: 'commit-firstperson-xyz', completed: true }] },
+  ]}, 1);
+  const system = lastBody.messages.find((m) => m.role === 'system').content;
+  assert.match(system, /first person singular/i);
+  assert.match(system, /never use "we"/i);
 });
 
 test('identical commit sets are cached, so a second pass makes no new call', async () => {

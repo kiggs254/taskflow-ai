@@ -292,7 +292,9 @@ const narrateItem = async (userId, item) => {
             'a teammate who does not read code can follow. Group related commits into ' +
             'the same thread of work. Do not list the commits, do not keep prefixes ' +
             'like feat()/fix()/chore(), no bullet points, no markdown, no file names. ' +
-            'Keep it short. Return json.',
+            'Write in the first person singular ("I added…", "I fixed…"): this is one ' +
+            "person's own work log, so never use \"we\", \"the team\", or a passive " +
+            '"was done". Keep it short. Return json.',
         },
         {
           role: 'user',
