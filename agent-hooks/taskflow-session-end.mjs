@@ -31,8 +31,25 @@ const UNCONFIGURED_TTL_MS = 2 * 60 * 1000;
 // Logs we couldn't decide on are kept for a retry, but not forever.
 const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
-const API = (process.env.TASKFLOW_API_URL || '').replace(/\/$/, '');
-const TOKEN = process.env.TASKFLOW_TOKEN;
+// Config resolution: env first (so a shell can still override), then a config file.
+//
+// The env vars live in a shell profile like ~/.zshrc, which ONLY interactive shells
+// source. A SessionEnd hook is spawned non-interactively, so it never saw them -- it
+// bailed at the check below, posted nothing, and (correctly) kept the log, which is
+// why logs piled up with no policy.json. The config file removes that dependency
+// entirely: the hook reads its own credentials regardless of how the shell was
+// started. Write ~/.taskflow/config.json as {"apiUrl":"...","token":"tf_..."}, mode
+// 0600.
+const readConfig = () => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(DIR, 'config.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+};
+const cfg = readConfig();
+const API = (process.env.TASKFLOW_API_URL || cfg.apiUrl || '').replace(/\/$/, '');
+const TOKEN = process.env.TASKFLOW_TOKEN || cfg.token;
 
 const readStdin = () =>
   new Promise((resolve) => {

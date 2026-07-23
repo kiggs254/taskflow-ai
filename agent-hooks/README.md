@@ -27,12 +27,22 @@ The most specific folder wins, so you can nest a personal folder inside a work o
 It only works for logging work — it can't read your tasks or change settings, and you
 can revoke it.
 
-**2. Add to your shell profile** (`~/.zshrc`):
+**2. Give the hook its credentials.** Write a config file — this is the reliable way,
+because Claude Code spawns hooks **non-interactively**, so a shell profile like
+`~/.zshrc` is *not* sourced and its `export`s are invisible to the hook:
 
 ```bash
-export TASKFLOW_API_URL=https://your-backend.example.com/api
-export TASKFLOW_TOKEN=tf_...
+mkdir -p ~/.taskflow && chmod 700 ~/.taskflow
+cat > ~/.taskflow/config.json <<'JSON'
+{ "apiUrl": "https://your-backend.example.com/api", "token": "tf_..." }
+JSON
+chmod 600 ~/.taskflow/config.json
 ```
+
+Environment variables (`TASKFLOW_API_URL`, `TASKFLOW_TOKEN`) still work and take
+precedence if the hook happens to inherit them, but don't rely on a shell profile for
+them — that's the trap that makes SessionEnd silently post nothing while session logs
+pile up under `~/.taskflow/sessions/` and no `~/.taskflow/policy.json` ever appears.
 
 **3. Install the hooks:**
 
