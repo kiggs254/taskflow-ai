@@ -147,30 +147,24 @@ export const ReportSettings: React.FC<ReportSettingsProps> = ({ token }) => {
                 nothing today came from a commit or a Claude Code session.
               </div>
             )}
-            <div className="space-y-2">
+            {/* Mirrors the real send: one short AI narrative per project, no per-commit
+                checklist and no checkmarks. `project` and `narrative` come from the same
+                endpoint the 16:30 job renders, so this preview is faithful. */}
+            <div className="space-y-3">
               {preview.items.map((item: any) => (
-                <div key={item.id} className="text-xs">
-                  <div className="flex items-start gap-2">
-                    <span className="text-success mt-0.5">✓</span>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-slate-200">{item.title}</span>
-                      {item.fromCommits && (
-                        <span className="ml-2 text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">code</span>
-                      )}
-                      {item.fromAgent && (
-                        <span className="ml-2 text-[10px] bg-slate-600/40 text-slate-300 px-1.5 py-0.5 rounded">claude code</span>
-                      )}
-                      {(item.subtasks ?? []).length > 0 && (
-                        <div className="mt-1 space-y-0.5 pl-1">
-                          {item.subtasks.map((st: any, i: number) => (
-                            <div key={i} className={st.completed ? 'text-slate-400' : 'text-slate-600'}>
-                              {st.completed ? '✓' : '○'} {st.title}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                <div key={item.id} className="text-xs min-w-0">
+                  <div className="text-slate-100 font-semibold">
+                    {item.project || item.title}
+                    {item.fromCommits && (
+                      <span className="ml-2 text-[10px] font-normal bg-primary/20 text-primary px-1.5 py-0.5 rounded align-middle">code</span>
+                    )}
+                    {item.fromAgent && (
+                      <span className="ml-2 text-[10px] font-normal bg-slate-600/40 text-slate-300 px-1.5 py-0.5 rounded align-middle">claude code</span>
+                    )}
                   </div>
+                  {item.narrative && (
+                    <p className="text-slate-400 mt-0.5 leading-relaxed">{item.narrative}</p>
+                  )}
                 </div>
               ))}
             </div>
