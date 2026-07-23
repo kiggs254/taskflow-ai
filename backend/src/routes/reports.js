@@ -1,7 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { getCompletedToday, attachNarratives, getReportSettings, updateReportSettings } from '../services/reportService.js';
+import { getCompletedToday, attachNarratives, nextReportInfo, getReportSettings, updateReportSettings } from '../services/reportService.js';
 import { sendReportForUser } from '../jobs/dailyReport.js';
 
 const router = express.Router();
@@ -27,12 +27,21 @@ router.get('/completed-today', asyncHandler(async (req, res) => {
   // last send -- its only caller is the report preview in Settings, and a preview that
   // doesn't match what gets sent is worse than no preview.
   const settings = await getReportSettings(req.user.id);
+  // When the next report actually fires, and where its window starts -- so the preview
+  // reflects the pending report (tomorrow, once today's has gone out), not the whole day.
+  const nextSend = nextReportInfo(settings);
   const report = await getCompletedToday(req.user.id, {
     timezone: req.query.tz || settings.timezone,
-    since: settings.last_sent_at ?? null,
+    since: nextSend.windowSince,
   });
   // Same narratives the real send renders, so the preview is faithful.
   await attachNarratives(report, req.user.id);
+  report.nextSend = {
+    when: nextSend.when,
+    date: nextSend.date,
+    alreadySentToday: nextSend.alreadySentToday,
+    reportTime: nextSend.reportTime,
+  };
   res.json(report);
 }));
 

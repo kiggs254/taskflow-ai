@@ -1,6 +1,15 @@
 import crypto from 'crypto';
 import { query } from '../config/database.js';
-import { DEFAULT_TIMEZONE, startOfLocalDayMs, localDateString, isValidTimezone } from '../utils/time.js';
+import {
+  DEFAULT_TIMEZONE,
+  startOfLocalDayMs,
+  localDateString,
+  isValidTimezone,
+  isWeekend,
+  localDayOfWeek,
+  parseTimeToMinutes,
+  localMinutesOfDay,
+} from '../utils/time.js';
 import { callAI } from './ai/callAI.js';
 import { truncateAtWord } from '../utils/text.js';
 
@@ -336,6 +345,55 @@ export const attachNarratives = async (report, userId) => {
     })
   );
   return report;
+};
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * When the NEXT report will actually go out, and where its window starts.
+ *
+ * The preview is labelled "what will be sent today", but once today's report has fired
+ * (it's past report_time, or last_sent_on is already today) the next one is tomorrow —
+ * or Monday, if tomorrow is the weekend. This computes that so the preview can say so,
+ * and returns `windowSince` so the preview covers exactly the pending report's window
+ * rather than the whole day (which would re-show work already sent at 16:30).
+ */
+export const nextReportInfo = (settings, atMs = Date.now()) => {
+  const tz = resolveTz(settings.timezone);
+  const today = localDateString(tz, atMs);
+  const sentToday = Boolean(settings.last_sent_on && String(settings.last_sent_on).slice(0, 10) === today);
+  const targetMin = parseTimeToMinutes(String(settings.report_time)) ?? 16 * 60 + 30;
+  const nowMin = localMinutesOfDay(tz, atMs);
+  const skipWeekends = settings.skip_weekends !== false;
+
+  // Where the pending report's window starts: the last send. If the column isn't
+  // populated but we know one went out at report_time today, use that instant, so the
+  // preview still excludes the work already sent.
+  let windowSince = settings.last_sent_at ?? null;
+  if (windowSince == null && sentToday) {
+    windowSince = startOfLocalDayMs(tz, atMs) + targetMin * 60_000;
+  }
+
+  const DAY = 86_400_000;
+  let when = 'later';
+  let date = null;
+  for (let off = 0; off <= 8; off++) {
+    const ms = atMs + off * DAY;
+    if (skipWeekends && isWeekend(tz, ms)) continue;
+    // Today only counts if it hasn't already fired and hasn't passed report_time.
+    if (off === 0 && (sentToday || nowMin >= targetMin)) continue;
+    date = localDateString(tz, ms);
+    when = off === 0 ? 'today' : off === 1 ? 'tomorrow' : WEEKDAYS[localDayOfWeek(tz, ms)];
+    break;
+  }
+
+  return {
+    when,
+    date,
+    alreadySentToday: sentToday,
+    windowSince,
+    reportTime: String(settings.report_time).slice(0, 5),
+  };
 };
 
 /**

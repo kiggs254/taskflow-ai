@@ -122,7 +122,9 @@ export const ReportSettings: React.FC<ReportSettingsProps> = ({ token }) => {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Eye className="w-4 h-4 text-slate-400" />
-            <h3 className="text-sm font-semibold text-slate-200">What will be sent today</h3>
+            <h3 className="text-sm font-semibold text-slate-200">
+              What will be sent {preview?.nextSend?.when ?? 'today'}
+            </h3>
           </div>
           <button
             onClick={loadPreview}
@@ -133,11 +135,19 @@ export const ReportSettings: React.FC<ReportSettingsProps> = ({ token }) => {
           </button>
         </div>
 
+        {preview?.nextSend?.alreadySentToday && (
+          <p className="text-[11px] text-slate-500 mb-2">
+            Today's {preview.nextSend.reportTime} report already went out — this is what's queued for {preview.nextSend.when}.
+          </p>
+        )}
+
         {!preview ? (
           <p className="text-xs text-slate-500">Loading…</p>
         ) : preview.items?.length === 0 ? (
           <p className="text-xs text-slate-500">
-            Nothing completed today yet — no report would be sent.
+            {preview.nextSend?.alreadySentToday
+              ? `Nothing new since today's report — nothing queued for ${preview.nextSend.when} yet.`
+              : 'Nothing completed today yet — no report would be sent.'}
           </p>
         ) : (
           <>
