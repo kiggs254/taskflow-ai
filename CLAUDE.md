@@ -61,6 +61,8 @@ Both `apiService.ts` and `geminiService.ts` normalize `API_BASE` to always end i
 
 Custom HMAC token, **not** JWT (`backend/src/utils/token.js`): `base64(hmac_sha256(payload) | payload)` where payload is `{uid, exp}`, 7-day expiry, signed with `API_SECRET`. Format intentionally mirrors a prior PHP implementation. `authenticate` middleware attaches `req.user = { id }`. Frontend keeps the token in `useState` mirrored to `localStorage.taskflow_token` and passes it explicitly as the first argument to every `api.*` call.
 
+**Session expiry is handled centrally, not per-call.** `apiService.ts` shadows `fetch` for the whole module, so every `request()` and every direct `api.*` fetch runs through one wrapper that, on any `401`, fires `onSessionExpired` **once** (re-armed on the next successful response). `App.tsx` registers it to log out and show an amber "session expired" banner on the login screen. Before this, an expired 7-day token made every 15s poll retry into a 401 and flood the console forever. Don't add a bare `globalThis.fetch` path that bypasses the wrapper.
+
 ### Frontend state
 
 `App.tsx` is a **3,800-line monolith** holding ~40 `useState` hooks and defining most views inline (`AuthScreen`, `TaskCard`, `FocusOverlay`, `DailyReset`, `AnalyticsScreen`, `SettingsScreen`, `MeetingsScreen`, `CompletedTasksScreen`). Larger/newer views live in `components/` (`TaskDetailModal` at 1,088 lines, `DraftTasksView`, the `*Settings` panels).

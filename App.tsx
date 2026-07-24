@@ -30,7 +30,7 @@ import {
   generateDailyPlan,
   generateClientFollowUp
 } from './services/geminiService';
-import { api } from './services/apiService';
+import { api, onSessionExpired } from './services/apiService';
 
 // --- Task diffing ---
 // The 15s poll needs to know whether anything actually changed. It used to answer
@@ -139,7 +139,7 @@ const playSound = (type: 'complete' | 'levelUp' | 'newTask') => {
 
 // --- Components ---
 
-const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stats: UserStats) => void }) => {
+const AuthScreen = ({ onLogin, notice }: { onLogin: (user: UserType, token: string, stats: UserStats) => void; notice?: string | null }) => {
   const [isRegister, setIsRegister] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
@@ -523,6 +523,12 @@ const AuthScreen = ({ onLogin }: { onLogin: (user: UserType, token: string, stat
           <h2 className="text-xl font-semibold text-white mb-6">
             {isRegister ? 'Create Account' : 'Welcome Back'}
           </h2>
+
+          {notice && !error && !successMessage && (
+            <div className="mb-4 p-3 bg-amber-900/20 border border-amber-900/50 rounded-lg text-amber-300 text-sm">
+              {notice}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {isRegister && (
@@ -2041,6 +2047,9 @@ export default function App() {
   // Auth State
   const [user, setUser] = useState<UserType | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  // Shown on the login screen after a session expires, so an expiry reads as an
+  // explanation rather than a silent bounce to login.
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   // App State
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -2415,6 +2424,7 @@ export default function App() {
     setUser(user);
     setToken(token);
     setStats(initialStats);
+    setAuthNotice(null); // a fresh login clears any "session expired" banner
     localStorage.setItem('taskflow_token', token);
     localStorage.setItem('taskflow_user', JSON.stringify(user));
   };
@@ -2426,6 +2436,16 @@ export default function App() {
     localStorage.removeItem('taskflow_user');
     setView(AppView.DASHBOARD);
   };
+
+  // A 401 on any request means the token has expired or been revoked. Log out once and
+  // explain why, instead of every 15s poll retrying into the same wall. Registered
+  // once; the setters it closes over are stable.
+  useEffect(() => {
+    onSessionExpired(() => {
+      setAuthNotice('Your session expired. Please sign in again.');
+      handleLogout();
+    });
+  }, []);
 
   // Derived State
   //
@@ -3134,7 +3154,7 @@ export default function App() {
 
   // If not logged in, show Auth
   if (!user) {
-    return <AuthScreen onLogin={handleLogin} />;
+    return <AuthScreen onLogin={handleLogin} notice={authNotice} />;
   }
 
   // Render Logic

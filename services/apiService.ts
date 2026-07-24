@@ -12,6 +12,43 @@ if (!API_BASE.endsWith('/api')) {
   API_BASE = API_BASE.replace(/\/$/, '') + '/api';
 }
 
+// --- Session-expiry handling -------------------------------------------------
+//
+// The auth token is a 7-day HMAC. When it lapses, every authenticated call returns
+// 401, and the app used to just keep retrying on each 15s poll -- flooding the console
+// with "Token Expired" and never recovering. This detects a 401 on ANY endpoint and
+// signals the app once, so it can log out cleanly and show the login screen.
+//
+// `fetch` is shadowed for this whole module below, so both the request() helper and
+// every direct api.* fetch route through one place -- there's no per-endpoint 401
+// handling to add or forget.
+type SessionExpiredHandler = () => void;
+let sessionExpiredHandler: SessionExpiredHandler | null = null;
+let sessionExpiredFired = false;
+
+/** Register the callback that runs the first time a request 401s. */
+export const onSessionExpired = (handler: SessionExpiredHandler): void => {
+  sessionExpiredHandler = handler;
+};
+
+const nativeFetch: typeof globalThis.fetch = globalThis.fetch.bind(globalThis);
+
+const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const res = await nativeFetch(input, init);
+  if (res.status === 401) {
+    // Fire once: 20 concurrent polls all 401'ing must not trigger 20 logouts.
+    if (!sessionExpiredFired) {
+      sessionExpiredFired = true;
+      sessionExpiredHandler?.();
+    }
+  } else if (res.ok) {
+    // A success means the session is valid again (e.g. after re-login), so re-arm so a
+    // later expiry fires the handler afresh.
+    sessionExpiredFired = false;
+  }
+  return res;
+};
+
 // Helper to handle requests
 const request = async (action: string, method: 'GET' | 'POST', body?: any, token?: string) => {
   const headers: HeadersInit = {
