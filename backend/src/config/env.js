@@ -32,6 +32,18 @@ export const config = {
       apiKey: process.env.DEEPSEEK_API_KEY,
       baseURL: 'https://api.deepseek.com',
     },
+    // Moonshot (Kimi). OpenAI-compatible. Its thinking models default to thinking ON,
+    // and the chain-of-thought is billed against max_tokens -- so callAI sends
+    // thinking:{type:'disabled'} for the JSON tasks here (see CAPS.moonshot).
+    moonshot: {
+      apiKey: process.env.MOONSHOT_API_KEY,
+      baseURL: process.env.MOONSHOT_BASE_URL || 'https://api.moonshot.ai/v1',
+    },
+    // Xiaomi MiMo. OpenAI-compatible.
+    mimo: {
+      apiKey: process.env.MIMO_API_KEY,
+      baseURL: process.env.MIMO_BASE_URL || 'https://api.xiaomimimo.com/v1',
+    },
   },
   cors: {
     origin: process.env.CORS_ORIGIN || '*',

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelFor, providerChain, costUsd, CAPS } from '../src/config/aiModels.js';
+import { modelFor, providerChain, primaryProvider, costUsd, CAPS, PROVIDERS } from '../src/config/aiModels.js';
 
 test('deepseek resolves to the current V4 models, not the legacy alias', () => {
   assert.equal(modelFor('deepseek', 'smart'), 'deepseek-v4-pro');
@@ -8,15 +8,38 @@ test('deepseek resolves to the current V4 models, not the legacy alias', () => {
   assert.notEqual(modelFor('deepseek', 'fast'), 'deepseek-chat');
 });
 
+test('moonshot wires up a cheap fast model and a thinking-capable smart model', () => {
+  assert.equal(modelFor('moonshot', 'fast'), 'kimi-k2.5');
+  assert.equal(modelFor('moonshot', 'smart'), 'kimi-k2.6');
+  // Kimi thinking models default to reasoning ON and bill it against max_tokens, so the
+  // toggle must exist for callAI to turn it off for JSON extraction.
+  assert.equal(CAPS.moonshot.thinkingToggle, true);
+  assert.equal(CAPS.moonshot.strictSchema, false);
+});
+
+test('mimo is configured, OpenAI-compatible, with no thinking field sent', () => {
+  assert.equal(modelFor('mimo', 'smart'), 'mimo-v2.5-pro');
+  assert.equal(CAPS.mimo.thinkingToggle, false);
+});
+
+test('moonshot is the default primary provider', () => {
+  const saved = process.env.AI_PRIMARY_PROVIDER;
+  delete process.env.AI_PRIMARY_PROVIDER;
+  assert.equal(primaryProvider(), 'moonshot');
+  assert.equal(providerChain('nonsense')[0], 'moonshot');
+  if (saved !== undefined) process.env.AI_PRIMARY_PROVIDER = saved;
+});
+
 test('an unknown provider degrades to the primary rather than throwing', () => {
   assert.equal(typeof modelFor('mistral', 'fast'), 'string');
   assert.equal(typeof modelFor(undefined, 'smart'), 'string');
 });
 
-test('providerChain puts the preferred provider first', () => {
+test('providerChain puts the preferred provider first and lists every provider once', () => {
   assert.equal(providerChain('deepseek')[0], 'deepseek');
   assert.equal(providerChain('openai')[0], 'openai');
-  assert.equal(providerChain('nonsense').length, 2);
+  assert.equal(providerChain('nonsense').length, PROVIDERS.length);
+  assert.equal(new Set(providerChain('deepseek')).size, PROVIDERS.length);
 });
 
 test('costUsd prices per 1M tokens and tolerates unknown models', () => {

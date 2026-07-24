@@ -9,6 +9,9 @@ import http from 'node:http';
  */
 
 process.env.API_SECRET = 'test';
+// Route narration at the mock openai server below; the product default primary is now
+// moonshot, which this test doesn't stand up.
+process.env.AI_PRIMARY_PROVIDER = 'openai';
 process.env.OPENAI_API_KEY = 'sk-test';
 process.env.DEEPSEEK_API_KEY = 'sk-test';
 process.env.DATABASE_URL = 'postgres://invalid:5432/invalid';

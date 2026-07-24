@@ -18,17 +18,17 @@ import { CAPS, costUsd, modelFor, providerChain } from '../../config/aiModels.js
 // applying only between the outer attempts. Retry policy lives in exactly one place.
 const clientOpts = { maxRetries: 0 };
 
+// Every provider here is OpenAI-compatible, so they're all the OpenAI SDK with a
+// different key + baseURL. A provider with no key is null and gets filtered out of the
+// chain, so adding one that isn't configured yet is a no-op rather than a failure.
+const openAiCompatible = (cfg) =>
+  cfg?.apiKey ? new OpenAI({ apiKey: cfg.apiKey, ...(cfg.baseURL ? { baseURL: cfg.baseURL } : {}), ...clientOpts }) : null;
+
 const clients = {
-  openai: config.ai.openai.apiKey
-    ? new OpenAI({ apiKey: config.ai.openai.apiKey, ...clientOpts })
-    : null,
-  deepseek: config.ai.deepseek.apiKey
-    ? new OpenAI({
-        apiKey: config.ai.deepseek.apiKey,
-        baseURL: config.ai.deepseek.baseURL,
-        ...clientOpts,
-      })
-    : null,
+  openai: openAiCompatible(config.ai.openai),
+  deepseek: openAiCompatible(config.ai.deepseek),
+  moonshot: openAiCompatible(config.ai.moonshot),
+  mimo: openAiCompatible(config.ai.mimo),
 };
 
 export const isProviderConfigured = (provider) => Boolean(clients[provider]);

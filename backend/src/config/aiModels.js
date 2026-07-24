@@ -13,7 +13,9 @@
  *   smart — cron/offline paths (daily report rollup, analytics narrative). Nobody is waiting.
  */
 
-export const PROVIDERS = ['openai', 'deepseek'];
+// Order is the fallback order after the primary. Moonshot leads because it's the
+// current primary (see primaryProvider); MiMo is last as the least-exercised path.
+export const PROVIDERS = ['moonshot', 'deepseek', 'openai', 'mimo'];
 
 export const MODELS = {
   openai: {
@@ -25,6 +27,20 @@ export const MODELS = {
     // OpenAI-compatible on the same base_url and support JSON output + tool calls.
     fast: process.env.DEEPSEEK_MODEL_FAST || 'deepseek-v4-flash',
     smart: process.env.DEEPSEEK_MODEL_SMART || 'deepseek-v4-pro',
+  },
+  // Moonshot (Kimi), OpenAI-compatible on https://api.moonshot.ai/v1. Only two models
+  // wired up: the cheap one for interactive `fast`, the pricier thinking-capable one
+  // for offline `smart`. Both take `thinking:{type:...}` (default ENABLED), so callAI
+  // sends `disabled` unless a caller opts in -- an always-reasoning model truncates
+  // JSON before it emits any, exactly as deepseek-v4-pro did.
+  moonshot: {
+    fast: process.env.MOONSHOT_MODEL_FAST || 'kimi-k2.5',
+    smart: process.env.MOONSHOT_MODEL_SMART || 'kimi-k2.6',
+  },
+  // Xiaomi MiMo, OpenAI-compatible on https://api.xiaomimimo.com/v1.
+  mimo: {
+    fast: process.env.MIMO_MODEL_FAST || 'mimo-v2-flash',
+    smart: process.env.MIMO_MODEL_SMART || 'mimo-v2.5-pro',
   },
 };
 
@@ -41,6 +57,13 @@ export const CAPS = {
   // gets truncated before it emits any JSON. Every call here is extraction or
   // summarisation, so thinking is off unless a caller asks for it.
   deepseek: { strictSchema: false, toolCalls: true, thinkingToggle: true },
+  // Kimi k2.5/k2.6 take the identical `thinking:{type:'enabled'|'disabled'}` field, and
+  // default to ENABLED -- so the toggle is load-bearing here, not optional: without the
+  // explicit `disabled`, every extraction call reasons first and truncates.
+  moonshot: { strictSchema: false, toolCalls: true, thinkingToggle: true },
+  // MiMo's JSON/tool guarantees aren't documented, so treat it like DeepSeek's
+  // json_object path (schema goes in the prompt) and don't send a thinking field.
+  mimo: { strictSchema: false, toolCalls: true, thinkingToggle: false },
 };
 
 /**
@@ -53,15 +76,24 @@ export const PRICING = {
   'deepseek-v4-flash': { in: 0.028, out: 0.42 },
   'deepseek-v4-pro': { in: 0.28, out: 1.68 },
   'deepseek-chat': { in: 0.14, out: 0.28 },
+  // Moonshot Kimi, USD per 1M tokens (cache-miss input).
+  'kimi-k2.5': { in: 0.6, out: 3.0 },
+  'kimi-k2.6': { in: 0.95, out: 4.0 },
+  // MiMo pricing isn't published here; a missing entry logs null cost rather than
+  // throwing, so leaving it out is safe until confirmed.
 };
 
 /**
  * Provider order. Falling back to a second provider is only useful if it is
  * actually configured, so the chain is filtered by key presence at call time.
  */
+// Moonshot is the current default primary ("make it main for now"). AI_PRIMARY_PROVIDER
+// still overrides. If MOONSHOT_API_KEY isn't set, callAI filters moonshot out of the
+// chain by client presence and the request falls through to the next configured
+// provider, so an unset key degrades rather than breaks.
 export const primaryProvider = () => {
   const p = process.env.AI_PRIMARY_PROVIDER;
-  return PROVIDERS.includes(p) ? p : 'openai';
+  return PROVIDERS.includes(p) ? p : 'moonshot';
 };
 
 export const providerChain = (preferred) => {

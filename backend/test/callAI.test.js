@@ -11,6 +11,9 @@ import http from 'node:http';
  */
 
 process.env.API_SECRET = 'test';
+// These tests exercise the openai -> deepseek fallback mechanics, so pin openai as the
+// primary. The product default is now moonshot, which these tests don't configure.
+process.env.AI_PRIMARY_PROVIDER = 'openai';
 process.env.OPENAI_API_KEY = 'sk-test';
 process.env.DEEPSEEK_API_KEY = 'sk-test';
 // Point telemetry at a DB that does not exist: recordUsage must swallow the failure
