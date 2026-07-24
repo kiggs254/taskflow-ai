@@ -31,6 +31,7 @@ import {
   generateClientFollowUp
 } from './services/geminiService';
 import { api, onSessionExpired } from './services/apiService';
+import { Theme, getStoredTheme, applyTheme } from './services/theme';
 
 // --- Task diffing ---
 // The 15s poll needs to know whether anything actually changed. It used to answer
@@ -1458,6 +1459,7 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
   });
   const [showFreelanceTab, setShowFreelanceTab] = useState(false);
   const [showPersonalTab, setShowPersonalTab] = useState(false);
+  const [theme, setTheme] = useState<Theme>(getStoredTheme);
   const [loadingPrefs, setLoadingPrefs] = useState(true);
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({ 
@@ -1467,6 +1469,12 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
   const toggleNotifications = () => {
     // Browser notifications are disabled - using toast notifications instead
       setNotifications(!notifications);
+  };
+
+  const toggleTheme = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    applyTheme(next); // flips the .light class on <html> and persists the choice
   };
 
   useEffect(() => {
@@ -1565,12 +1573,19 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
                       <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${sounds ? 'translate-x-6' : ''}`} />
                    </button>
                 </div>
-                 <div className="flex items-center justify-between opacity-50 cursor-not-allowed">
+                 <div className="flex items-center justify-between">
                    <div className="flex items-center gap-3">
                       <Palette className="w-5 h-5 text-slate-400" />
-                      <span className="text-slate-200">Dark Mode</span>
+                      <span className="text-slate-200">Light Mode</span>
                    </div>
-                   <div className="text-xs text-slate-500">Always On</div>
+                   <button
+                     onClick={toggleTheme}
+                     aria-pressed={theme === 'light'}
+                     aria-label="Toggle light mode"
+                     className={`w-12 h-6 rounded-full transition-colors relative ${theme === 'light' ? 'bg-primary' : 'bg-slate-700'}`}
+                   >
+                      <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${theme === 'light' ? 'translate-x-6' : ''}`} />
+                   </button>
                 </div>
               </div>
            </div>

@@ -14,12 +14,112 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Moved verbatim from the inline <style> block in index.html. */
+/* Theming.
+ *
+ * Every colour the app uses is a CSS variable holding an "R G B" triple, and
+ * tailwind.config.js maps its colour names to `rgb(var(--c-x) / <alpha-value>)`. So a
+ * class like `bg-slate-800` or `text-white`, written literally all over the JSX,
+ * resolves through these variables -- and flipping the whole app to light mode is just
+ * adding `.light` to <html>. No per-component dark: variants, no JSX churn.
+ *
+ * Light mode inverts the neutral (slate) scale: a shade that reads as a dark surface
+ * in dark mode becomes a light surface, and a shade that reads as light text becomes
+ * dark text. `white` (used for headings AND on coloured buttons) flips to near-black
+ * for text; the button case is reclaimed further down. */
+:root {
+  color-scheme: dark;
+
+  --c-white: 255 255 255;
+  --c-fg: 248 250 252;
+
+  --c-background: 15 23 42;
+  --c-surface: 30 41 59;
+  --c-primary: 59 130 246;
+  --c-secondary: 100 116 139;
+  --c-accent: 244 63 94;
+  --c-success: 16 185 129;
+  --c-warning: 245 158 11;
+
+  --c-slate-50: 248 250 252;
+  --c-slate-100: 241 245 249;
+  --c-slate-200: 226 232 240;
+  --c-slate-300: 203 213 225;
+  --c-slate-400: 148 163 184;
+  --c-slate-500: 100 116 139;
+  --c-slate-600: 71 85 105;
+  --c-slate-700: 51 65 85;
+  --c-slate-800: 30 41 59;
+  --c-slate-900: 15 23 42;
+  --c-slate-950: 2 6 23;
+
+  --scrollbar-track: 15 23 42;
+  --scrollbar-thumb: 51 65 85;
+  --scrollbar-thumb-hover: 71 85 105;
+}
+
+html.light {
+  color-scheme: light;
+
+  /* text-white -> near-black text (bg-white flips too; that's rare and handled below) */
+  --c-white: 15 23 42;
+  --c-fg: 15 23 42;
+
+  --c-background: 248 250 252; /* page canvas */
+  --c-surface: 255 255 255;    /* cards / panels */
+  --c-primary: 37 99 235;      /* a touch deeper, for contrast on a light canvas */
+
+  /* Inverted neutral scale: low shade numbers were bright text -> now dark text;
+     high shade numbers were dark surfaces -> now light surfaces. */
+  --c-slate-50: 15 23 42;
+  --c-slate-100: 30 41 59;
+  --c-slate-200: 51 65 85;   /* strong text (was near-white headings) */
+  --c-slate-300: 71 85 105;  /* body text */
+  --c-slate-400: 71 85 105;  /* secondary text -- kept dark enough to pass AA on white */
+  --c-slate-500: 100 116 139;/* muted text */
+  --c-slate-600: 148 163 184;
+  --c-slate-700: 226 232 240;/* borders / dividers */
+  --c-slate-800: 241 245 249;/* inputs / secondary surfaces */
+  --c-slate-900: 248 250 252;
+  --c-slate-950: 255 255 255;
+
+  --scrollbar-track: 241 245 249;
+  --scrollbar-thumb: 203 213 225;
+  --scrollbar-thumb-hover: 148 163 184;
+}
+
+/* On a light canvas, `text-white` is near-black -- correct for headings, wrong for the
+   white label on a saturated button/badge/gradient. Reclaim it: these selectors are
+   more specific than the `.text-white` utility, so the label stays white wherever it
+   sits on a coloured fill. */
+html.light .bg-primary,
+html.light .bg-accent,
+html.light .bg-success,
+html.light .bg-warning,
+html.light .bg-blue-500,
+html.light .bg-blue-600,
+html.light .bg-blue-700,
+html.light .bg-indigo-600,
+html.light .bg-purple-600,
+html.light .bg-red-500,
+html.light .bg-red-600,
+html.light .bg-green-500,
+html.light .bg-emerald-500,
+html.light .bg-emerald-600,
+html.light .from-primary,
+html.light .from-blue-500,
+html.light .from-blue-600,
+html.light .from-indigo-500,
+html.light .from-purple-500,
+html.light .to-blue-600 {
+  color: rgb(255 255 255);
+}
+
 @layer base {
   body {
-    background-color: #0f172a;
-    color: #f8fafc;
+    background-color: rgb(var(--c-background));
+    color: rgb(var(--c-fg));
     font-family: 'Inter', sans-serif;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   /* Custom Scrollbar */
@@ -27,13 +127,13 @@
     width: 8px;
   }
   ::-webkit-scrollbar-track {
-    background: #0f172a;
+    background: rgb(var(--scrollbar-track));
   }
   ::-webkit-scrollbar-thumb {
-    background: #334155;
+    background: rgb(var(--scrollbar-thumb));
     border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #475569;
+    background: rgb(var(--scrollbar-thumb-hover));
   }
 }

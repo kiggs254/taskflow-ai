@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TASKFLOW.AI</title>
     <link rel="icon" type="image/png" href="https://i.ibb.co/fY4ZPKTr/Untitled-design-8.png" />
+    <script>
+      /* Apply the saved theme before first paint so light mode never flashes dark.
+         Kept inline and tiny on purpose; the real theming lives in index.css. */
+      try { if (localStorage.getItem('taskflow_theme') === 'light') document.documentElement.classList.add('light'); } catch (e) {}
+    </script>
     <!--
       Tailwind is compiled at build time (tailwind.config.js + index.css), not by the
       cdn.tailwindcss.com runtime that used to live here. That script shipped a full
