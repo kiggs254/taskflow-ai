@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { query } from '../config/database.js';
 import { truncateAtWord } from '../utils/text.js';
 import { syncTask } from './taskService.js';
@@ -277,10 +278,27 @@ export const fetchRepoCommits = async (client, repo, { login, sinceIso }) => {
   return { commits: [...bySha.values()], branchOf, notModified: false };
 };
 
-/** One AI-written summary line for a repo's day of work. */
+// Same commits + same label -> same title, so rebuilding a branch's task on every scan
+// (the repo re-scans whenever ANY branch gets a commit) reuses one smart-tier call
+// instead of re-billing. Content-addressed and bounded.
+const dayTitleCache = new Map();
+const DAY_TITLE_CACHE_MAX = 500;
+
+/** One AI-written summary line for a branch's day of work. */
 const summariseDay = async (userId, repoName, commits) => {
   const subjects = commits.map((c) => `- ${c.message.split('\n')[0]}`).join('\n');
   const fallback = `${repoName} — ${commits.length} commit${commits.length > 1 ? 's' : ''}`;
+
+  const key = crypto.createHash('sha256').update(`${repoName}\n${subjects}`).digest('hex');
+  if (dayTitleCache.has(key)) return dayTitleCache.get(key);
+
+  const remember = (title) => {
+    if (dayTitleCache.size >= DAY_TITLE_CACHE_MAX) {
+      dayTitleCache.delete(dayTitleCache.keys().next().value);
+    }
+    dayTitleCache.set(key, title);
+    return title;
+  };
 
   try {
     const { content } = await callAI({
@@ -325,10 +343,10 @@ const summariseDay = async (userId, repoName, commits) => {
           `Keys received: [${Object.keys(parsed ?? {}).join(', ') || 'none'}]. ` +
           `Raw (first 300): ${String(content).slice(0, 300)}`
       );
-      return fallback;
+      return fallback; // don't cache a fallback -- retry it next scan
     }
     // truncateAtWord, not slice: a hard cut landed mid-word and read as corruption.
-    return `${repoName} — ${truncateAtWord(summary, 80)}`;
+    return remember(`${repoName} — ${truncateAtWord(summary, 80)}`);
   } catch (error) {
     // A summary is a nicety; never lose the commit record over it.
     console.error('GitHub: commit summary failed, using fallback:', error.message);
@@ -410,11 +428,11 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
         if (inserted.rows.length) commitsIngested++;
       }
 
-      // Rebuild today's task from the ledger rather than from this response, so the
-      // task reflects every commit ever recorded for the day, not just this batch.
+      // Rebuild from the ledger rather than this response, so each task reflects every
+      // commit recorded for the day, not just this batch.
       const dayCommits = (
         await query(
-          `SELECT sha, message, html_url, committed_at
+          `SELECT sha, message, html_url, committed_at, branch
            FROM processed_commits
            WHERE user_id = $1 AND repo_id = $2 AND committed_at >= $3 AND committed_at < $4
            ORDER BY committed_at ASC`,
@@ -425,52 +443,68 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
       if (!dayCommits.length) continue;
 
       const repoName = `${repo.owner}/${repo.name}`;
-      // userId is part of the id deliberately: repo_id is GitHub's *global* id, so
-      // `gh-{repo_id}-{day}` collides across TaskFlow users who track the same repo,
-      // and syncTask's conflict target is the id alone. Namespacing keeps each user's
-      // repo-day task distinct; syncTask's user_id guard is the second line of defence.
-      const taskId = `gh-${userId}-${repo.repo_id}-${day}`;
-      const title = await summariseDay(userId, repo.name, dayCommits);
-      const lastCommitAt = Number(dayCommits[dayCommits.length - 1].committed_at);
+      const defaultBranch = repo.default_branch || 'main';
 
-      const task = {
-        id: taskId,
-        title,
-        // One concise line, not a second copy of every commit. The subtasks below
-        // already list every commit message; repeating them here -- each trailed by a
-        // raw https://github.com/... URL that renders as a wall of text -- just showed
-        // the same 14 messages twice. Commit links are kept on the subtasks instead.
-        description: `${dayCommits.length} commit${dayCommits.length > 1 ? 's' : ''} to ${repoName} on ${day}.`,
-        // Integration-sourced work is always 'job'.
-        workspace: 'job',
-        energy: 'medium',
-        status: 'done',
-        estimatedTime: null,
-        tags: ['github', repo.name],
-        dependencies: [],
-        subtasks: dayCommits.map((c, i) => ({
-          id: `${taskId}-${i}`,
-          title: c.message.split('\n')[0].slice(0, 120),
-          completed: true,
-          completedAt: Number(c.committed_at),
-          // The commit link, carried on the subtask rather than dumped as raw text in
-          // the description. Extra JSONB fields are inert to the current UI but let it
-          // link the commit later without another scan.
-          url: c.html_url || null,
-        })),
-        // Commit time, not scan time: the work happened when it was committed.
-        createdAt: Number(dayCommits[0].committed_at),
-        completedAt: lastCommitAt,
-      };
+      // One task per branch, not per repo: work on a feature branch is its own task
+      // rather than lumped in with main. Legacy rows with no branch fall back to the
+      // default branch (that's how they were stored before branch scanning).
+      const byBranch = new Map();
+      for (const c of dayCommits) {
+        const b = c.branch || defaultBranch;
+        if (!byBranch.has(b)) byBranch.set(b, []);
+        byBranch.get(b).push(c);
+      }
 
-      await syncTask(userId, task);
-      tasksTouched++;
+      for (const [branch, branchCommits] of byBranch) {
+        // Branch names contain '/', so slug them for the id. userId is in the id
+        // deliberately: repo_id is GitHub's *global* id, so an un-namespaced id would
+        // collide across users tracking the same repo; syncTask's user_id guard is the
+        // second line of defence.
+        const branchSlug = branch.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 60) || 'branch';
+        const taskId = `gh-${userId}-${repo.repo_id}-${branchSlug}-${day}`;
+        // Show the branch in the label for anything but the default branch, so two
+        // tasks on one repo read as distinct work.
+        const label = branch === defaultBranch ? repo.name : `${repo.name} (${branch})`;
+        const title = await summariseDay(userId, label, branchCommits);
+        const lastCommitAt = Number(branchCommits[branchCommits.length - 1].committed_at);
 
-      await query(
-        `UPDATE processed_commits SET task_id = $3
-         WHERE user_id = $1 AND repo_id = $2 AND committed_at >= $4 AND committed_at < $5`,
-        [userId, repo.repo_id, taskId, dayStartMs, dayStartMs + 86_400_000]
-      );
+        const task = {
+          id: taskId,
+          title,
+          // Concise; the subtasks already list every commit. The branch is named here
+          // so the source is unambiguous.
+          description: `${branchCommits.length} commit${branchCommits.length > 1 ? 's' : ''} to ${repoName} on ${branch} (${day}).`,
+          // Integration-sourced work is always 'job'.
+          workspace: 'job',
+          energy: 'medium',
+          status: 'done',
+          estimatedTime: null,
+          tags: ['github', repo.name, branch],
+          dependencies: [],
+          subtasks: branchCommits.map((c, i) => ({
+            id: `${taskId}-${i}`,
+            title: c.message.split('\n')[0].slice(0, 120),
+            completed: true,
+            completedAt: Number(c.committed_at),
+            // The commit link, carried on the subtask rather than dumped as raw text.
+            url: c.html_url || null,
+          })),
+          // Commit time, not scan time: the work happened when it was committed.
+          createdAt: Number(branchCommits[0].committed_at),
+          completedAt: lastCommitAt,
+        };
+
+        await syncTask(userId, task);
+        tasksTouched++;
+
+        // Re-point by SHA (not a time range), so each commit lands on exactly its
+        // branch's task and the grouping can't drift.
+        await query(
+          `UPDATE processed_commits SET task_id = $3
+           WHERE user_id = $1 AND repo_id = $2 AND sha = ANY($4::text[])`,
+          [userId, repo.repo_id, taskId, branchCommits.map((c) => c.sha)]
+        );
+      }
     } catch (error) {
       if (error.rateLimited) {
         // Per-app limit: abandon the whole sweep, don't move to the next repo.
@@ -480,6 +514,16 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
       console.error(`GitHub: failed scanning ${repo.owner}/${repo.name}:`, error.message);
     }
   }
+
+  // Drop any gh- task no longer backed by a commit -- notably the old per-repo-day task
+  // whose commits were just re-pointed to per-branch tasks. task_id FK is ON DELETE SET
+  // NULL, so this can't cascade into the ledger. Scoped to this user.
+  await query(
+    `DELETE FROM tasks
+     WHERE user_id = $1 AND id LIKE 'gh-%'
+       AND NOT EXISTS (SELECT 1 FROM processed_commits WHERE task_id = tasks.id)`,
+    [userId]
+  );
 
   await query(
     'UPDATE github_integrations SET last_scan_at = CURRENT_TIMESTAMP WHERE user_id = $1',
