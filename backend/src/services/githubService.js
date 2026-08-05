@@ -5,7 +5,8 @@ import { callAI } from './ai/callAI.js';
 import { getClientForUser, nextPageUrl, isGithubConfigured } from './githubAuth.js';
 import { DEFAULT_TIMEZONE, localDateString, startOfLocalDayMs } from '../utils/time.js';
 
-const MAX_PAGES = 5; // 500 commits/repo/day; beyond this something is wrong
+const MAX_PAGES = 5; // 500 commits/repo/day/branch; beyond this something is wrong
+const MAX_BRANCHES = 100; // cap the fan-out on a repo with a runaway number of branches
 
 /**
  * Complete the GitHub App installation callback.
@@ -189,27 +190,33 @@ export const disconnectGithub = async (userId) => {
  * tokens -- silently lossy, which is the worst failure mode for a report someone
  * reads) or the Search API (separate quota, indexing lag).
  */
-const fetchRepoCommits = async (client, repo, { login, sinceIso }) => {
+/** Every branch name in the repo, capped. */
+const listBranches = async (client, repo) => {
+  const names = [];
+  let url = `/repos/${repo.owner}/${repo.name}/branches?per_page=100`;
+  let pages = 0;
+  while (url && pages < 3) {
+    const res = await client.request(url);
+    for (const b of res.data || []) if (b?.name) names.push(b.name);
+    url = nextPageUrl(res.link);
+    pages++;
+  }
+  return names.slice(0, MAX_BRANCHES);
+};
+
+/** Today's commits by the author on ONE branch. */
+const fetchBranchCommits = async (client, repo, branch, { login, sinceIso }) => {
   const commits = [];
   let url =
     `/repos/${repo.owner}/${repo.name}/commits` +
-    `?sha=${encodeURIComponent(repo.default_branch || 'main')}` +
+    `?sha=${encodeURIComponent(branch)}` +
     `&since=${encodeURIComponent(sinceIso)}` +
     `&per_page=100` +
     (login ? `&author=${encodeURIComponent(login)}` : '');
 
   let pages = 0;
-  let etag = repo.etag;
-  let firstEtag = null;
-
   while (url && pages < MAX_PAGES) {
-    const res = await client.request(url, { etag: pages === 0 ? etag : undefined });
-
-    // `since` is pinned to local midnight, so the URL is stable for 24h and repeat
-    // polls within a day hit this branch. 304s don't count against the rate limit.
-    if (res.notModified) return { commits: [], etag, notModified: true, rate: res.rate };
-
-    if (pages === 0) firstEtag = res.etag;
+    const res = await client.request(url);
     commits.push(...(res.data || []));
     url = nextPageUrl(res.link);
     pages++;
@@ -217,12 +224,57 @@ const fetchRepoCommits = async (client, repo, { login, sinceIso }) => {
 
   if (pages >= MAX_PAGES && url) {
     console.warn(
-      `GitHub: ${repo.owner}/${repo.name} hit the ${MAX_PAGES}-page cap; ` +
+      `GitHub: ${repo.owner}/${repo.name}@${branch} hit the ${MAX_PAGES}-page cap; ` +
         `some commits were not ingested for this day.`
     );
   }
+  return commits;
+};
 
-  return { commits, etag: firstEtag, notModified: false };
+/**
+ * All of today's commits across EVERY branch, deduped by SHA.
+ *
+ * The commits API has no "all branches" mode -- `sha` selects a single ref and defaults
+ * to the default branch -- so work on a feature branch was invisible until it merged to
+ * main. We enumerate branches and union their commits; the same SHA on several branches
+ * (before a merge, or a shared base) collapses to one, and processed_commits dedups
+ * again on insert. `since`+`author` keep each branch's payload tiny, so the fan-out is
+ * cheap even on a repo with many branches.
+ *
+ * This drops the per-repo ETag short-circuit the single-branch path had. At the default
+ * 30-min scan frequency that's a handful of small requests per repo, far inside the
+ * GitHub App's 15k/hr budget; correctness across branches is worth more than a 304.
+ *
+ * Exported for testing against a fake client.
+ */
+export const fetchRepoCommits = async (client, repo, { login, sinceIso }) => {
+  const branches = await listBranches(client, repo);
+  // If a repo somehow reports no branches, fall back to its recorded default so a
+  // single-branch repo still works.
+  const scan = branches.length ? branches : [repo.default_branch || 'main'];
+
+  const bySha = new Map();
+  const branchOf = new Map();
+
+  for (const branch of scan) {
+    let commits;
+    try {
+      commits = await fetchBranchCommits(client, repo, branch, { login, sinceIso });
+    } catch (err) {
+      // A rate-limit must stop the whole scan; a branch deleted/renamed mid-scan
+      // (404/409) should just be skipped rather than abort the repo.
+      if (err?.rateLimited) throw err;
+      continue;
+    }
+    for (const c of commits) {
+      if (c?.sha && !bySha.has(c.sha)) {
+        bySha.set(c.sha, c);
+        branchOf.set(c.sha, branch);
+      }
+    }
+  }
+
+  return { commits: [...bySha.values()], branchOf, notModified: false };
 };
 
 /** One AI-written summary line for a repo's day of work. */
@@ -324,14 +376,14 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
 
   for (const repo of repos) {
     try {
-      const { commits, etag, notModified } = await fetchRepoCommits(client, repo, { login, sinceIso });
+      const { commits, branchOf } = await fetchRepoCommits(client, repo, { login, sinceIso });
 
       await query(
-        'UPDATE github_repos SET last_polled_at = CURRENT_TIMESTAMP, etag = COALESCE($3, etag) WHERE user_id = $1 AND repo_id = $2',
-        [userId, repo.repo_id, etag]
+        'UPDATE github_repos SET last_polled_at = CURRENT_TIMESTAMP WHERE user_id = $1 AND repo_id = $2',
+        [userId, repo.repo_id]
       );
 
-      if (notModified || !commits.length) continue;
+      if (!commits.length) continue;
 
       // Merge commits are plumbing, not work, and would double-count every PR.
       const real = commits.filter((c) => (c.parents?.length ?? 1) <= 1);
@@ -352,7 +404,7 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
             committedAt,
             c.commit?.message ?? '',
             c.html_url ?? null,
-            repo.default_branch ?? null,
+            branchOf.get(c.sha) ?? repo.default_branch ?? null,
           ]
         );
         if (inserted.rows.length) commitsIngested++;
