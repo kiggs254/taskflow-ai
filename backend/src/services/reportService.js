@@ -334,21 +334,40 @@ const narrateItem = async (userId, item) => {
   return narrative;
 };
 
+// How many narration calls may be in flight at once.
+//
+// This was Promise.all over every item -- on a 9-project day that fired 9 concurrent
+// smart-tier calls in one burst. Providers rate-limit on concurrency, so the first
+// couple landed and the rest took 429s; each fell back to "3 commits" and the 16:30
+// report went out mostly un-narrated while telemetry showed the calls "handled".
+// A small window is plenty: nobody is waiting on the cron, and the preview is cached.
+const NARRATIVE_CONCURRENCY = 2;
+
 /**
  * Attach a `project` and an AI-written `narrative` to every report item, in place.
  *
  * Separate from getCompletedToday, which stays pure SQL: this is the one place AI
  * touches the report, and both the 16:30 send and the Settings preview call it so the
- * preview shows exactly what will be sent. Items are narrated concurrently, and a
- * failure on one never rejects the batch -- narrateItem swallows its own errors.
+ * preview shows exactly what will be sent. A failure on one item never rejects the
+ * batch -- narrateItem swallows its own errors and falls back.
  */
 export const attachNarratives = async (report, userId) => {
-  await Promise.all(
-    (report.items || []).map(async (item) => {
+  const items = report.items || [];
+  let next = 0;
+
+  // A fixed pool of workers pulling from a shared cursor: bounded concurrency without
+  // batching, so one slow item doesn't stall the others behind a barrier.
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next++];
       const { project } = splitProjectTitle(item.title);
       item.project = project;
       item.narrative = await narrateItem(userId, item);
-    })
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(NARRATIVE_CONCURRENCY, items.length) }, worker)
   );
   return report;
 };
@@ -364,10 +383,27 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
  * and returns `windowSince` so the preview covers exactly the pending report's window
  * rather than the whole day (which would re-show work already sent at 16:30).
  */
+/**
+ * A DATE column as 'YYYY-MM-DD'.
+ *
+ * node-postgres hands back a JS Date for a DATE, and `String(date).slice(0, 10)` gives
+ * "Wed Aug 12" -- which never equals "2026-08-12", so an "already sent today?" check
+ * written that way is always false. Normalise on the local calendar parts, not
+ * toISOString(), which would shift the day for anyone east of UTC.
+ */
+export const toDateString = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  }
+  return String(value).slice(0, 10);
+};
+
 export const nextReportInfo = (settings, atMs = Date.now()) => {
   const tz = resolveTz(settings.timezone);
   const today = localDateString(tz, atMs);
-  const sentToday = Boolean(settings.last_sent_on && String(settings.last_sent_on).slice(0, 10) === today);
+  const sentToday = toDateString(settings.last_sent_on) === today;
   const targetMin = parseTimeToMinutes(String(settings.report_time)) ?? 16 * 60 + 30;
   const nowMin = localMinutesOfDay(tz, atMs);
   const skipWeekends = settings.skip_weekends !== false;

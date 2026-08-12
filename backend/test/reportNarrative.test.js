@@ -19,13 +19,18 @@ process.env.DATABASE_URL = 'postgres://invalid:5432/invalid';
 let hits = 0;
 let mode = 'ok';
 let lastBody = null;
+let concurrencyProbe = null;
 const server = await new Promise((resolve) => {
   const s = http.createServer((req, res) => {
     hits++;
     let raw = '';
     req.on('data', (c) => (raw += c));
-    req.on('end', () => {
+    req.on('end', async () => {
       try { lastBody = JSON.parse(raw); } catch { /* ignore */ }
+      // Lets a test observe how many calls are in flight at once.
+      const done = concurrencyProbe ? concurrencyProbe() : null;
+      if (done) await new Promise((r) => setTimeout(r, 15));
+      if (done) done();
       if (mode === 'fail') {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: { message: 'boom' } }));
@@ -119,4 +124,33 @@ test('an item with no subtasks is narrated as its title outcome without calling 
   await attachNarratives(report, 1);
   assert.equal(hits, 0, 'nothing to summarise -> no call');
   assert.equal(report.items[0].narrative, 'Wrote the design doc');
+});
+
+test('narration is throttled, so a big day does not burst-fire and get rate limited', async () => {
+  // The 16:30 failure: Promise.all over 9 projects fired 9 concurrent smart-tier calls,
+  // most came back 429, and the report went out with "3 commits" fallbacks. A bounded
+  // pool keeps in-flight calls low while still narrating everything.
+  mode = 'ok';
+  let inFlight = 0;
+  let peak = 0;
+  concurrencyProbe = () => {
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    return () => { inFlight--; };
+  };
+
+  const report = { items: Array.from({ length: 9 }, (_, i) => ({
+    title: `proj-${i} — did work`,
+    subtasks: [{ title: `throttle-commit-${i}`, completed: true }],
+  })) };
+
+  await attachNarratives(report, 1);
+  concurrencyProbe = null;
+
+  assert.ok(peak <= 2, `expected at most 2 concurrent calls, saw ${peak}`);
+  assert.equal(
+    report.items.filter((i) => i.narrative === 'A short story of the work.').length,
+    9,
+    'every item is still narrated'
+  );
 });

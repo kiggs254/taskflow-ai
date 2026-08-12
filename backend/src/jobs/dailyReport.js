@@ -5,6 +5,7 @@ import {
   attachNarratives,
   claimReportDay,
   releaseReportDay,
+  toDateString,
 } from '../services/reportService.js';
 import { getUserById } from '../services/userService.js';
 import { sendDailyReportEmail } from '../services/emailService.js';
@@ -128,7 +129,11 @@ export const startDailyReport = () => {
           if (settings.skip_weekends !== false && isWeekend(tz, now)) continue;
 
           const today = localDateString(tz, now);
-          if (settings.last_sent_on && localDateString(tz, now) === String(settings.last_sent_on).slice(0, 10)) {
+          // Same normalisation as nextReportInfo: pg returns a Date for a DATE column,
+          // and String(date).slice(0,10) is "Wed Aug 12", so this guard silently never
+          // fired. Harmless (claimReportDay is the real at-most-once gate, and it
+          // compares server-side) but it meant every tick did the claim round-trip.
+          if (toDateString(settings.last_sent_on) === localDateString(tz, now)) {
             continue;
           }
 
