@@ -33,9 +33,23 @@ const clients = {
 
 export const isProviderConfigured = (provider) => Boolean(clients[provider]);
 
-// Providers that returned 401/403 are unusable for the life of the process.
-// Retrying a bad key on every request just adds latency to a guaranteed failure.
-const deadProviders = new Set();
+// Providers that returned 401/403 are benched, but only for a cooldown, not the whole
+// process. A 401/403 covers both a genuinely bad key AND a spent balance / suspended
+// key that the user then tops up or fixes -- benching forever meant a recharge only
+// took effect after a redeploy ("no summaries even though I paid"). After the cooldown
+// the provider is retried; if it's still broken it just gets benched again.
+const DEAD_PROVIDER_COOLDOWN_MS = 20 * 60 * 1000;
+const deadProviders = new Map(); // provider -> epoch ms it may be retried
+
+const isBenched = (p) => {
+  const until = deadProviders.get(p);
+  if (until == null) return false;
+  if (Date.now() >= until) {
+    deadProviders.delete(p);
+    return false;
+  }
+  return true;
+};
 
 const TIMEOUT_MS = { fast: 30_000, smart: 90_000 };
 const MAX_ATTEMPTS = 3;
@@ -171,9 +185,7 @@ export const callAI = async ({
   thinking = false,
   userId = null,
 }) => {
-  const chain = providerChain(provider).filter(
-    (p) => clients[p] && !deadProviders.has(p)
-  );
+  const chain = providerChain(provider).filter((p) => clients[p] && !isBenched(p));
 
   if (!chain.length) {
     throw new Error(
@@ -272,8 +284,12 @@ export const callAI = async ({
         });
 
         if (kind === 'auth') {
-          console.error(`AI provider ${p} rejected credentials; disabling for this process.`);
-          deadProviders.add(p);
+          console.error(
+            `AI provider ${p} rejected credentials (${status}); benching for ` +
+              `${DEAD_PROVIDER_COOLDOWN_MS / 60000}m. Recovers on its own if the key is ` +
+              `topped up or fixed.`
+          );
+          deadProviders.set(p, Date.now() + DEAD_PROVIDER_COOLDOWN_MS);
           break; // try the next provider
         }
 

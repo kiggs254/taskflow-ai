@@ -282,7 +282,7 @@ const narrateItem = async (userId, item) => {
     .digest('hex');
   if (narrativeCache.has(key)) return narrativeCache.get(key);
 
-  let narrative = fallback;
+  let narrative = null;
   try {
     const { content } = await callAI({
       taskKind: 'report_narrative',
@@ -320,6 +320,12 @@ const narrateItem = async (userId, item) => {
   } catch (error) {
     console.error(`Report narrative failed for "${project}", using fallback:`, error.message);
   }
+
+  // Only cache a real AI narrative. Caching the fallback meant that once the AI failed
+  // (e.g. credits ran out), every later preview/send kept serving that fallback from
+  // cache even after the AI was working again -- the report never recovered without a
+  // restart. Not caching it means the next attempt retries.
+  if (!narrative) return fallback;
 
   if (narrativeCache.size >= NARRATIVE_CACHE_MAX) {
     narrativeCache.delete(narrativeCache.keys().next().value);

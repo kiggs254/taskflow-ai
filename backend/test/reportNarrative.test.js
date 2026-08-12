@@ -94,6 +94,25 @@ test('falls back to the title outcome when the model fails, never blank', async 
   assert.equal(report.items[0].narrative, 'Reconciled the ledger', 'fallback is the outcome after the em dash');
 });
 
+test('a fallback is NOT cached, so it regenerates once the model works again', async () => {
+  // The exact "credits ran out" case: the AI failed, so the item fell back. After a
+  // recharge, asking again must produce the real narrative -- not keep serving the
+  // cached fallback forever.
+  const item = () => ({ items: [
+    { title: 'ops-svc — did stuff', subtasks: [{ title: 'commit-recovery-unique', completed: true }] },
+  ]});
+
+  mode = 'fail';
+  const failed = item();
+  await attachNarratives(failed, 1);
+  assert.equal(failed.items[0].narrative, 'did stuff', 'fell back while the model was down');
+
+  mode = 'ok';
+  const recovered = item();
+  await attachNarratives(recovered, 1);
+  assert.equal(recovered.items[0].narrative, 'A short story of the work.', 'regenerates, not a cached fallback');
+});
+
 test('an item with no subtasks is narrated as its title outcome without calling the model', async () => {
   mode = 'ok'; hits = 0;
   const report = { items: [{ title: 'notes — Wrote the design doc', subtasks: [] }] };
