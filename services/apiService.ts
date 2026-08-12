@@ -373,14 +373,20 @@ export const api = {
       if (!res.ok) throw new Error('Failed to load today\'s report');
       return res.json();
     },
-    sendNow: async (token: string) => {
+    /**
+     * Run the real delivery path now.
+     * `refresh` re-writes every AI narrative instead of reusing cached ones, and
+     * `claim` marks the day sent so the scheduled 16:30 job won't post again.
+     * End Day Reset sets both; "Send test report" sets neither.
+     */
+    sendNow: async (token: string, opts: { refresh?: boolean; claim?: boolean } = {}) => {
       const res = await fetch(`${API_BASE}/reports/send-now`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ force: true }),
+        body: JSON.stringify({ force: true, ...opts }),
       });
       if (!res.ok) throw new Error('Failed to send test report');
       return res.json();

@@ -154,3 +154,20 @@ test('narration is throttled, so a big day does not burst-fire and get rate limi
     'every item is still narrated'
   );
 });
+
+test('refresh re-writes narratives instead of serving the cache', async () => {
+  // End Day Reset always re-summarises, so a wrap-up is never a stale cached line --
+  // notably after a run where the AI was down and everything fell back to "3 commits".
+  mode = 'ok';
+  const mk = () => ({ items: [
+    { title: 'endday-proj — did work', subtasks: [{ title: 'commit-endday-unique', completed: true }] },
+  ]});
+
+  await attachNarratives(mk(), 1);          // populates the cache
+  hits = 0;
+  await attachNarratives(mk(), 1);          // default: cached, no call
+  assert.equal(hits, 0, 'without refresh the cache is used');
+
+  await attachNarratives(mk(), 1, { refresh: true });
+  assert.ok(hits >= 1, 'refresh:true re-asks the model');
+});

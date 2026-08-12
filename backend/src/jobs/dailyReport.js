@@ -18,7 +18,11 @@ const SWEEP_MINUTES = 5;
  * Send one user's report across their enabled channels.
  * Exported so "Send test report" in Settings runs the exact same path.
  */
-export const sendReportForUser = async (userId, settings, { force = false, atMs = Date.now() } = {}) => {
+export const sendReportForUser = async (
+  userId,
+  settings,
+  { force = false, atMs = Date.now(), refresh = false } = {}
+) => {
   const tz = settings.timezone || DEFAULT_TIMEZONE;
   // Pick up where the last report stopped, so work done after yesterday's send is
   // carried into this one rather than falling into the gap between the two.
@@ -47,7 +51,8 @@ export const sendReportForUser = async (userId, settings, { force = false, atMs 
 
   // Turn each project's commits into a short narrative before rendering. After the
   // gate and the empty check, so a report that won't send never pays for AI.
-  await attachNarratives(report, userId);
+  // `refresh` re-writes them from scratch (End Day Reset), ignoring the cache.
+  await attachNarratives(report, userId, { refresh });
 
   const results = {};
 

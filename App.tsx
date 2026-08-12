@@ -2922,17 +2922,35 @@ export default function App() {
         }
       }
 
-      // 2) The end-of-day report is sent server-side.
+      // 2) Send the end-of-day report, server-side.
       //
-      // It used to be assembled and posted from right here, inside the manual Daily
-      // Reset flow -- which meant the "daily report" only existed if the user opened
-      // the app and clicked reset. It is now a scheduled job (backend/src/jobs/
-      // dailyReport.js) that fires at the user's configured local time, so it must
-      // NOT also fire from the client or the report would be sent twice.
+      // The report itself is assembled and delivered by the backend (the same path the
+      // scheduled job uses), never rebuilt here -- the subtask-aware "completed today"
+      // rules live in backend/src/services/reportService.js so the job, this button and
+      // the preview can't disagree.
       //
-      // The subtask-aware "completed today" rules that lived here now live in
-      // backend/src/services/reportService.js, shared by the job and GET
-      // /api/reports/completed-today.
+      // refresh: re-write every AI narrative rather than reusing cached ones, so a
+      //          wrap-up is always freshly summarised.
+      // claim:   mark the day sent, so the scheduled job can't post a second copy to
+      //          the team channel later.
+      try {
+        const sent = await api.reports.sendNow(token, { refresh: true, claim: true });
+        if (sent?.sent) {
+          const channels = Object.entries(sent.results ?? {})
+            .filter(([, v]: any) => v.ok)
+            .map(([k]) => k)
+            .join(' and ');
+          addToast(`Day report sent${channels ? ` via ${channels}` : ''}.`, 'success');
+        } else if (sent?.reason === 'nothing_completed') {
+          addToast('Nothing completed today — no report sent.', 'info');
+        } else {
+          addToast('Report was not delivered. Check report settings.', 'error');
+        }
+      } catch (error) {
+        // A failed report must not block the reset itself.
+        console.error('Daily reset: report send failed', error);
+        addToast('Could not send the day report.', 'error');
+      }
 
       // 3) Tell backend we've reset the day
       const res = await api.dailyReset(token);

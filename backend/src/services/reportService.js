@@ -264,7 +264,7 @@ const NARRATIVE_SCHEMA = {
 const narrativeCache = new Map();
 const NARRATIVE_CACHE_MAX = 500;
 
-const narrateItem = async (userId, item) => {
+const narrateItem = async (userId, item, { refresh = false } = {}) => {
   const { project, outcome } = splitProjectTitle(item.title);
   const lines = (item.subtasks || [])
     .filter((s) => s.completed && s.title)
@@ -280,7 +280,10 @@ const narrateItem = async (userId, item) => {
     .createHash('sha256')
     .update(`${project}\n${lines.join('\n')}`)
     .digest('hex');
-  if (narrativeCache.has(key)) return narrativeCache.get(key);
+  // `refresh` re-asks the model even for commits already narrated. End Day Reset uses
+  // it so the wrap-up is always freshly written -- notably after a run where the AI was
+  // down and the report went out with "3 commits" fallbacks.
+  if (!refresh && narrativeCache.has(key)) return narrativeCache.get(key);
 
   let narrative = null;
   try {
@@ -351,7 +354,7 @@ const NARRATIVE_CONCURRENCY = 2;
  * preview shows exactly what will be sent. A failure on one item never rejects the
  * batch -- narrateItem swallows its own errors and falls back.
  */
-export const attachNarratives = async (report, userId) => {
+export const attachNarratives = async (report, userId, { refresh = false } = {}) => {
   const items = report.items || [];
   let next = 0;
 
@@ -362,7 +365,7 @@ export const attachNarratives = async (report, userId) => {
       const item = items[next++];
       const { project } = splitProjectTitle(item.title);
       item.project = project;
-      item.narrative = await narrateItem(userId, item);
+      item.narrative = await narrateItem(userId, item, { refresh });
     }
   };
 

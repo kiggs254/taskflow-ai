@@ -1,7 +1,15 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
-import { getCompletedToday, attachNarratives, nextReportInfo, getReportSettings, updateReportSettings } from '../services/reportService.js';
+import {
+  getCompletedToday,
+  attachNarratives,
+  nextReportInfo,
+  getReportSettings,
+  updateReportSettings,
+  claimReportDay,
+} from '../services/reportService.js';
+import { DEFAULT_TIMEZONE, localDateString } from '../utils/time.js';
 import { sendReportForUser } from '../jobs/dailyReport.js';
 
 const router = express.Router();
@@ -70,7 +78,22 @@ router.put('/settings', asyncHandler(async (req, res) => {
  */
 router.post('/send-now', asyncHandler(async (req, res) => {
   const settings = await getReportSettings(req.user.id);
-  const outcome = await sendReportForUser(req.user.id, settings, { force: req.body?.force !== false });
+  const now = Date.now();
+  const outcome = await sendReportForUser(req.user.id, settings, {
+    force: req.body?.force !== false,
+    atMs: now,
+    // End Day Reset passes refresh:true so the wrap-up is always freshly summarised.
+    refresh: req.body?.refresh === true,
+  });
+
+  // End Day Reset claims the day on success, so the scheduled send can't fire again
+  // later and post a second report to the team channel. A plain "Send test report"
+  // doesn't claim -- testing the plumbing must not cancel the real report.
+  if (req.body?.claim === true && outcome.sent) {
+    const tz = settings.timezone || DEFAULT_TIMEZONE;
+    await claimReportDay(req.user.id, localDateString(tz, now), now);
+  }
+
   res.json(outcome);
 }));
 
