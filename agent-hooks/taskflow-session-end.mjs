@@ -153,7 +153,11 @@ const main = async () => {
   // necessarily the project root. CLAUDE_PROJECT_DIR is the documented way to get it.
   const projectDir = process.env.CLAUDE_PROJECT_DIR || input.cwd;
 
-  let decided = false; // did we reach a confident conclusion about this session?
+  // Only true once the session is genuinely dealt with: posted, or confidently judged
+  // not to be work. It must NOT be set merely because the policy was readable -- doing
+  // that deleted the log whenever the POST failed, so a backend that moved or blipped
+  // silently destroyed the record of real work.
+  let handled = false;
   try {
     const policy = await getPolicy();
 
@@ -162,11 +166,11 @@ const main = async () => {
     // transient error, which is exactly how a real session was lost to a stale cache.
     if (!policy) return;
 
-    decided = true;
-
     // THE PRIVACY GATE. Everything below this line only runs for work folders.
     const rule = policy.enabled === false ? null : matchWorkPath(projectDir, policy.workPaths || []);
-    if (!rule) return;
+    // A confident "not work": nothing should leave the machine, and the log shouldn't
+    // linger either.
+    if (!rule) { handled = true; return; }
 
     let prompts = [];
     let changedPaths = [];
@@ -184,7 +188,7 @@ const main = async () => {
     }
 
     changedPaths = [...new Set(changedPaths)];
-    if (!prompts.length && !changedPaths.length) return; // nothing happened
+    if (!prompts.length && !changedPaths.length) { handled = true; return; } // nothing happened
 
     // Real timestamps from the recorded entries, not "now" — the task's completedAt
     // should reflect when the work happened, matching how commit tasks use commit
@@ -214,11 +218,13 @@ const main = async () => {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }),
     });
+
+    // Reached only if the POST resolved. A throw above leaves handled false, so the log
+    // survives for the next session end to retry.
+    handled = true;
   } finally {
-    // Only discard the log once we actually decided. A confident "not work" should
-    // delete it (a personal session's prompts shouldn't linger here); an *undecided*
-    // session must keep it, or a transient backend blip silently destroys real work.
-    if (decided) {
+    // Discard only what was actually handled. Anything else is kept and retried.
+    if (handled) {
       try {
         fs.unlinkSync(logFile);
       } catch {
