@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
-  Plus, Brain, Zap, Coffee, Briefcase, User, Laptop, CheckCircle2, Play, 
+  Gauge, Plus, Brain, Zap, Coffee, Briefcase, User, Laptop, CheckCircle2, Play, 
   X, Menu, Trophy, Flame, ArrowRight, Sparkles, Target, Clock, Layout, 
   Sun, Moon, RotateCcw, MessageSquare, Copy, Check, Mail, Lock, Unlock,
   LogOut, Loader2, Link as LinkIcon, BarChart2, Settings as SettingsIcon,
@@ -20,6 +20,8 @@ import { GitHubSettings } from './components/GitHubSettings';
 import { ReportSettings } from './components/ReportSettings';
 import { AnalyticsScreen } from './components/AnalyticsScreen';
 import { AgentSettings } from './components/AgentSettings';
+import { KpiSettings } from './components/KpiSettings';
+import { KpiReport } from './components/KpiReport';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { ToastContainer, Toast, ToastType } from './components/ToastNotification';
 import { ConfirmationModal } from './components/ConfirmationModal';
@@ -1647,6 +1649,7 @@ const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onL
                  <GitHubSettings token={token} />
                  <AgentSettings token={token} />
                  <ReportSettings token={token} />
+                 <KpiSettings token={token} />
                  <GmailSettings token={token} />
                  <TelegramSettings token={token} />
                  <SlackSettings token={token} />
@@ -3349,6 +3352,13 @@ export default function App() {
                 >
                   <BarChart2 className="w-4 h-4" /> Analytics
                 </button>
+                {/* KPI report — monthly, in the format the review template expects */}
+                <button
+                  onClick={() => setView(AppView.KPI_REPORT)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.KPI_REPORT ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                >
+                  <Gauge className="w-4 h-4" /> KPI Report
+                </button>
                 {/* 4. Draft Tasks */}
                 <button 
                   onClick={() => setView(AppView.DRAFT_TASKS)}
@@ -3821,6 +3831,7 @@ export default function App() {
 
           {/* Analytics View */}
           {view === AppView.ANALYTICS && <AnalyticsScreen token={token} onBack={() => setView(AppView.DASHBOARD)} />}
+          {view === AppView.KPI_REPORT && <KpiReport token={token!} onBack={() => setView(AppView.DASHBOARD)} />}
           
           {/* Completed Tasks View */}
           {view === AppView.COMPLETED_TASKS && <CompletedTasksScreen tasks={completedTasksAll} onBack={() => setView(AppView.DASHBOARD)} onExport={handleExport} onUncomplete={uncompleteTask} />}

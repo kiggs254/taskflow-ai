@@ -393,6 +393,67 @@ export const api = {
     },
   },
 
+  // Monthly KPI reporting
+  kpi: {
+    settings: async (token: string) => {
+      const res = await fetch(`${API_BASE}/kpi/settings`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load KPI settings');
+      return res.json();
+    },
+    updateSettings: async (token: string, settings: { fleetBaseUrl?: string; fleetApiKey?: string; workInstanceIds?: string[]; sheetId?: string }) => {
+      const res = await fetch(`${API_BASE}/kpi/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(settings),
+      });
+      if (!res.ok) throw new Error('Failed to save KPI settings');
+      return res.json();
+    },
+    /** The fleet from ebiz-manager, plus which ids are already marked as work. */
+    instances: async (token: string) => {
+      const res = await fetch(`${API_BASE}/kpi/instances`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to load fleet instances');
+      }
+      return res.json();
+    },
+    monthly: async (token: string, month: string) => {
+      const res = await fetch(`${API_BASE}/kpi/monthly?month=${encodeURIComponent(month)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to build the KPI report');
+      }
+      return res.json();
+    },
+    /** Tab-separated grid — pastes straight into a sheet, needs no Google auth. */
+    monthlyTsv: async (token: string, month: string) => {
+      const res = await fetch(`${API_BASE}/kpi/monthly?month=${encodeURIComponent(month)}&format=tsv`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to build the KPI report');
+      return res.text();
+    },
+    exportSheet: async (token: string, month: string, spreadsheetId?: string) => {
+      const res = await fetch(`${API_BASE}/kpi/export-sheet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ month, spreadsheetId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to export to Google Sheets');
+      }
+      return res.json();
+    },
+  },
+
   // GitHub Integration
   github: {
     connect: async (token: string) => {

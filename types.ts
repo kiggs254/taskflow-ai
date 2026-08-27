@@ -62,6 +62,7 @@ export enum AppView {
   COMPLETED_TASKS = 'COMPLETED_TASKS',
   DRAFT_TASKS = 'DRAFT_TASKS',
   MEETINGS = 'MEETINGS',
+  KPI_REPORT = 'KPI_REPORT',
 }
 
 export interface AIParsedTask {
