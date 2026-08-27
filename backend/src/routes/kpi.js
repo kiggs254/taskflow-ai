@@ -72,7 +72,13 @@ router.get('/instances', asyncHandler(async (req, res) => {
  */
 router.get('/monthly', asyncHandler(async (req, res) => {
   const month = String(req.query.month || '').trim();
-  const report = await getMonthlyKpi(req.user.id, { month, timezone: req.query.tz });
+  // Served from the stored snapshot unless the caller explicitly asks for a rebuild,
+  // so opening the page doesn't re-walk every repo on GitHub.
+  const report = await getMonthlyKpi(req.user.id, {
+    month,
+    timezone: req.query.tz,
+    refresh: req.query.refresh === '1',
+  });
   if (req.query.format === 'tsv') {
     res.type('text/tab-separated-values').send(toTsv(report));
     return;

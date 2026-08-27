@@ -29,11 +29,11 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
     isOpen: false, title: '', message: '', type: 'info',
   });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refresh = false) => {
     setLoading(true);
-    setReport(null);
+    if (refresh) setReport(null);
     try {
-      setReport(await api.kpi.monthly(token, month));
+      setReport(await api.kpi.monthly(token, month, refresh));
     } catch (e: any) {
       setAlert({ isOpen: true, title: 'Could not build the report', message: e.message, type: 'error' });
     } finally {
@@ -41,7 +41,7 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
     }
   }, [token, month]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(false); }, [load]);
 
   // Every metric is derived now, so the thing worth surfacing is not "what must you
   // fill in" but "what had no data" -- a null is an absent measurement, not a zero.
@@ -98,7 +98,7 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
             className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
           />
         </div>
-        <button onClick={load} disabled={loading}
+        <button onClick={() => load(true)} disabled={loading}
           className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-sm disabled:opacity-50">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Rebuild
         </button>
@@ -116,6 +116,11 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
       </div>
 
       {loading && <p className="text-slate-400 text-sm">Reading commits and fleet data…</p>}
+      {report?.generatedAt && !loading && (
+        <p className="text-xs text-slate-500">
+          Generated {new Date(report.generatedAt).toLocaleString()} · stored, so the figures stay put until you rebuild.
+        </p>
+      )}
 
       {report && (
         <>

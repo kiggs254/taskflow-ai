@@ -313,7 +313,7 @@ const fromFleet = (value, how) => ({ value, source: 'fleet', note: how });
  * counted -- so a manager validating against system records can see the definition
  * rather than guess at it.
  */
-export const getMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = {}) => {
+const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = {}) => {
   const tz = isValidTimezone(timezone) ? timezone : DEFAULT_TIMEZONE;
   const range = monthRange(month);
 
@@ -444,4 +444,41 @@ export const getMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE
       },
     ],
   };
+};
+
+/** The stored snapshot for a month, or null. */
+export const getStoredKpi = async (userId, month) => {
+  const r = await query(
+    'SELECT report, generated_at FROM kpi_reports WHERE user_id = $1 AND month = $2',
+    [userId, month]
+  );
+  if (!r.rows[0]) return null;
+  return { ...r.rows[0].report, generatedAt: r.rows[0].generated_at };
+};
+
+/**
+ * The month's report: the stored one if it exists, otherwise built and stored.
+ *
+ * `refresh` forces a rebuild. Generating walks every selected repo's branches on
+ * GitHub, so this must not happen just because a page was opened -- and a report that
+ * has already been sent to a manager should keep reporting the same figures rather than
+ * quietly drifting as git history moves beneath it.
+ */
+export const getMonthlyKpi = async (userId, { month, timezone, refresh = false } = {}) => {
+  if (!refresh) {
+    const stored = await getStoredKpi(userId, month);
+    if (stored) return stored;
+  }
+
+  const report = await buildMonthlyKpi(userId, { month, timezone });
+
+  await query(
+    `INSERT INTO kpi_reports (user_id, month, report, generated_at)
+     VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+     ON CONFLICT (user_id, month) DO UPDATE
+       SET report = EXCLUDED.report, generated_at = EXCLUDED.generated_at`,
+    [userId, month, JSON.stringify(report)]
+  );
+
+  return { ...report, generatedAt: new Date().toISOString() };
 };

@@ -422,8 +422,9 @@ export const api = {
       }
       return res.json();
     },
-    monthly: async (token: string, month: string) => {
-      const res = await fetch(`${API_BASE}/kpi/monthly?month=${encodeURIComponent(month)}`, {
+    /** Served from the stored snapshot unless `refresh` forces a rebuild. */
+    monthly: async (token: string, month: string, refresh = false) => {
+      const res = await fetch(`${API_BASE}/kpi/monthly?month=${encodeURIComponent(month)}${refresh ? '&refresh=1' : ''}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) {
