@@ -35,6 +35,58 @@ const authFor = async (userId) => {
   return client;
 };
 
+
+/**
+ * Turn a googleapis error into something actionable.
+ *
+ * The first version of this asserted the cause was a missing scope, which swallowed
+ * Google's own message and sent the reader off to reconnect an account that was already
+ * fine. Google distinguishes these cases clearly -- report what it actually said, and
+ * only add guidance when the message identifies the cause.
+ */
+export const explainGoogleError = (e) => {
+  const detail =
+    e?.response?.data?.error?.message ||
+    e?.errors?.[0]?.message ||
+    e?.message ||
+    'unknown error';
+  const status = e?.code ?? e?.response?.status;
+
+  // The API is not switched on for the Cloud project behind these OAuth credentials.
+  // Nothing about the account, the sheet or the scopes is wrong -- and reconnecting
+  // will not help, which is exactly why the old message was misleading.
+  if (/has not been used in project|is disabled|SERVICE_DISABLED|accessNotConfigured/i.test(detail)) {
+    const project = /project (\d+)/i.exec(detail)?.[1];
+    return new Error(
+      'The Google Sheets API is not enabled for the Cloud project behind your OAuth ' +
+        'credentials. Enable it here, then retry (no need to reconnect):\n' +
+        `https://console.cloud.google.com/apis/library/sheets.googleapis.com${project ? `?project=${project}` : ''}\n\n` +
+        `Google said: ${detail}`
+    );
+  }
+
+  if (/insufficient|scope/i.test(detail)) {
+    return new Error(
+      `Your Google connection is missing the Sheets scope (${SHEETS_SCOPE}). ` +
+        'Disconnect and reconnect Gmail in Settings to grant it.\n\n' +
+        `Google said: ${detail}`
+    );
+  }
+
+  if (status === 404) {
+    return new Error(`No spreadsheet with that ID, or this account can't see it.\n\nGoogle said: ${detail}`);
+  }
+
+  if (status === 403) {
+    return new Error(
+      `Google refused the spreadsheet (403). Check the sheet is owned by, or shared ` +
+        `with, the Google account connected in Settings.\n\nGoogle said: ${detail}`
+    );
+  }
+
+  return new Error(`Google Sheets error${status ? ` (${status})` : ''}: ${detail}`);
+};
+
 /** The report as a 2-D grid: exactly the layout the review template uses. */
 export const toGrid = (report) => {
   const rows = [];
@@ -90,32 +142,32 @@ export const writeMonthTab = async (userId, spreadsheetId, report) => {
   try {
     meta = await sheets.spreadsheets.get({ spreadsheetId });
   } catch (e) {
-    if (e?.code === 403 || e?.response?.status === 403) {
-      throw new Error(
-        'Google refused the spreadsheet. Reconnect Gmail in Settings to grant the ' +
-          `Sheets scope (${SHEETS_SCOPE}), and check the sheet belongs to that account.`
-      );
-    }
-    throw e;
+    throw explainGoogleError(e);
   }
 
   const existing = meta.data.sheets?.find((s) => s.properties?.title === title);
-  if (!existing) {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: { requests: [{ addSheet: { properties: { title } } }] },
-    });
-  } else {
-    await sheets.spreadsheets.values.clear({ spreadsheetId, range: `${title}!A1:Z400` });
-  }
-
   const values = toGrid(report);
-  await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range: `${title}!A1`,
-    valueInputOption: 'RAW',
-    requestBody: { values },
-  });
+  try {
+    if (!existing) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests: [{ addSheet: { properties: { title } } }] },
+      });
+    } else {
+      await sheets.spreadsheets.values.clear({ spreadsheetId, range: `${title}!A1:Z400` });
+    }
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${title}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values },
+    });
+  } catch (e) {
+    // A read can succeed on a sheet the account may not WRITE to, so the write needs
+    // the same explanation rather than surfacing a raw googleapis stack.
+    throw explainGoogleError(e);
+  }
 
   return { spreadsheetId, tab: title, rows: values.length, created: !existing };
 };
