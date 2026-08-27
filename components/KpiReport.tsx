@@ -43,8 +43,11 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const needsInput = useMemo(
-    () => (report?.categories || []).flatMap((c: any) => c.metrics).filter((m: any) => m.source === 'manual').length,
+  // Every metric is derived now, so the thing worth surfacing is not "what must you
+  // fill in" but "what had no data" -- a null is an absent measurement, not a zero.
+  const notMeasured = useMemo(
+    () => (report?.categories || []).flatMap((c: any) => c.metrics)
+      .filter((m: any) => m.value === null || m.value === undefined).length,
     [report]
   );
 
@@ -125,7 +128,7 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
               {report.evidence.fleetConnected
                 ? <span className="text-emerald-400">fleet data connected</span>
                 : <span className="text-amber-400">fleet not connected</span>}
-              {needsInput > 0 && <> · <span className="text-amber-400">{needsInput} metric(s) need your input</span></>}
+              {notMeasured > 0 && <> · <span className="text-amber-400">{notMeasured} metric(s) had no data</span></>}
             </p>
             {report.evidence.unconventionalCommits > 0 && (
               <p>
@@ -167,7 +170,7 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
                         </td>
                         <td className="px-4 py-2.5">
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${SOURCE_STYLE[m.source] || ''}`}>
-                            {m.source === 'manual' ? 'needs input' : m.source}
+                            {m.source === 'manual' ? 'no source' : m.source}
                           </span>
                         </td>
                       </tr>

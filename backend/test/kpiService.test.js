@@ -64,3 +64,34 @@ test('monthRange rejects a malformed month rather than guessing', () => {
   assert.throws(() => monthRange('July'), /YYYY-MM/);
   assert.throws(() => monthRange('2026-7'), /YYYY-MM/);
 });
+
+import { pct, responseHours } from '../src/services/kpiService.js';
+
+test('pct reports null rather than 0 when there is nothing to divide by', () => {
+  // "not measured" and "zero" are different claims; a KPI sheet must not conflate them.
+  assert.equal(pct(0, 0), null);
+  assert.equal(pct(3, 4), 75);
+  assert.equal(pct(1, 3), 33.3);
+});
+
+test('responseHours takes the median gap from a report to the next fix', () => {
+  const H = 3600000;
+  const t0 = Date.UTC(2026, 6, 10, 9);
+  // Reports at 09:00, 11:00, 13:00; fixes 1h, 5h, 3h later respectively.
+  const arrivals = [t0, t0 + 2 * H, t0 + 4 * H];
+  const fixes = [t0 + 1 * H, t0 + 7 * H, t0 + 7 * H];
+  // gaps: 1h, 5h, 3h -> median 3h
+  assert.equal(responseHours(arrivals, fixes), 3);
+});
+
+test('responseHours ignores a report with no fix after it, rather than scoring it zero', () => {
+  const H = 3600000;
+  const t0 = Date.UTC(2026, 6, 10, 9);
+  // Second report never got a fix -- it must not be counted as an instant response.
+  assert.equal(responseHours([t0, t0 + 100 * H], [t0 + 2 * H]), 2);
+});
+
+test('responseHours is null when there is nothing to measure', () => {
+  assert.equal(responseHours([], [1]), null);
+  assert.equal(responseHours([1], []), null);
+});
