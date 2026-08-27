@@ -18,6 +18,7 @@ import agentRoutes from './routes/agent.js';
 import kpiRoutes from './routes/kpi.js';
 import { initializeBot } from './services/telegramService.js';
 import { startDailyReport } from './jobs/dailyReport.js';
+import { startKpiMonthlyExport } from './jobs/kpiMonthlyExport.js';
 import { startEmailScanner } from './jobs/emailScanner.js';
 import { startSlackScanner } from './jobs/slackScanner.js';
 import { startGithubScanner } from './jobs/githubScanner.js';
@@ -120,6 +121,9 @@ if (config.nodeEnv === 'production' || process.env.ENABLE_JOBS === 'true') {
   startOverdueNotifier();
   startDailySummary();
   startDailyReport();
+
+  // Writes last month's KPI report to Google Sheets once the month ends.
+  startKpiMonthlyExport();
   console.log('Scheduled jobs started');
 }
 

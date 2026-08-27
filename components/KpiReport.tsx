@@ -25,7 +25,7 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [alert, setAlert] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({
+  const [alert, setAlert] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info'; link?: { url: string; label: string } }>({
     isOpen: false, title: '', message: '', type: 'info',
   });
 
@@ -69,8 +69,9 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
       setAlert({
         isOpen: true,
         title: 'Written to Google Sheets',
-        message: `Tab "${out.tab}" ${out.created ? 'created' : 'updated'} (${out.rows} rows).\n\n${out.url}`,
+        message: `Tab "${out.tab}" ${out.created ? 'created' : 'updated'} — ${out.rows} rows.`,
         type: 'success',
+        link: { url: `${out.url}#gid=0`, label: `Open ${out.tab}` },
       });
     } catch (e: any) {
       setAlert({ isOpen: true, title: 'Sheets export failed', message: e.message, type: 'error' });
@@ -226,6 +227,7 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
         title={alert.title}
         message={alert.message}
         type={alert.type}
+        link={alert.link}
         onClose={() => setAlert({ ...alert, isOpen: false })}
       />
     </div>

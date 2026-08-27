@@ -8,6 +8,9 @@ interface AlertModalProps {
   title: string;
   message: string;
   type?: AlertType;
+  /** Optional call-to-action, so a result can offer the thing it just produced
+   *  instead of printing a raw URL for the reader to select and paste. */
+  link?: { url: string; label: string };
   onClose: () => void;
 }
 
@@ -16,6 +19,7 @@ export const AlertModal: React.FC<AlertModalProps> = ({
   title,
   message,
   type = 'info',
+  link,
   onClose,
 }) => {
   if (!isOpen) return null;
@@ -63,7 +67,17 @@ export const AlertModal: React.FC<AlertModalProps> = ({
             </div>
             <div className="flex-1">
               <h3 className="text-xl font-bold text-white mb-2">{title}</h3>
-              <p className="text-slate-300">{message}</p>
+              <p className="text-slate-300 whitespace-pre-line">{message}</p>
+              {link && (
+                <a
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 mt-3 text-sm font-medium text-primary hover:underline"
+                >
+                  {link.label} ↗
+                </a>
+              )}
             </div>
             <button
               onClick={onClose}
