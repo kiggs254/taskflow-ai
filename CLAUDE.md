@@ -141,6 +141,20 @@ These encode bugs that were expensive to find. Re-introducing any of them is a r
 - `services/geminiService.ts` is still a misnomer (no Gemini code; it calls `/api/ai/*`), as is `parseTaskWithGemini`.
 - `slack_integrations.daily_report_enabled` is now superseded by `user_report_settings` and is only kept so the old frontend read doesn't break. Drop it once nothing reads it.
 
+## Monthly KPI reporting
+
+`GET /api/kpi/monthly?month=YYYY-MM` assembles the five weighted categories of the review template from three sources, and every metric carries a `source`:
+
+- `auto` — parsed from **conventional-commit subjects** (`feat:` → sub-features, `fix:` → bugs fixed, `revert:` → rollback rate). `classifyCommit` returns `null` for a non-conventional subject rather than force-fitting it, and the count of those is reported as `unconventionalCommits` so an undercount is visible instead of silent.
+- `fleet` — `ebiz-manager`'s `GET /api/kpi` (uptime %, downtime hours, incidents, MTTR, vulnerabilities). It reads `uptime_daily`, **not** `health_checks`, which is pruned after 7 days and so can never answer about last month.
+- `manual` — `value: null`. Anything nothing can prove (adoption rate, sprint completion, bug severity/triage) stays blank for a human. Same invariant as the rest of the app: **don't render fabricated numbers** — a KPI sheet a manager validates against system records is the worst place to invent one.
+
+Commits are read **from GitHub for the whole month**, not from `processed_commits`: that ledger only holds what the scanner ingested since it was switched on, so it cannot answer for a month predating it.
+
+`kpi_settings.work_instance_ids` is the allowlist of `ebiz-manager` deployment ids that count as work — most of that fleet is personal side projects, and their downtime must never enter a work score. Empty means the whole fleet, which is usually wrong.
+
+Sheets export writes one tab per month via the **Gmail OAuth credentials** (the `spreadsheets` scope is requested alongside the Gmail scopes, so an account linked earlier must reconnect once). `?format=tsv` needs no Google auth at all.
+
 ## Known remaining work
 
 - **`TaskCard` is still not `React.memo`'d.** The prerequisites are done (blockers come from `blockersByTaskId`, derived lists are memoized), but the ~9 handlers `App.tsx` passes to it are recreated each render — including an inline `onAddDependency={() => setLinkingTask(task)}` — so `memo` would be a no-op until they're wrapped in `useCallback`. Do the callbacks first, then the memo; the reverse order buys nothing.

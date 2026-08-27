@@ -33,6 +33,10 @@ export const getAuthUrl = (userId) => {
   const scopes = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/gmail.modify', // For marking emails as read
+    // Lets the monthly KPI report write itself into a Google Sheet using the same
+    // Google account. Requested here rather than in a second connect flow; an account
+    // linked before this scope existed must reconnect once to grant it.
+    'https://www.googleapis.com/auth/spreadsheets',
   ];
 
   const url = oauth2Client.generateAuthUrl({
