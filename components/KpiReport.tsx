@@ -144,11 +144,38 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
             {report.evidence.fleetError && <p className="text-red-400">Fleet error: {report.evidence.fleetError}</p>}
           </div>
 
+          {report.score?.overall != null && (
+            <div className="bg-surface border border-slate-700 rounded-xl p-5 flex flex-wrap items-center gap-6">
+              <div>
+                <div className="text-3xl font-bold text-white">{report.score.overall}%</div>
+                <div className="text-xs text-slate-500 mt-0.5">Overall score</div>
+              </div>
+              <div className="flex-1 min-w-[200px] grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {report.categories.map((c: any) => (
+                  <div key={c.name}>
+                    <div className="text-sm font-semibold text-slate-200">
+                      {c.score == null ? <span className="text-slate-500">—</span> : `${c.score}%`}
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate">{c.name} · {c.weight}%</div>
+                  </div>
+                ))}
+              </div>
+              {report.score.coverage < 100 && (
+                <p className="text-[11px] text-amber-400 basis-full">
+                  Based on {report.score.coverage}% of the weighting — the rest had no data and is not counted for or against you.
+                </p>
+              )}
+            </div>
+          )}
+
           {report.categories.map((c: any) => (
             <div key={c.name} className="bg-surface border border-slate-700 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
                 <h2 className="font-semibold text-white">{c.name}</h2>
-                <span className="text-xs text-slate-400">{c.weight}% of score</span>
+                <span className="text-xs text-slate-400">
+                  {c.weight}% of score
+                  {c.score != null && <> · <span className="text-slate-200 font-medium">{c.score}%</span> ({c.metricsMet}/{c.metricsScored} targets met)</>}
+                </span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -157,6 +184,7 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
                       <th className="px-4 py-2 font-medium">Metric</th>
                       <th className="px-4 py-2 font-medium">Target</th>
                       <th className="px-4 py-2 font-medium">Actual</th>
+                      <th className="px-4 py-2 font-medium">Status</th>
                       <th className="px-4 py-2 font-medium">Source</th>
                     </tr>
                   </thead>
@@ -167,11 +195,16 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
                           {m.metric}
                           {m.note && <div className="text-[11px] text-slate-500 mt-0.5">{m.note}</div>}
                         </td>
-                        <td className="px-4 py-2.5 text-slate-400 whitespace-nowrap">{m.target}</td>
+                        <td className="px-4 py-2.5 text-slate-400 whitespace-nowrap">{m.targetLabel ?? 'Tracked'}</td>
                         <td className="px-4 py-2.5 whitespace-nowrap">
                           {m.value === null || m.value === undefined
                             ? <span className="text-amber-400/70 italic">—</span>
                             : <span className="text-white font-medium">{String(m.value)}</span>}
+                        </td>
+                        <td className="px-4 py-2.5 whitespace-nowrap">
+                          {m.status === 'met' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">met</span>}
+                          {m.status === 'missed' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">missed</span>}
+                          {m.status === 'no-data' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-600/30 text-slate-400">no data</span>}
                         </td>
                         <td className="px-4 py-2.5">
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${SOURCE_STYLE[m.source] || ''}`}>

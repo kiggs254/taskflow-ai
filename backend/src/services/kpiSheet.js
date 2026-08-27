@@ -92,22 +92,34 @@ export const toGrid = (report) => {
   const rows = [];
   rows.push([`KPI Report — ${report.month}`]);
   rows.push([`Period`, `${report.period.from} to ${report.period.to}`]);
+  if (report.score?.overall != null) {
+    rows.push(['Overall score', `${report.score.overall}%`,
+      `based on ${report.score.coverage}% of the weighting that could be measured`]);
+  }
   rows.push([]);
-  rows.push(['Category', 'Weight']);
-  for (const c of report.categories) rows.push([c.name, `${c.weight}%`]);
-  rows.push(['Total', '100%']);
+  rows.push(['Category', 'Weight', 'Score', 'Targets met']);
+  for (const c of report.categories) {
+    rows.push([
+      c.name,
+      `${c.weight}%`,
+      c.score == null ? 'not scored' : `${c.score}%`,
+      c.metricsScored ? `${c.metricsMet} of ${c.metricsScored}` : '—',
+    ]);
+  }
+  rows.push(['Total', '100%', report.score?.overall != null ? `${report.score.overall}%` : 'not scored', '']);
   rows.push([]);
 
   for (const c of report.categories) {
-    rows.push([`${c.name} — ${c.weight}% of KPI score`]);
-    rows.push(['Metric', 'Target', 'Actual', 'Source', 'Note']);
+    rows.push([`${c.name} — ${c.weight}% of KPI score`, c.score == null ? 'not scored' : `score ${c.score}%`]);
+    rows.push(['Metric', 'Target', 'Actual', 'Status', 'Source', 'Note']);
     for (const m of c.metrics) {
       rows.push([
         m.metric,
-        m.target,
+        m.targetLabel ?? m.target?.label ?? 'Tracked',
         // An unproven figure is left blank for a human, never zero-filled.
         m.value === null || m.value === undefined ? '' : String(m.value),
-        m.source === 'manual' ? 'NEEDS INPUT' : m.source,
+        { met: 'Met', missed: 'Missed', 'no-data': 'No data', 'no-target': '' }[m.status] ?? '',
+        m.source,
         m.note || '',
       ]);
     }

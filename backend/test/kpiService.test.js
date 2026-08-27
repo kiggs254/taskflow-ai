@@ -95,3 +95,61 @@ test('responseHours is null when there is nothing to measure', () => {
   assert.equal(responseHours([], [1]), null);
   assert.equal(responseHours([1], []), null);
 });
+
+import { scoreReport } from '../src/services/kpiService.js';
+
+const cat = (name, weight, metrics) => ({ name, weight, metrics });
+const M = (value, target) => ({ metric: 'm', value, target });
+
+test('a metric with no data is not scored as a failure', () => {
+  // Instrumentation gaps must not read as poor performance.
+  const cats = [cat('A', 100, [
+    M(90, { label: '≥ 85', op: 'gte', value: 85 }),
+    M(null, { label: '< 1', op: 'lte', value: 1 }),
+  ])];
+  const { overall } = scoreReport(cats);
+  assert.equal(cats[0].metricsScored, 1, 'only the measured metric is scored');
+  assert.equal(cats[0].metrics[1].status, 'no-data');
+  assert.equal(overall, 100, 'the missing one neither helps nor hurts');
+});
+
+test('"Tracked" metrics are reported but never scored', () => {
+  const cats = [cat('A', 100, [
+    M(167, { label: 'Tracked', op: null }),
+    M(50, { label: '≥ 85', op: 'gte', value: 85 }),
+  ])];
+  scoreReport(cats);
+  assert.equal(cats[0].metrics[0].status, 'no-target');
+  assert.equal(cats[0].metricsScored, 1);
+  assert.equal(cats[0].score, 0, 'the one scoreable metric missed');
+});
+
+test('gte / lte / eq are compared the right way round', () => {
+  const cats = [cat('A', 100, [
+    M(99.6, { label: '≥ 99.5', op: 'gte', value: 99.5 }),  // met
+    M(0.4, { label: '< 1', op: 'lte', value: 1 }),          // met
+    M(10, { label: '< 3', op: 'lte', value: 3 }),           // missed
+    M(0, { label: '0', op: 'eq', value: 0 }),               // met
+  ])];
+  scoreReport(cats);
+  assert.deepEqual(cats[0].metrics.map((m) => m.status), ['met', 'met', 'missed', 'met']);
+  assert.equal(cats[0].score, 75);
+});
+
+test('the overall is renormalised over the weight actually scored', () => {
+  // System unmeasurable: the total must reflect what WAS measured, not be dragged to 0.
+  const cats = [
+    cat('Feature', 30, [M(100, { label: '≥ 85', op: 'gte', value: 85 })]),
+    cat('System', 30, [M(null, { label: '≥ 99.5', op: 'gte', value: 99.5 })]),
+  ];
+  const { overall, coverage } = scoreReport(cats);
+  assert.equal(cats[1].score, null, 'a category with nothing measurable has no score');
+  assert.equal(overall, 100);
+  assert.equal(coverage, 30, 'and coverage says the score rests on 30% of the weighting');
+});
+
+test('coverage is 0 when nothing at all could be scored', () => {
+  const { overall, coverage } = scoreReport([cat('A', 100, [M(null, { label: '< 1', op: 'lte', value: 1 })])]);
+  assert.equal(overall, null, 'null, not 0 — an unscored report has no score');
+  assert.equal(coverage, 0);
+});

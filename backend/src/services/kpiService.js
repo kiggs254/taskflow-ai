@@ -190,9 +190,10 @@ export const getCommitMetrics = async (userId, { sinceIso, untilIso, startMs, en
     perRepo.push({ repo: `${repo.owner}/${repo.name}`, commits: real.length, feat: repoFeat, fix: repoFix });
   }
 
-  // A scope needing a second fix within 14 days is work that came back -- the
-  // observable equivalent of a reopened bug.
-  const RECUR_MS = 14 * 24 * 3600 * 1000;
+  // A second fix to the same area within 72h is a fix that did not hold. The window was
+  // 14 days, which counts ordinary iteration on an active area as a reopened bug and
+  // produced a rate many times the target -- wrong, and badly unflattering.
+  const RECUR_MS = 72 * 3600 * 1000;
   let recurringFixes = 0;
   for (const times of fixesByScope.values()) {
     times.sort((a, b) => a - b);
@@ -300,6 +301,72 @@ export const responseHours = (arrivals, fixTimestamps) => {
   return round1(gaps[Math.floor(gaps.length / 2)]);
 };
 
+
+/**
+ * A target the report can actually score against. `label` is what the review template
+ * prints; op/value is what makes it comparable. A "Tracked" metric has no target and is
+ * reported without being scored, rather than counted as a pass or a failure.
+ */
+const gte = (v, label) => ({ label: label ?? `≥ ${v}`, op: 'gte', value: v });
+const lte = (v, label) => ({ label: label ?? `< ${v}`, op: 'lte', value: v });
+const eq0 = (label) => ({ label: label ?? '0', op: 'eq', value: 0 });
+const tracked = { label: 'Tracked', op: null };
+
+/**
+ * Score one metric.
+ *
+ * A metric with no data is 'no-data', never a miss: an absent measurement must not be
+ * scored as a failure, or the total quietly punishes gaps in instrumentation rather
+ * than gaps in the work.
+ */
+const scoreMetric = (value, target) => {
+  if (!target?.op) return 'no-target';
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'no-data';
+  const n = Number(value);
+  if (target.op === 'gte') return n >= target.value ? 'met' : 'missed';
+  if (target.op === 'lte') return n <= target.value ? 'met' : 'missed';
+  return n === target.value ? 'met' : 'missed';
+};
+
+/**
+ * Category scores plus the weighted overall.
+ *
+ * The overall is renormalised across categories that actually have a score, so an
+ * unmeasurable category doesn't silently drag the total toward zero. `coverage` says
+ * how much of the weighting the score is based on, so a partial figure can't be read as
+ * a complete one.
+ */
+export const scoreReport = (categories) => {
+  let weighted = 0;
+  let weightScored = 0;
+
+  for (const c of categories) {
+    let met = 0;
+    let missed = 0;
+    for (const m of c.metrics) {
+      m.status = scoreMetric(m.value, m.target);
+      if (m.status === 'met') met++;
+      else if (m.status === 'missed') missed++;
+      // Flatten the target back to its printable label for renderers.
+      m.targetLabel = m.target?.label ?? 'Tracked';
+    }
+    const scoreable = met + missed;
+    c.metricsMet = met;
+    c.metricsScored = scoreable;
+    c.score = scoreable ? Number(((met / scoreable) * 100).toFixed(1)) : null;
+    if (c.score !== null) {
+      weighted += (c.score * c.weight) / 100;
+      weightScored += c.weight;
+    }
+  }
+
+  return {
+    // Out of the weight actually scored, not out of 100, so it is not overstated.
+    overall: weightScored ? Number(((weighted / weightScored) * 100).toFixed(1)) : null,
+    coverage: weightScored,
+  };
+};
+
 /** A metric that was measured, with the definition used to measure it. */
 const measured = (value, how) => ({ value, source: 'auto', note: how });
 const fromFleet = (value, how) => ({ value, source: 'fleet', note: how });
@@ -345,10 +412,112 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
   const rollbacks = (del?.failedDeployRuns ?? 0) + revertCount;
   const rollbackPct = releases ? pct(rollbacks, releases) : pct(revertCount, featCount + fixCount);
 
+  const categories = [
+    {
+      name: 'Feature Development',
+      weight: 30,
+      metrics: [
+        { metric: 'Number of Sub Features Released', target: tracked,
+          ...measured(featCount, `feat: commits across ${commits.repos} repo(s)`) },
+        { metric: 'Client Systems Receiving Features', target: tracked,
+          ...measured(commits.reposWithFeatures, 'Distinct client systems that received feature work') },
+        { metric: '% of Sub Features Released On Schedule', target: gte(85),
+          ...measured(pct(commits.featOnDefault, commits.featTotal), 'Features that reached the production branch in-month') },
+        { metric: 'Major Features / New Systems Launched', target: tracked,
+          ...measured(
+            flt?.monitored ? (flt.launchedInPeriod ?? 0) + commits.breaking : (commits.breaking || null),
+            flt?.monitored
+              ? 'Systems first seen live this month, plus breaking-change releases'
+              : 'Breaking-change releases only — launch dates need fleet monitoring history') },
+        { metric: 'Feature Adoption Rate', target: gte(50),
+          ...fromFleet(
+            flt?.liveInstances == null ? null : pct(flt.liveInstances, flt.totalInstances ?? 0),
+            flt?.liveInstances == null
+              ? 'No probe data for the selected systems this month'
+              : 'Delivered systems live and serving traffic') },
+      ],
+    },
+    {
+      name: 'Bugs',
+      weight: 20,
+      metrics: [
+        { metric: 'Number of Bugs Reported', target: tracked,
+          ...measured(tasks.clientReportedIssues, 'Inbound client messages (email/Slack) — includes requests as well as defects') },
+        { metric: 'Number of Bugs Fixed', target: tracked,
+          ...measured(fixCount, 'fix: commits') },
+        { metric: 'Max Bug Fixing Time', target: lte(3, '< 3 days'),
+          ...fromFleet(sys?.maxIncidentHours != null ? round1(sys.maxIncidentHours / 24) : null, 'Longest single incident, in days') },
+        { metric: 'Critical/High-Severity Bugs Reported', target: tracked,
+          ...measured(commits.criticalFixes, 'Fixes on critical paths: checkout, payments, orders, stock, auth') },
+        { metric: 'Critical Bug Fixing Time', target: lte(24, '< 24 hours'),
+          ...fromFleet(sys?.mttrHours ?? null, 'Mean time to resolve an incident') },
+        { metric: 'Bug Re-open Rate', target: lte(5, '< 5%'),
+          ...measured(pct(commits.recurringFixes, fixCount), 'Areas needing a second fix within 72h — a fix that did not hold') },
+        { metric: 'Bug Backlog (open at end of period)', target: lte(5, '< 5'),
+          ...measured(tasks.pendingBacklog, 'Unactioned client reports at month end') },
+        { metric: 'Average Bug Triage Time', target: lte(24, '< 24 hours'),
+          ...measured(responseHours(tasks.arrivals, commits.fixTimestamps), 'Median hours from a client report to the next fix shipped') },
+      ],
+    },
+    {
+      name: 'System',
+      weight: 30,
+      metrics: [
+        { metric: 'System Downtime Hours', target: lte(1, '< 1 hour'),
+          ...fromFleet(sys?.downtimeHours ?? null, 'Across work systems only') },
+        { metric: 'System Uptime %', target: gte(99.5),
+          ...fromFleet(sys?.uptimePct ?? null, sys?.worstInstance ? `Worst system ${sys.worstInstance.uptimePct}%` : 'Health probes') },
+        { metric: 'Number of Alerts Opened', target: tracked,
+          ...fromFleet(sys?.criticalIncidents ?? null, 'All severities — not only P0/P1, which are not separately labelled') },
+        { metric: 'Mean Time to Resolve (MTTR)', target: lte(3, '< 3 hours'),
+          ...fromFleet(sys?.mttrHours ?? null, 'Closed incidents only') },
+        { metric: 'Incidents Unresolved at Month End', target: lte(5, '< 5'),
+          ...fromFleet(
+            sys?.criticalIncidents != null ? Math.max(0, (sys.criticalIncidents ?? 0) - (sys.incidentsClosed ?? 0)) : null,
+            'Root cause is not recorded, so this is not attributed to QA coverage') },
+      ],
+    },
+    {
+      name: 'Security & Compliance',
+      weight: 10,
+      metrics: [
+        { metric: 'Number of Security Incidents', target: eq0(),
+          ...fromFleet(sec?.criticalVulnerabilitiesIdentified ?? null, 'Critical findings from scanning — no breach is recorded anywhere') },
+        { metric: 'PCI-DSS / Compliance Checklist', target: gte(100, '100% before go-live'),
+          ...fromFleet(pct((flt?.totalInstances ?? 0) - (sec?.instancesWithExposureFindings ?? 0), flt?.totalInstances ?? 0), 'Work systems with no open exposure/TLS finding') },
+        { metric: 'Number of Vulnerabilities Identified', target: tracked,
+          ...fromFleet(sec?.scansRun ? (sec.vulnerabilitiesIdentified ?? 0) : null,
+            sec?.scansRun ? `${sec.scansRun} scan(s) ran this month` : 'No vulnerability scan ran in this period') },
+        { metric: 'Number of Vulnerabilities Resolved', target: tracked,
+          ...fromFleet(sec?.scansRun ? (sec.vulnerabilitiesResolved ?? 0) : null,
+            sec ? `${sec.vulnerabilitiesOpenAtEnd ?? 0} still open` : null) },
+      ],
+    },
+    {
+      name: 'Delivery & Team',
+      weight: 10,
+      metrics: [
+        { metric: 'Number of Releases Deployed', target: tracked,
+          ...(releases != null
+            ? fromFleet(releases, `Deploy runs across ${del?.instancesDeployed ?? 0} system(s)`)
+            : measured(commits.featOnDefault, 'Commits reaching a production branch (fleet not connected)')) },
+        { metric: '% of Releases Requiring Rollback/Hotfix', target: lte(3, '< 3%'),
+          ...measured(rollbackPct, `${rollbacks} failed deploy(s) or revert(s)`) },
+        { metric: 'Delivery Completion Rate', target: gte(85),
+          ...measured(pct(tasks.tasksCompleted, tasks.tasksCreated), 'Tasks completed vs. raised this month') },
+        { metric: 'Number of Client-Reported Issues', target: tracked,
+          ...measured(tasks.clientReportedIssues, 'From email and Slack') },
+      ],
+    },
+  ];
+
+  const { overall, coverage } = scoreReport(categories);
+
   return {
     month,
     timezone: tz,
     period: { from: range.fromDay, to: range.toDay },
+    score: { overall, coverage },
     evidence: {
       repos: commits.repos,
       commits: commits.commits,
@@ -357,92 +526,7 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
       fleetConnected: Boolean(fleetData),
       fleetError,
     },
-    categories: [
-      {
-        name: 'Feature Development',
-        weight: 30,
-        metrics: [
-          { metric: 'Number of Sub Features Released', target: 'Tracked',
-            ...measured(featCount, `feat: commits across ${commits.repos} repo(s)`) },
-          { metric: 'Client Systems Receiving Features', target: 'Tracked',
-            ...measured(commits.reposWithFeatures, 'Distinct client systems that received feature work this month') },
-          { metric: '% of Sub Features Released On Schedule', target: '≥ 85%',
-            ...measured(pct(commits.featOnDefault, commits.featTotal), 'Features that reached the production branch in-month, vs. left on a branch') },
-          { metric: 'Major Features / New Systems Launched', target: 'Tracked',
-            ...measured((flt?.launchedInPeriod ?? 0) + commits.breaking, 'Systems that went live this month, plus breaking-change (feat!) releases') },
-          { metric: 'Feature Adoption Rate', target: '≥ 50%',
-            ...fromFleet(pct(flt?.liveInstances ?? 0, flt?.totalInstances ?? 0), 'Delivered systems live and serving traffic') },
-        ],
-      },
-      {
-        name: 'Bugs',
-        weight: 20,
-        metrics: [
-          { metric: 'Number of Bugs Reported', target: 'Tracked',
-            ...measured(tasks.clientReportedIssues, 'Issues arriving from client channels (email/Slack)') },
-          { metric: 'Number of Bugs Fixed', target: 'Tracked',
-            ...measured(fixCount, 'fix: commits') },
-          { metric: 'Max Bug Fixing Time', target: '< 3 days',
-            ...fromFleet(sys?.mttrHours != null ? round1(sys.mttrHours / 24) : null, 'Longest incident resolution, in days') },
-          { metric: 'Critical/High-Severity Bugs Reported', target: 'Tracked',
-            ...measured(commits.criticalFixes, 'Fixes on critical paths: checkout, payments, orders, stock, auth') },
-          { metric: 'Critical Bug Fixing Time', target: '< 24 hours',
-            ...fromFleet(sys?.mttrHours ?? null, 'Mean time to resolve a critical incident') },
-          { metric: 'Bug Re-open Rate', target: '< 5%',
-            ...measured(pct(commits.recurringFixes, fixCount), 'Areas needing a repeat fix within 14 days') },
-          { metric: 'Bug Backlog (open at end of period)', target: '< 5',
-            ...measured(tasks.pendingBacklog, 'Unactioned client reports at month end') },
-          { metric: 'Average Bug Triage Time', target: '< 24 hours',
-            ...measured(responseHours(tasks.arrivals, commits.fixTimestamps), 'Median hours from a client report to the next fix shipped') },
-        ],
-      },
-      {
-        name: 'System',
-        weight: 30,
-        metrics: [
-          { metric: 'System Downtime Hours', target: '< 1 hour',
-            ...fromFleet(sys?.downtimeHours ?? null, 'Across work instances only') },
-          { metric: 'System Uptime %', target: '≥ 99.5%',
-            ...fromFleet(sys?.uptimePct ?? null, sys?.worstInstance ? `Worst instance ${sys.worstInstance.uptimePct}%` : 'Health probes') },
-          { metric: 'Number of Critical Incidents (P0/P1)', target: 'Tracked',
-            ...fromFleet(sys?.criticalIncidents ?? null, 'Alerts opened in period') },
-          { metric: 'Mean Time to Resolve (MTTR)', target: '< 3 hours',
-            ...fromFleet(sys?.mttrHours ?? null, 'Closed incidents only') },
-          { metric: 'Production Incidents from Missed QA', target: '< 5',
-            ...fromFleet(sys?.criticalIncidents != null ? Math.max(0, (sys.criticalIncidents ?? 0) - (sys.incidentsClosed ?? 0)) : null, 'Incidents still unresolved at month end') },
-        ],
-      },
-      {
-        name: 'Security & Compliance',
-        weight: 10,
-        metrics: [
-          { metric: 'Number of Security Incidents', target: '0',
-            ...fromFleet(sec?.criticalVulnerabilitiesIdentified ?? null, 'Critical findings detected by scanning (no breach recorded)') },
-          { metric: 'PCI-DSS / Compliance Checklist', target: '100% before go-live',
-            ...fromFleet(pct((flt?.totalInstances ?? 0) - (sec?.instancesWithExposureFindings ?? 0), flt?.totalInstances ?? 0), 'Work systems with no open exposure/TLS finding') },
-          { metric: 'Number of Vulnerabilities Identified', target: 'Tracked',
-            ...fromFleet(sec?.vulnerabilitiesIdentified ?? null, 'Across work systems and shared hosts') },
-          { metric: 'Number of Vulnerabilities Resolved', target: 'Tracked',
-            ...fromFleet(sec?.vulnerabilitiesResolved ?? null, sec ? `${sec.vulnerabilitiesOpenAtEnd ?? 0} still open` : null) },
-        ],
-      },
-      {
-        name: 'Delivery & Team',
-        weight: 10,
-        metrics: [
-          { metric: 'Number of Releases Deployed', target: 'Tracked',
-            ...(releases != null
-              ? fromFleet(releases, `Deploy runs across ${del?.instancesDeployed ?? 0} system(s)`)
-              : measured(commits.featOnDefault, 'Commits reaching a production branch (fleet not connected)')) },
-          { metric: '% of Releases Requiring Rollback/Hotfix', target: '< 3%',
-            ...measured(rollbackPct, `${rollbacks} failed deploy(s)/revert(s)`) },
-          { metric: 'Delivery Completion Rate', target: '≥ 85%',
-            ...measured(pct(tasks.tasksCompleted, tasks.tasksCreated), 'Tasks completed vs. raised this month') },
-          { metric: 'Number of Client-Reported Issues', target: 'Tracked',
-            ...measured(tasks.clientReportedIssues, 'From email and Slack') },
-        ],
-      },
-    ],
+    categories,
   };
 };
 
