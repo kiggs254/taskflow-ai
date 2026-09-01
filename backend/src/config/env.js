@@ -48,6 +48,22 @@ export const config = {
   cors: {
     origin: process.env.CORS_ORIGIN || '*',
   },
+  // Live agent console. `POST /control/message` on the agent is arbitrary shell
+  // across every client repo, so this is deliberately process-wide env rather
+  // than per-user DB rows: there is one agent fleet per deployment, and a
+  // fleet-RCE credential does not belong in a settings form.
+  //
+  // CONSOLE_USER_IDS is an allowlist, and empty means nobody. The console is
+  // off until someone is named, which is the safe default for a feature whose
+  // failure mode is handing out a shell.
+  agentConsole: {
+    url: process.env.AGENT_URL || '',
+    token: process.env.AGENT_CONTROL_TOKEN || '',
+    userIds: (process.env.CONSOLE_USER_IDS || '')
+      .split(',')
+      .map((s) => parseInt(s.trim(), 10))
+      .filter(Number.isInteger),
+  },
   smtp: {
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,

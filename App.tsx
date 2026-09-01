@@ -7,7 +7,7 @@ import {
   PieChart, Bell, Volume2, Shield, Palette, ArrowLeft, Pencil, Save, Filter,
   Search, Command, MoreVertical, Hourglass, AlarmClockOff, Video, Trash2,
   Calendar, ArrowUpDown, Download, Clipboard, Repeat, CheckSquare, RefreshCw,
-  EyeOff, ChevronRight
+  EyeOff, ChevronRight, Terminal
 } from 'lucide-react';
 import { 
   Task, WorkspaceType, UserStats, AppView, User as UserType, EnergyLevel, RecurrenceRule
@@ -22,6 +22,7 @@ import { AnalyticsScreen } from './components/AnalyticsScreen';
 import { AgentSettings } from './components/AgentSettings';
 import { KpiSettings } from './components/KpiSettings';
 import { KpiReport } from './components/KpiReport';
+import { AgentConsole } from './components/AgentConsole';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { ToastContainer, Toast, ToastType } from './components/ToastNotification';
 import { ConfirmationModal } from './components/ConfirmationModal';
@@ -3194,6 +3195,12 @@ export default function App() {
   }
 
   // Render Logic
+  // Full-bleed, like FOCUS_MODE and DAILY_RESET: the shell's max-w-4xl column is
+  // far too narrow for a live console.
+  if (view === AppView.AGENTS && token) {
+    return <AgentConsole token={token} onBack={() => setView(AppView.DASHBOARD)} />;
+  }
+
   if (view === AppView.FOCUS_MODE && focusedTask) {
     return <FocusOverlay task={focusedTask} onExit={() => endFocus(false)} onComplete={() => endFocus(true)} />;
   }
@@ -3358,6 +3365,13 @@ export default function App() {
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.KPI_REPORT ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
                   <Gauge className="w-4 h-4" /> KPI Report
+                </button>
+                {/* Live agent console */}
+                <button
+                  onClick={() => setView(AppView.AGENTS)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.AGENTS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                >
+                  <Terminal className="w-4 h-4" /> Agent Console
                 </button>
                 {/* 4. Draft Tasks */}
                 <button 

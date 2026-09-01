@@ -49,6 +49,18 @@ const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Resp
   return res;
 };
 
+/**
+ * The module-shadowed `fetch` and the normalised base URL, for callers that
+ * cannot use `request()` — specifically the agent console's SSE stream, which
+ * needs the raw streaming Response.
+ *
+ * Exported rather than re-implemented so a 401 on the stream still fires
+ * `onSessionExpired` exactly once, like every other call. CLAUDE.md: don't add a
+ * bare `globalThis.fetch` path that bypasses the wrapper.
+ */
+export const apiFetch = fetch;
+export const getApiBase = (): string => API_BASE;
+
 // Helper to handle requests
 const request = async (action: string, method: 'GET' | 'POST', body?: any, token?: string) => {
   const headers: HeadersInit = {
@@ -717,6 +729,52 @@ export const api = {
       });
       if (!res.ok) throw new Error('Failed to bulk reject draft tasks');
       return res.json();
+    },
+  },
+
+  /**
+   * Live agent console. Errors surface the server's own message (`body.error`)
+   * rather than a generic string: this is the one screen where "something went
+   * wrong" is exactly the experience being fixed.
+   */
+  console: {
+    bootstrap: async (token: string, after?: number) => {
+      const qs = Number.isInteger(after) ? `?after=${after}` : '';
+      const res = await fetch(`${API_BASE}/console/bootstrap${qs}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Failed to load the agent console');
+      return body;
+    },
+    send: async (token: string, text: string, autoApprove = false) => {
+      const res = await fetch(`${API_BASE}/console/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ text, autoApprove }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Failed to send the message');
+      return body;
+    },
+    stop: async (token: string) => {
+      const res = await fetch(`${API_BASE}/console/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Failed to stop the agent');
+      return body;
+    },
+    approve: async (token: string, approvalId: string, decision: 'approve' | 'deny') => {
+      const res = await fetch(`${API_BASE}/console/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ approvalId, decision }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Failed to record the decision');
+      return body;
     },
   },
 };

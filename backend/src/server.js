@@ -16,6 +16,7 @@ import reportsRoutes from './routes/reports.js';
 import analyticsRoutes from './routes/analytics.js';
 import agentRoutes from './routes/agent.js';
 import kpiRoutes from './routes/kpi.js';
+import consoleRoutes from './routes/console.js';
 import { initializeBot } from './services/telegramService.js';
 import { startDailyReport } from './jobs/dailyReport.js';
 import { startKpiMonthlyExport } from './jobs/kpiMonthlyExport.js';
@@ -70,6 +71,12 @@ app.use('/api/agent', agentRoutes);
 
 // Monthly KPI reporting (fleet facts + commit-derived figures + Google Sheet export).
 app.use('/api/kpi', kpiRoutes);
+
+// Live agent console (session auth + an explicit CONSOLE_USER_IDS allowlist,
+// both inside the router). Must be mounted here: taskRoutes below does a bare
+// router.use(authenticate) at '/api', so a later mount would 401 before ever
+// reaching these handlers.
+app.use('/api/console', consoleRoutes);
 
 // Auth routes (no authentication required)
 app.use('/api', authRoutes);
