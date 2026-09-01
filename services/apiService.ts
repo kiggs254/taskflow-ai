@@ -747,6 +747,15 @@ export const api = {
       if (!res.ok) throw new Error(body.error || 'Failed to load the agent console');
       return body;
     },
+    /** Is Hermes actually reachable? Asked directly, not inferred from activity. */
+    hermes: async (token: string) => {
+      const res = await fetch(`${API_BASE}/console/hermes`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Could not check Hermes');
+      return body as { state: string; reason?: string };
+    },
     send: async (token: string, text: string, autoApprove = false) => {
       const res = await fetch(`${API_BASE}/console/message`, {
         method: 'POST',

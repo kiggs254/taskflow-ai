@@ -3195,12 +3195,6 @@ export default function App() {
   }
 
   // Render Logic
-  // Full-bleed, like FOCUS_MODE and DAILY_RESET: the shell's max-w-4xl column is
-  // far too narrow for a live console.
-  if (view === AppView.AGENTS && token) {
-    return <AgentConsole token={token} onBack={() => setView(AppView.DASHBOARD)} />;
-  }
-
   if (view === AppView.FOCUS_MODE && focusedTask) {
     return <FocusOverlay task={focusedTask} onExit={() => endFocus(false)} onComplete={() => endFocus(true)} />;
   }
@@ -3846,6 +3840,7 @@ export default function App() {
           {/* Analytics View */}
           {view === AppView.ANALYTICS && <AnalyticsScreen token={token} onBack={() => setView(AppView.DASHBOARD)} />}
           {view === AppView.KPI_REPORT && <KpiReport token={token!} onBack={() => setView(AppView.DASHBOARD)} />}
+          {view === AppView.AGENTS && token && <AgentConsole token={token} onBack={() => setView(AppView.DASHBOARD)} />}
           
           {/* Completed Tasks View */}
           {view === AppView.COMPLETED_TASKS && <CompletedTasksScreen tasks={completedTasksAll} onBack={() => setView(AppView.DASHBOARD)} onExport={handleExport} onUncomplete={uncompleteTask} />}

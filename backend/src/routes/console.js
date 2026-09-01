@@ -103,6 +103,27 @@ router.get('/status', asyncHandler(async (req, res) => {
   }
 }));
 
+/**
+ * Is Hermes actually reachable?
+ *
+ * Previously the UI inferred this from whether a Hermes tool call was in flight,
+ * so an idle-but-healthy Hermes rendered identically to a dead one. This asks
+ * the capability service directly. Its /health needs no credentials, so no
+ * secret is involved.
+ */
+router.get('/hermes', asyncHandler(async (req, res) => {
+  if (denied(req, res)) return;
+  secure(res);
+  const url = config.agentConsole.capsvcUrl;
+  if (!url) return res.json({ state: 'unconfigured' });
+  try {
+    const r = await fetch(`${url.replace(/\/+$/, '')}/health`, { signal: AbortSignal.timeout(6000) });
+    return res.json({ state: r.ok ? 'up' : 'down', status: r.status });
+  } catch (err) {
+    return res.json({ state: 'down', reason: err?.name === 'TimeoutError' ? 'timeout' : 'unreachable' });
+  }
+}));
+
 // --- write -----------------------------------------------------------------
 
 router.post('/message', asyncHandler(async (req, res) => {

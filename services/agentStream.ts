@@ -196,3 +196,111 @@ export function connectAgentStream(token: string, h: Handlers): () => void {
     controller?.abort();
   };
 }
+
+/* ------------------------------------------------------------------------- *
+ * Making the transcript readable
+ *
+ * The agent's own detail is a raw shell command. Twenty-five lines of
+ * `grep -rn ... | head -20` is an accurate log and an unreadable one. These
+ * turn each call into a short phrase describing what was actually done, with
+ * the exact command still one click away.
+ * ------------------------------------------------------------------------- */
+
+/** `/work/repos/hotpoint-front/admin/src/app/api/x.ts` -> `hotpoint-front/…/x.ts` */
+export function shortPath(p: string): string {
+  if (!p) return '';
+  const clean = p.replace(/^\/work\/repos\//, '').replace(/^\/work\//, '').replace(/^\.\//, '');
+  const parts = clean.split('/').filter(Boolean);
+  if (parts.length <= 2) return parts.join('/');
+  return `${parts[0]}/…/${parts[parts.length - 1]}`;
+}
+
+const firstQuoted = (s: string): string | null => {
+  const m = s.match(/"([^"]{1,60})"|'([^']{1,60})'/);
+  return m ? (m[1] ?? m[2]) : null;
+};
+
+/** A short human phrase for a shell command. */
+function describeBash(cmd: string): string {
+  const c = cmd.trim().replace(/^\(\s*/, '');
+  const head = c.split(/[\s;|&]+/)[0] || '';
+  const q = firstQuoted(c);
+  const pathIn = (s: string) => {
+    const m = s.match(/(\/[A-Za-z0-9._\-\/]{4,})/);
+    return m ? shortPath(m[1]) : '';
+  };
+
+  if (/^gpt\s+image\b/.test(c)) return `Generated an image${q ? `: “${q}”` : ''}`;
+  if (/^gpt\s+tts\b/.test(c)) return `Generated speech${q ? `: “${q}”` : ''}`;
+  if (/^gpt\s+(ask|review)\b/.test(c)) return 'Asked GPT-5 for a second opinion';
+
+  if (/^ls\b/.test(c)) { const p = pathIn(c); return p ? `Listed files in ${p}` : 'Listed files'; }
+  if (/^(cat|head|tail|less)\b/.test(c) || /^sed\s+-n/.test(c)) { const p = pathIn(c); return p ? `Read ${p}` : 'Read a file'; }
+  if (/^(grep|rg|ag)\b/.test(c) || /\|\s*grep\b/.test(c)) return q ? `Searched for “${q}”` : 'Searched the code';
+  if (/^find\b/.test(c)) { const p = pathIn(c); return p ? `Looked for files in ${p}` : 'Looked for files'; }
+  if (/^awk\b|^cut\b|^sort\b|^uniq\b|^wc\b/.test(c)) return 'Processed some output';
+
+  if (/^git\s+push/.test(c)) return 'Pushed to git';
+  if (/^git\s+commit/.test(c)) return 'Committed changes';
+  if (/^git\s+(log|show)/.test(c)) return 'Checked git history';
+  if (/^git\s+(status|diff)/.test(c)) return 'Checked what changed';
+  if (/^git\s+(pull|fetch|clone)/.test(c)) return 'Fetched from git';
+  if (/^git\b/.test(c)) return 'Ran a git command';
+
+  if (/^npm\s+run\s+build|^yarn\s+build|^pnpm\s+build/.test(c)) return 'Built the project';
+  if (/^npm\s+(test|run\s+test)/.test(c)) return 'Ran the tests';
+  if (/^npm\s+(i|install|ci)\b/.test(c)) return 'Installed dependencies';
+  if (/^npx\s+tsc/.test(c)) return 'Type-checked the code';
+  if (/^npm\b|^npx\b|^yarn\b|^pnpm\b/.test(c)) return 'Ran a package command';
+
+  if (/^curl\b|^wget\b/.test(c)) {
+    const m = c.match(/https?:\/\/([^\/\s"']+)/);
+    return m ? `Fetched ${m[1]}` : 'Made a web request';
+  }
+  if (/^ssh\b/.test(c)) {
+    const m = c.match(/(?:root@|@)([\w.\-]+)/);
+    return m ? `Ran a command on ${m[1]}` : 'Connected to a server';
+  }
+  if (/^docker\b/.test(c)) return 'Ran a Docker command';
+  if (/^coolify\b/.test(c)) return 'Checked Coolify';
+  if (/^wasend\b/.test(c)) return 'Submitted a WhatsApp draft for approval';
+  if (/^(python3?|node)\s+-e\b/.test(c) || /<<'?EOF'?/.test(c)) return 'Ran a small script';
+  if (/^echo\b|^printf\b/.test(c)) return 'Printed some output';
+  if (/^mkdir\b|^cp\b|^mv\b|^chmod\b|^rm\b/.test(c)) return 'Moved files around';
+
+  return head ? `Ran ${head}` : 'Ran a command';
+}
+
+/** A short human phrase for any tool call. */
+export function describeCall(tool: string, detail: string): string {
+  const d = (detail || '').trim();
+  switch (tool) {
+    case 'Bash':      return describeBash(d);
+    case 'Read':      return `Read ${shortPath(d)}`;
+    case 'Write':     return `Wrote ${shortPath(d)}`;
+    case 'Edit':      return `Edited ${shortPath(d)}`;
+    case 'NotebookEdit': return `Edited ${shortPath(d)}`;
+    case 'Glob':      return 'Looked for files';
+    case 'Grep':      return firstQuoted(d) ? `Searched for “${firstQuoted(d)}”` : 'Searched the code';
+    case 'WebFetch': {
+      const m = d.match(/https?:\/\/([^\/\s"']+)/);
+      return m ? `Read ${m[1]}` : 'Read a web page';
+    }
+    case 'WebSearch': return firstQuoted(d) ? `Searched the web for “${firstQuoted(d)}”` : 'Searched the web';
+    case 'Skill': {
+      const m = d.match(/"skill"\s*:\s*"([^"]+)"/);
+      return m ? `Used the ${m[1]} skill` : 'Used a skill';
+    }
+    case 'Task':       return 'Ran a sub-agent';
+    case 'ToolSearch': return 'Looked up a tool';
+    case 'TodoWrite':  return 'Updated its plan';
+    default:           return tool ? `Used ${tool}` : 'Did something';
+  }
+}
+
+/** One line summarising a whole turn's activity, e.g. "12 steps · 3 searches". */
+export function summariseCounts(labels: string[]): string {
+  if (labels.length === 0) return 'no steps';
+  const n = labels.length;
+  return `${n} step${n === 1 ? '' : 's'}`;
+}

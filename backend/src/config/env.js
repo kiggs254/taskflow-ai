@@ -58,6 +58,10 @@ export const config = {
   // failure mode is handing out a shell.
   agentConsole: {
     url: process.env.AGENT_URL || '',
+    // Hermes' capability service. Only its unauthenticated /health is used, to
+    // answer "is Hermes actually up?" rather than inferring it from whether a
+    // Hermes call happens to be running.
+    capsvcUrl: process.env.CAPSVC_URL || '',
     token: process.env.AGENT_CONTROL_TOKEN || '',
     userIds: (process.env.CONSOLE_USER_IDS || '')
       .split(',')
