@@ -118,7 +118,7 @@ export const toGrid = (report) => {
         m.targetLabel ?? m.target?.label ?? 'Tracked',
         // An unproven figure is left blank for a human, never zero-filled.
         m.value === null || m.value === undefined ? '' : String(m.value),
-        { met: 'Met', missed: 'Missed', 'no-data': 'No data', 'n/a': 'N/A', 'no-target': '' }[m.status] ?? '',
+        { met: 'Met', missed: 'Missed', 'no-data': 'No data', 'no-target': '' }[m.status] ?? '',
         m.source,
         m.note || '',
       ]);
@@ -163,7 +163,9 @@ export const writeMonthTab = async (userId, spreadsheetId, report) => {
     if (!existing) {
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
-        requestBody: { requests: [{ addSheet: { properties: { title } } }] },
+        // index 0: the newest month becomes the first tab, so opening the book lands on
+        // the current report rather than the oldest one.
+        requestBody: { requests: [{ addSheet: { properties: { title, index: 0 } } }] },
       });
     } else {
       await sheets.spreadsheets.values.clear({ spreadsheetId, range: `${title}!A1:Z400` });

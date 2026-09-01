@@ -5,12 +5,16 @@ import { writeMonthTab } from '../services/kpiSheet.js';
 import { DEFAULT_TIMEZONE, localDateString, isValidTimezone } from '../utils/time.js';
 
 /**
- * Write last month's KPI report to Google Sheets, once, at the start of each month.
+ * Write last month's KPI report to Google Sheets on the morning of the 1st.
  *
- * Hourly rather than a single monthly cron: a container that happens to be down at the
- * one firing time would otherwise skip the month entirely, and this report is due to a
- * manager on the 2nd working day. Any hour of the new month will do.
+ * Checked hourly rather than scheduled as a single monthly cron. A one-shot cron is
+ * skipped outright if the process happens to be restarting at that minute -- exactly how
+ * a daily report went missing -- so this fires on the first tick at or after 06:00 on
+ * the 1st, and if the whole of the 1st is missed it still catches up later in the month
+ * rather than losing it. The claim below is what stops a second write, not the narrowness
+ * of the schedule.
  */
+const EXPORT_FROM_HOUR = 6;
 
 /** The previous calendar month, in the user's timezone, as YYYY-MM. */
 export const previousMonth = (tz = DEFAULT_TIMEZONE, atMs = Date.now()) => {
@@ -59,6 +63,15 @@ export const runMonthlyExport = async ({ atMs = Date.now() } = {}) => {
 
     // Already done (or being done) for this month.
     if (row.last_exported_month === month) continue;
+
+    // Hold until the morning of the 1st. Past the 1st this is already true, so a month
+    // missed entirely (container down all day) is still exported rather than lost.
+    const local = localDateString(tz, atMs);         // YYYY-MM-DD
+    const dayOfMonth = Number(local.slice(8, 10));
+    const hour = Number(
+      new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(atMs)
+    );
+    if (dayOfMonth === 1 && hour < EXPORT_FROM_HOUR) continue;
 
     const previous = row.last_exported_month;
     if (!(await claimMonth(row.user_id, month))) continue;

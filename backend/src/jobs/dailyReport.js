@@ -12,8 +12,6 @@ import { sendDailyReportEmail } from '../services/emailService.js';
 import { postDailySummaryToSlack } from '../services/slackService.js';
 import { localDateString, localMinutesOfDay, parseTimeToMinutes, isWeekend, DEFAULT_TIMEZONE } from '../utils/time.js';
 
-const SWEEP_MINUTES = 5;
-
 /**
  * Send one user's report across their enabled channels.
  * Exported so "Send test report" in Settings runs the exact same path.
@@ -118,9 +116,14 @@ export const startDailyReport = () => {
           if (target === null) continue; // don't fall back to midnight on a bad value
 
           const nowMinutes = localMinutesOfDay(tz, now);
-          // Fire in the bucket at or just after the target, so a slightly late tick
-          // still lands. Never fires twice thanks to the claim below.
-          if (nowMinutes < target || nowMinutes >= target + SWEEP_MINUTES) continue;
+          // Any time at or after the target, not just the five minutes following it.
+          //
+          // The window used to be [target, target+5), so if the process was restarting
+          // or mid-deploy during those five minutes the day's report was skipped
+          // outright and never retried -- which is exactly how a send got missed and had
+          // to be triggered by hand. Sending late beats not sending, and the atomic
+          // claim below is what prevents a second copy, not the narrowness of this gate.
+          if (nowMinutes < target) continue;
 
           // Weekends: skip the send entirely, and crucially do NOT claim.
           //

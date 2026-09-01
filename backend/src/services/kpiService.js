@@ -311,14 +311,6 @@ const gte = (v, label) => ({ label: label ?? `≥ ${v}`, op: 'gte', value: v });
 const lte = (v, label) => ({ label: label ?? `< ${v}`, op: 'lte', value: v });
 const eq0 = (label) => ({ label: label ?? '0', op: 'eq', value: 0 });
 const tracked = { label: 'Tracked', op: null };
-/**
- * A metric the review template asks for that this role cannot produce: it presupposes a
- * team process (sprint commitments, a triaged bug queue, a tracker with reopen state)
- * that a solo developer on many client systems does not run. Kept visible so the
- * template is still answered, but excluded from scoring -- substituting a lookalike
- * proxy and scoring against it measured the proxy, not the work.
- */
-const notApplicable = (reason) => ({ target: { label: 'n/a — solo developer', op: null }, na: true, value: null, source: 'n/a', note: reason });
 
 /**
  * Score one metric.
@@ -327,8 +319,7 @@ const notApplicable = (reason) => ({ target: { label: 'n/a — solo developer', 
  * scored as a failure, or the total quietly punishes gaps in instrumentation rather
  * than gaps in the work.
  */
-const scoreMetric = (value, target, na) => {
-  if (na) return 'n/a';
+const scoreMetric = (value, target) => {
   if (!target?.op) return 'no-target';
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'no-data';
   const n = Number(value);
@@ -353,7 +344,7 @@ export const scoreReport = (categories) => {
     let met = 0;
     let missed = 0;
     for (const m of c.metrics) {
-      m.status = scoreMetric(m.value, m.target, m.na);
+      m.status = scoreMetric(m.value, m.target);
       if (m.status === 'met') met++;
       else if (m.status === 'missed') missed++;
       // Flatten the target back to its printable label for renderers.
@@ -425,6 +416,8 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
 
   const categories = [
     {
+      // Deliberately absent: "% released on schedule". No release schedule or commitment
+      // is recorded anywhere, and branch-merge timing was standing in for it.
       name: 'Feature Development',
       weight: 30,
       metrics: [
@@ -432,8 +425,6 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
           ...measured(featCount, `feat: commits across ${commits.repos} repo(s)`) },
         { metric: 'Client Systems Receiving Features', target: tracked,
           ...measured(commits.reposWithFeatures, 'Distinct client systems that received feature work') },
-        { metric: '% of Sub Features Released On Schedule',
-          ...notApplicable('No release schedule or sprint commitment is recorded anywhere. Branch-merge timing was standing in for it, which measures merge habits, not lateness') },
         { metric: 'Major Features / New Systems Launched', target: tracked,
           ...measured(
             flt?.monitored ? (flt.launchedInPeriod ?? 0) + commits.breaking : (commits.breaking || null),
@@ -449,11 +440,14 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
       ],
     },
     {
+      // Deliberately absent: bugs reported, re-open rate, backlog and triage time. Each
+      // needs a tracker or a triage step that doesn't exist here, and the proxies that
+      // stood in for them (inbound email volume, repeat commits to one area, an
+      // unreviewed suggestion inbox) measured the proxy rather than the work -- and
+      // scored against targets they were never comparable to.
       name: 'Bugs',
       weight: 20,
       metrics: [
-        { metric: 'Number of Bugs Reported',
-          ...notApplicable(`No bug tracker. ${tasks.clientReportedIssues} inbound client messages were received, but those are requests and conversation, not filed defects`) },
         { metric: 'Number of Bugs Fixed', target: tracked,
           ...measured(fixCount, 'fix: commits') },
         { metric: 'Max Bug Fixing Time', target: lte(3, '< 3 days'),
@@ -462,12 +456,6 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
           ...measured(commits.criticalFixes, 'Fixes on critical paths: checkout, payments, orders, stock, auth') },
         { metric: 'Critical Bug Fixing Time', target: lte(24, '< 24 hours'),
           ...fromFleet(sys?.mttrHours ?? null, 'Mean time to resolve an incident') },
-        { metric: 'Bug Re-open Rate',
-          ...notApplicable('Nothing records a bug being reopened. Repeat commits to one area were standing in for it, which is ordinary iteration while building') },
-        { metric: 'Bug Backlog (open at end of period)',
-          ...notApplicable(`No triaged bug queue. ${tasks.pendingBacklog} unreviewed AI task suggestions sat in the inbox, which is not the same thing`) },
-        { metric: 'Average Bug Triage Time',
-          ...notApplicable('No triage step exists to time. Report-to-next-fix was standing in for it, which is responsiveness, not triage') },
       ],
     },
     {
@@ -511,6 +499,8 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
       ],
     },
     {
+      // Deliberately absent: sprint completion rate. No sprints are run, and the
+      // completed-vs-raised substitute was skewed by auto-generated task suggestions.
       name: 'Delivery & Team',
       weight: 10,
       metrics: [
@@ -520,8 +510,6 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
             : measured(commits.featOnDefault, 'Commits reaching a production branch (fleet not connected)')) },
         { metric: '% of Releases Requiring Rollback/Hotfix', target: lte(3, '< 3%'),
           ...measured(rollbackPct, `${revertCount} revert commit(s)${del?.failedDeployRuns ? ` · ${del.failedDeployRuns} deploy(s) failed before shipping, not counted as rollbacks` : ''}`) },
-        { metric: 'Team Sprint Completion Rate',
-          ...notApplicable('No sprints are run. Completed-vs-raised was standing in for it, and "raised" is inflated by auto-generated task suggestions') },
         { metric: 'Number of Client-Reported Issues', target: tracked,
           ...measured(tasks.clientReportedIssues, 'All inbound client messages (email/Slack) — volume, not filed issues') },
       ],

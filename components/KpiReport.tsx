@@ -15,7 +15,6 @@ const lastMonth = () => {
 
 const SOURCE_STYLE: Record<string, string> = {
   auto: 'bg-emerald-500/15 text-emerald-400',
-  'n/a': 'bg-slate-600/20 text-slate-500',
   fleet: 'bg-primary/20 text-primary',
   manual: 'bg-amber-500/15 text-amber-400',
 };
@@ -207,7 +206,6 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
                           {m.status === 'met' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">met</span>}
                           {m.status === 'missed' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">missed</span>}
                           {m.status === 'no-data' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-600/30 text-slate-400">no data</span>}
-                          {m.status === 'n/a' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-600/30 text-slate-500">n/a</span>}
                         </td>
                         <td className="px-4 py-2.5">
                           <span className={`text-[10px] px-1.5 py-0.5 rounded ${SOURCE_STYLE[m.source] || ''}`}>
