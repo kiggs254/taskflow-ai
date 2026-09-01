@@ -45,29 +45,25 @@ export const startEmailScanner = () => {
 
           // Scan emails for this user
           const scanResult = await scanEmails(integration.user_id, 50);
-          console.log(`📧 Gmail scan completed for user ${integration.user_id}: ${scanResult?.draftsCreated || 0} drafts, ${scanResult?.tasksCreated || 0} tasks`);
-          
-          // Send Telegram notification if tasks were created
-          if (scanResult && (scanResult.draftsCreated > 0 || scanResult.tasksCreated > 0)) {
+          console.log(
+            `📧 Gmail scan for user ${integration.user_id}: ` +
+              `${scanResult?.proposalsCreated ?? 0} proposal(s), ` +
+              `${scanResult?.ignored ?? 0} needed no reply, ` +
+              `${scanResult?.skipped ?? 0} already seen`
+          );
+
+          // Only ping when something actually wants the user. Mail that needs no reply
+          // is the majority and is deliberately silent -- notifying on it would
+          // reproduce the noise this replaced.
+          if (scanResult?.proposalsCreated > 0) {
             try {
-              let message = '';
-              const taskTitles = scanResult.tasks?.map(t => `• ${t.title}`).join('\n') || '';
-              const draftTitles = scanResult.drafts?.map(d => `• ${d.title}`).join('\n') || '';
-              
-              if (scanResult.tasksCreated > 0 && scanResult.draftsCreated > 0) {
-                message = `✅ ${scanResult.tasksCreated} task${scanResult.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}\n\n📝 ${scanResult.draftsCreated} draft task${scanResult.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
-              } else if (scanResult.tasksCreated > 0) {
-                message = `✅ ${scanResult.tasksCreated} task${scanResult.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}`;
-              } else if (scanResult.draftsCreated > 0) {
-                message = `📝 ${scanResult.draftsCreated} draft task${scanResult.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
-              }
-              
-              if (message) {
-                await sendNotification(integration.user_id, message);
-              }
+              const n = scanResult.proposalsCreated;
+              await sendNotification(
+                integration.user_id,
+                `✉️ ${n} email${n > 1 ? 's' : ''} need${n > 1 ? '' : 's'} a reply — drafts are ready for you to review.`
+              );
             } catch (notifError) {
               console.error(`Error sending Telegram notification for user ${integration.user_id}:`, notifError);
-              // Don't fail the scan if notification fails
             }
           }
         } catch (error) {

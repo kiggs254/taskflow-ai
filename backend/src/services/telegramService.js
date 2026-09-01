@@ -1,7 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { query } from '../config/database.js';
 import { parseTask } from './aiService.js';
-import { createDraftTask } from './draftTaskService.js';
 import { getUserTasks, syncTask, completeTask } from './taskService.js';
 import crypto from 'crypto';
 
@@ -638,80 +637,6 @@ const setupBotHandlers = () => {
     }
   });
 
-  // DISABLED: Auto-create drafts from messages (was causing spam)
-  // Users should use /add command instead
-  // If you want to re-enable, uncomment and add proper cooldown/message tracking
-  /*
-  bot.on('message', async (msg) => {
-    // Skip if it's a command
-    if (msg.text && msg.text.startsWith('/')) {
-      return;
-    }
-
-    // Skip if already processed
-    if (globalProcessedMessages.has(msg.message_id)) {
-      return;
-    }
-
-    // Skip if it's not a text message
-    if (!msg.text || msg.text.trim().length === 0) {
-      globalProcessedMessages.add(msg.message_id);
-      return;
-    }
-
-    const chatId = msg.chat.id;
-    const messageKey = `${chatId}_draft`;
-    
-    // Check cooldown (5 minutes)
-    const lastSent = globalChatCooldowns.get(messageKey);
-    if (lastSent && Date.now() - lastSent < 300000) {
-      globalProcessedMessages.add(msg.message_id);
-      return;
-    }
-    
-    try {
-      const userId = await getUserIdFromTelegram(msg.from.id);
-      if (!userId) {
-        globalProcessedMessages.add(msg.message_id);
-        return;
-      }
-
-      console.log(`Creating draft task for user ${userId} from Telegram message`);
-      const aiResult = await parseTask(msg.text);
-      
-      const draftTask = await createDraftTask(userId, {
-        source: 'telegram',
-        sourceId: msg.message_id.toString(),
-        title: aiResult?.title || msg.text.substring(0, 100),
-        description: msg.text,
-        // Defaults to 'job' like every other integration (Gmail and Slack both
-        // hardcode 'job'). This used to fall back to 'personal' whenever the AI
-        // returned nothing, quietly filing work messages into a tab that is hidden
-        // by default -- the same way tasks went missing from the Work tab.
-        workspace: aiResult?.workspaceSuggestions || 'job',
-        energy: aiResult?.energy || 'medium',
-        estimatedTime: aiResult?.estimatedTime || 15,
-        tags: aiResult?.tags || [],
-        // Model-reported rather than the previous hardcoded 0.7.
-        aiConfidence: aiResult?.confidence ?? null,
-      });
-
-      await bot.sendMessage(
-        chatId,
-        `📝 Task draft created!\n\n` +
-        `Title: ${draftTask.title}\n` +
-        `Go to your TaskFlow app to approve or edit it.`,
-        { reply_to_message_id: msg.message_id }
-      );
-      
-      globalChatCooldowns.set(messageKey, Date.now());
-      globalProcessedMessages.add(msg.message_id);
-    } catch (error) {
-      console.error('Message handling error:', error);
-      globalProcessedMessages.add(msg.message_id);
-    }
-  });
-  */
   
   // Error handler for bot (prevent crashes) - only register once
   bot.on('error', (error) => {

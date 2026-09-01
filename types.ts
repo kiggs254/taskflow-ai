@@ -59,7 +59,6 @@ export enum AppView {
   DAILY_RESET = 'DAILY_RESET',
   SETTINGS = 'SETTINGS',
   COMPLETED_TASKS = 'COMPLETED_TASKS',
-  DRAFT_TASKS = 'DRAFT_TASKS',
   MEETINGS = 'MEETINGS',
   KPI_REPORT = 'KPI_REPORT',
   AGENTS = 'AGENTS',
@@ -80,19 +79,18 @@ export interface AIParsedTask {
   subtasks?: string[];
 }
 
-export interface DraftTask {
+export interface EmailProposal {
   id: number;
-  userId: number;
-  source: 'gmail' | 'telegram' | 'slack';
-  sourceId?: string;
-  title: string;
-  description?: string;
-  workspace?: WorkspaceType;
-  energy?: EnergyLevel;
-  estimatedTime?: number;
-  tags: string[];
-  dueDate?: number;
-  status: 'pending' | 'approved' | 'rejected';
-  aiConfidence?: number;
+  threadId: string;
+  lastMessageId?: string;
+  subject?: string;
+  from?: string;
+  classification?: string;
+  summary?: string;
+  reasoning?: string;
+  draftReply?: string;
+  status: 'pending' | 'sent' | 'dismissed';
+  threadMetadata?: Record<string, unknown>;
   createdAt: string;
+  updatedAt: string;
 }

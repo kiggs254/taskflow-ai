@@ -12,7 +12,6 @@ import {
 import { 
   Task, WorkspaceType, UserStats, AppView, User as UserType, EnergyLevel, RecurrenceRule
 } from './types';
-import { DraftTasksView } from './components/DraftTasksView';
 import { GmailSettings } from './components/GmailSettings';
 import { TelegramSettings } from './components/TelegramSettings';
 import { SlackSettings } from './components/SlackSettings';
@@ -2079,7 +2078,6 @@ export default function App() {
   const [workspaceSuggestion, setWorkspaceSuggestion] = useState<{ taskId: string; workspace: WorkspaceType } | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
-  const [draftTasksCount, setDraftTasksCount] = useState<number>(0);
   const [newTasksCount, setNewTasksCount] = useState<number>(0);
   const previousDraftCountRef = useRef<number>(0);
   
@@ -2173,42 +2171,7 @@ export default function App() {
     }
   }, []);
 
-  // Fetch draft tasks count
-  const fetchDraftTasksCount = async () => {
-    if (!token) return;
-    try {
-      const drafts = await api.draftTasks.getAll(token, 'pending');
-      const newCount = drafts.length;
-      
-      // Play sound if new drafts arrived (louder DING)
-      if (newCount > previousDraftCountRef.current && previousDraftCountRef.current > 0) {
-        const newDraftsCount = newCount - previousDraftCountRef.current;
-        playSound('newTask'); // Louder DING sound
-        // Show toast notification
-        addToast(`📧 ${newDraftsCount} new draft task${newDraftsCount > 1 ? 's' : ''} arrived!`, 'success');
-      }
-      
-      setDraftTasksCount(newCount);
-      previousDraftCountRef.current = newCount;
-    } catch (error) {
-      console.error('Failed to fetch draft tasks count:', error);
-    }
-  };
 
-  // Poll for draft tasks count (every 15 seconds for more real-time updates)
-  useEffect(() => {
-    if (!token) return;
-    
-    // Fetch immediately (but don't play sound on initial load)
-    fetchDraftTasksCount();
-    
-    // Then poll every 15 seconds for real-time updates
-    const interval = setInterval(() => {
-      fetchDraftTasksCount();
-    }, 15000);
-    
-    return () => clearInterval(interval);
-  }, [token]);
 
   // Load user preferences for workspace tabs
   useEffect(() => {
@@ -2395,7 +2358,6 @@ export default function App() {
       
       // Refresh draft tasks count after fetching tasks (in case new drafts were created)
       if (token) {
-        fetchDraftTasksCount();
       }
       
       // Calculate daily stats from tasks
@@ -2646,7 +2608,6 @@ export default function App() {
     try {
       await api.syncTask(token, newTask);
       // Refresh draft count in case this was from a draft
-      fetchDraftTasksCount();
     } catch (e) {
       console.error("Failed to sync task", e);
       // Revert if failed
@@ -3353,20 +3314,6 @@ export default function App() {
                 >
                   <Terminal className="w-4 h-4" /> Agent Console
                 </button>
-                {/* 4. Draft Tasks */}
-                <button 
-                  onClick={() => setView(AppView.DRAFT_TASKS)}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center justify-between gap-3 ${view === AppView.DRAFT_TASKS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Mail className="w-4 h-4" /> Draft Tasks
-                  </div>
-                  {draftTasksCount > 0 && (
-                    <span className="px-2 py-0.5 rounded-full bg-accent text-white text-xs font-bold min-w-[20px] text-center">
-                      {draftTasksCount > 99 ? '99+' : draftTasksCount}
-                    </span>
-                  )}
-                </button>
                 {/* 5. Completed */}
                 <button 
                   onClick={() => setView(AppView.COMPLETED_TASKS)}
@@ -3546,7 +3493,6 @@ export default function App() {
                               api.slack.scanNow(token, 50).catch((e) => console.error('Slack scan error', e)),
                             ]);
                             addToast('🔄 Synced all sources (Gmail & Slack)', 'success');
-                            fetchDraftTasksCount();
                             fetchData();
                           } catch (err) {
                             console.error('Sync sources failed', err);
@@ -3841,14 +3787,6 @@ export default function App() {
             />
           )}
 
-          {/* Draft Tasks View */}
-          {view === AppView.DRAFT_TASKS && token && (
-            <DraftTasksView 
-              token={token} 
-              onDraftCountChange={setDraftTasksCount}
-            />
-          )}
-
           {/* Settings View */}
           {view === AppView.SETTINGS && user && <SettingsScreen user={user} onLogout={handleLogout} onBack={() => setView(AppView.DASHBOARD)} token={token!} />}
 
@@ -3906,18 +3844,6 @@ export default function App() {
             <Plus className="w-6 h-6" />
           </button>
           
-          <button 
-            onClick={() => setView(AppView.DRAFT_TASKS)}
-            className={`relative flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.DRAFT_TASKS ? 'text-primary' : 'text-slate-400'}`}
-          >
-            <Mail className="w-5 h-5" />
-            <span className="text-[10px] font-medium">Drafts</span>
-            {draftTasksCount > 0 && (
-              <span className="absolute -top-1 right-1 w-4 h-4 rounded-full bg-accent text-white text-[9px] flex items-center justify-center font-bold">
-                {draftTasksCount > 9 ? '9+' : draftTasksCount}
-              </span>
-            )}
-          </button>
           
           <button 
             onClick={() => setView(AppView.SETTINGS)}

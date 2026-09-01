@@ -2,8 +2,8 @@ import { google } from 'googleapis';
 import { query } from '../config/database.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import crypto from 'crypto';
-import { parseTask, parseEmailThread, checkEmailRelevance } from './aiService.js';
-import { createDraftTask } from './draftTaskService.js';
+import { triageThread } from './emailTriage.js';
+import { upsertProposal } from './proposalService.js';
 import {
   filterUnprocessedGmailIds,
   markGmailMessageProcessed,
@@ -206,11 +206,33 @@ const processEmailThread = async (fullThreadContent, promptInstructions = '') =>
 /**
  * Scan emails and extract tasks
  */
+/**
+ * Plain-text body of one Gmail message payload.
+ *
+ * Same logic the previous scanner inlined twice: prefer the top-level body, otherwise
+ * concatenate the text/plain parts. Nested multipart is walked, which the inline version
+ * did not do -- a multipart/alternative inside multipart/mixed returned nothing.
+ */
+export const extractEmailBody = (payload) => {
+  if (!payload) return '';
+  if (payload.body?.data) {
+    return Buffer.from(payload.body.data, 'base64').toString('utf-8');
+  }
+  let out = '';
+  for (const part of payload.parts || []) {
+    if (part.mimeType === 'text/plain' && part.body?.data) {
+      out += Buffer.from(part.body.data, 'base64').toString('utf-8');
+    } else if (part.parts) {
+      out += extractEmailBody(part);
+    }
+  }
+  return out;
+};
+
 export const scanEmails = async (userId, maxEmails = 50) => {
   try {
     const gmail = await getGmailClient(userId);
-    
-    // Get integration settings
+
     let integrationResult;
     try {
       integrationResult = await query(
@@ -218,339 +240,154 @@ export const scanEmails = async (userId, maxEmails = 50) => {
         [userId]
       );
     } catch (error) {
-      // Backwards compatibility if prompt_instructions column isn't present yet
+      // Older DBs may not have prompt_instructions yet.
       if (error?.code === '42703') {
         integrationResult = await query(
           'SELECT last_scan_at FROM gmail_integrations WHERE user_id = $1',
           [userId]
         );
-        integrationResult.rows = integrationResult.rows.map((row) => ({ ...row, prompt_instructions: '' }));
       } else {
         throw error;
       }
     }
-    
-    const integrationSettings = integrationResult.rows[0] || {};
-    const lastScanAt = integrationSettings.last_scan_at;
-    const promptInstructions = integrationSettings.prompt_instructions || '';
 
-    // Scan all mail. We rely on last_scan_at to avoid reprocessing instead of
-    // filtering by label/category, so the user can control relevance via prompt instructions.
-    // Exclude sent emails - we only want to scan received emails
+    const lastScanAt = integrationResult.rows[0]?.last_scan_at;
+    const instructions = integrationResult.rows[0]?.prompt_instructions || '';
+
     let queryString = '-in:sent';
-    
     if (lastScanAt) {
-      // Only get emails after last scan
-      const lastScanTimestamp = Math.floor(new Date(lastScanAt).getTime() / 1000);
-      queryString += ` after:${lastScanTimestamp}`;
+      queryString += ` after:${Math.floor(new Date(lastScanAt).getTime() / 1000)}`;
     }
 
-    // List messages
-    const listParams = {
+    const messagesResponse = await gmail.users.messages.list({
       userId: 'me',
       maxResults: maxEmails,
-    };
-    if (queryString.trim()) {
-      listParams.q = queryString.trim();
-    }
-
-    const messagesResponse = await gmail.users.messages.list(listParams);
+      q: queryString,
+    });
 
     const messages = messagesResponse.data.messages || [];
-    console.log(`Gmail scan: found ${messages.length} message(s) for user ${userId} with query "${queryString}"`);
-    const draftTasks = [];
-    const createdTasks = [];
-    let tasksCreated = 0;
-
-    // === DUPLICATE CHECK ===
-    // Consult the immutable ledger up front, in one batched query, and drop
-    // already-seen messages before we fetch or bill any AI work for them.
-    //
-    // This replaces two guards that inferred "processed" from "an artifact still
-    // exists": draftTaskExists (which ignored status='rejected', so rejecting a
-    // draft guaranteed its return) and taskExistsForSource (an unindexed
-    // description LIKE scan that broke as soon as the task was deleted or edited).
-    const unprocessedIds = new Set(
-      await filterUnprocessedGmailIds(userId, messages.map(m => m.id))
-    );
-    const skipped = messages.length - unprocessedIds.size;
-    if (skipped > 0) {
-      console.log(`Gmail scan: skipping ${skipped} already-processed message(s) for user ${userId}`);
+    if (messages.length === 0) {
+      await query(
+        'UPDATE gmail_integrations SET last_scan_at = CURRENT_TIMESTAMP WHERE user_id = $1',
+        [userId]
+      );
+      return { success: true, proposalsCreated: 0, skipped: 0, ignored: 0 };
     }
 
-    // Process each email
-    for (const message of messages) {
-      if (!unprocessedIds.has(message.id)) continue;
+    // The immutable ledger, consulted before any fetch or AI billing.
+    const unprocessedIds = await filterUnprocessedGmailIds(userId, messages.map((m) => m.id));
+    const pending = messages.filter((m) => unprocessedIds.has(m.id));
+
+    let proposalsCreated = 0;
+    let ignored = 0;
+    const seenThreads = new Set();
+
+    for (const message of pending) {
       try {
-        // Get full message
         const messageData = await gmail.users.messages.get({
           userId: 'me',
           id: message.id,
           format: 'full',
         });
+        const threadId = messageData.data.threadId;
 
-        const email = messageData.data;
-        const threadId = email.threadId;
-        
-        // Get full thread to process all messages
+        // ONE AI call per thread, not per message.
+        //
+        // The old loop fetched and parsed the thread once for every new message in it,
+        // so three new messages in a conversation produced three near-identical drafts.
+        // Later messages of an already-handled thread are still ledgered below, so they
+        // are not reconsidered on the next scan.
+        if (seenThreads.has(threadId)) {
+          await markGmailMessageProcessed(userId, message.id, { outcome: 'thread_handled' });
+          continue;
+        }
+        seenThreads.add(threadId);
+
         const threadData = await gmail.users.threads.get({
           userId: 'me',
           id: threadId,
           format: 'full',
         });
+        const threadMessages = threadData.data.messages || [];
 
-        const thread = threadData.data;
-        
-        // Extract participants from all messages in thread
-        const allParticipants = {
-          from: new Set(),
-          to: new Set(),
-          cc: new Set(),
-          bcc: new Set(),
-        };
+        const header = (msg, name) =>
+          msg.payload?.headers?.find((h) => h.name?.toLowerCase() === name)?.value || '';
 
-        let fullThreadContent = '';
-        let latestMessage = email;
-        let latestSubject = 'No Subject';
-        let latestDate = null;
-
-        // Process all messages in thread
-        for (const threadMessage of thread.messages || []) {
-          const msgHeaders = threadMessage.payload.headers;
-          const msgFrom = msgHeaders.find(h => h.name === 'From')?.value;
-          const msgTo = msgHeaders.find(h => h.name === 'To')?.value;
-          const msgCc = msgHeaders.find(h => h.name === 'Cc')?.value;
-          const msgBcc = msgHeaders.find(h => h.name === 'Bcc')?.value;
-          const msgSubject = msgHeaders.find(h => h.name === 'Subject')?.value;
-          const msgDate = msgHeaders.find(h => h.name === 'Date')?.value;
-
-          if (msgFrom) allParticipants.from.add(msgFrom);
-          if (msgTo) {
-            msgTo.split(',').forEach(addr => allParticipants.to.add(addr.trim()));
-          }
-          if (msgCc) {
-            msgCc.split(',').forEach(addr => allParticipants.cc.add(addr.trim()));
-          }
-          if (msgBcc) {
-            msgBcc.split(',').forEach(addr => allParticipants.bcc.add(addr.trim()));
-          }
-
-          // Extract body text from this message
-          let msgBodyText = '';
-          if (threadMessage.payload.body?.data) {
-            msgBodyText = Buffer.from(threadMessage.payload.body.data, 'base64').toString('utf-8');
-          } else if (threadMessage.payload.parts) {
-            for (const part of threadMessage.payload.parts) {
-              if (part.mimeType === 'text/plain' && part.body?.data) {
-                msgBodyText += Buffer.from(part.body.data, 'base64').toString('utf-8');
-              }
-            }
-          }
-
-          // Build thread content
-          fullThreadContent += `\n\n--- Message from ${msgFrom} ---\n`;
-          fullThreadContent += `Date: ${msgDate || 'Unknown'}\n`;
-          fullThreadContent += `Subject: ${msgSubject || 'No Subject'}\n`;
-          fullThreadContent += `To: ${msgTo || 'N/A'}\n`;
-          if (msgCc) fullThreadContent += `CC: ${msgCc}\n`;
-          fullThreadContent += `\n${msgBodyText}`;
-
-          // Keep track of latest message
-          if (threadMessage.id === message.id) {
-            latestMessage = threadMessage;
-            latestSubject = msgSubject || 'No Subject';
-            latestDate = msgDate;
-          }
+        const participants = new Set();
+        let threadText = '';
+        for (const msg of threadMessages) {
+          const from = header(msg, 'from');
+          const to = header(msg, 'to');
+          [from, to, header(msg, 'cc')].forEach((v) => {
+            v.split(',').map((x) => x.trim()).filter(Boolean).forEach((x) => participants.add(x));
+          });
+          threadText +=
+            `\n--- ${header(msg, 'date')} | From: ${from} | To: ${to} ---\n` +
+            `${extractEmailBody(msg.payload).slice(0, 6000)}\n`;
         }
 
-        // Extract email data from latest message
-        const headers = latestMessage.payload.headers;
-        const subject = latestSubject;
-        const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
-        const date = latestDate;
-        
-        // Extract body text from latest message
-        let bodyText = '';
-        if (latestMessage.payload.body?.data) {
-          bodyText = Buffer.from(latestMessage.payload.body.data, 'base64').toString('utf-8');
-        } else if (latestMessage.payload.parts) {
-          for (const part of latestMessage.payload.parts) {
-            if (part.mimeType === 'text/plain' && part.body?.data) {
-              bodyText += Buffer.from(part.body.data, 'base64').toString('utf-8');
-            }
-          }
+        const latest = threadMessages[threadMessages.length - 1] || messageData.data;
+        const subject = header(latest, 'subject');
+        const from = header(latest, 'from');
+
+        const verdict = await triageThread(userId, {
+          subject,
+          from,
+          participants: [...participants],
+          threadText,
+          instructions,
+        });
+
+        // null = the model could not be reached. Leave the message UNledgered so the
+        // next scan retries it. Treating an outage as "no reply needed" would silently
+        // swallow real client mail, which is the failure mode this rewrite exists to end.
+        if (!verdict) continue;
+
+        if (!verdict.needsReply) {
+          // Recorded with its reasoning, so a wrong call is reviewable rather than
+          // invisible -- but nothing is created. This is the whole point.
+          await markGmailMessageProcessed(userId, message.id, { outcome: 'no_reply_needed' });
+          ignored++;
+          continue;
         }
 
-        // Process full thread with AI
-        const threadResult = await processEmailThread(fullThreadContent, promptInstructions || '');
-        
-        // Store email metadata
-        const emailMetadata = {
-          threadId: threadId,
-          messageId: message.id,
-          participants: {
-            from: Array.from(allParticipants.from),
-            to: Array.from(allParticipants.to),
-            cc: Array.from(allParticipants.cc),
-            bcc: Array.from(allParticipants.bcc),
+        await upsertProposal(userId, {
+          threadId,
+          lastMessageId: message.id,
+          subject,
+          from,
+          classification: verdict.classification,
+          summary: verdict.summary,
+          reasoning: verdict.reasoning,
+          draftReply: verdict.draftReply,
+          threadMetadata: {
+            threadId,
+            messageId: message.id,
+            participants: [...participants].slice(0, 20),
+            // Only ever the model's explicit meeting time. The old code used the email's
+            // own Date header here, which is why every task showed a meeting.
+            meetingTime: verdict.meetingTime || null,
           },
-          subject: subject,
-          date: date,
-        };
-
-        // === RELEVANCE CHECK: Use AI to check if email matches user's dos/don'ts ===
-        // Only apply filter if user has provided meaningful instructions
-        if (promptInstructions && promptInstructions.trim().length > 10) {
-          const emailSummary = `Subject: ${subject}\nFrom: ${from}\n\n${bodyText.substring(0, 1500)}`;
-          const relevanceCheck = await checkEmailRelevance(emailSummary, promptInstructions);
-          
-          if (!relevanceCheck.isRelevant) {
-            console.log(`Skipping email ${message.id} (${subject}): Not relevant - ${relevanceCheck.reason}`);
-            // Record the verdict. Without this the AI re-judges (and re-bills for)
-            // every irrelevant email on every single scan, forever.
-            await markGmailMessageProcessed(userId, message.id, { outcome: 'irrelevant' });
-            continue;
-          }
-          console.log(`Email ${message.id} (${subject}) approved: ${relevanceCheck.reason}`);
-        } else {
-          console.log(`Processing email ${message.id} (${subject}): No filter instructions`);
-        }
-
-        // Use AI to extract task (fallback if thread processing didn't provide title)
-        try {
-          const aiResult = await parseTask(
-            `Subject: ${subject}\n\nFrom: ${from}\n\n${bodyText.substring(0, 2000)}`,
-            undefined,
-            promptInstructions || ''
-          );
-          
-          // Use thread result description if available, otherwise use basic description
-          const description = threadResult.description 
-            ? `${threadResult.description}\n\n<!-- Email metadata: ${JSON.stringify(emailMetadata)} -->`
-            : `From: ${from}\nSubject: ${subject}\n\n${bodyText.substring(0, 1000)}\n\n<!-- Email metadata: ${JSON.stringify(emailMetadata)} -->`;
-          
-          // Get subtasks from AI extraction (if available)
-          const subtasks = threadResult.subtasks || [];
-          
-          // Get meeting link from AI extraction or extract manually
-          let meetingLink = threadResult.meetingLink || null;
-          if (!meetingLink) {
-            // Fallback: try to extract meeting link from body
-            const meetingPatterns = [
-              /https:\/\/[\w.-]*zoom\.us\/[^\s<>"')]+/i,
-              /https:\/\/meet\.google\.com\/[^\s<>"')]+/i,
-              /https:\/\/teams\.microsoft\.com\/[^\s<>"')]+/i,
-              /https:\/\/[\w.-]*webex\.com\/[^\s<>"')]+/i,
-            ];
-            for (const pattern of meetingPatterns) {
-              const match = bodyText.match(pattern);
-              if (match) {
-                meetingLink = match[0];
-                break;
-              }
-            }
-          }
-          
-          const baseTaskData = {
-            title: threadResult.title || aiResult?.title || subject || 'Email Task',
-            description: description,
-            // All integration-sourced tasks should default to Job
-            workspace: 'job',
-            energy: aiResult?.energy || 'medium',
-            estimatedTime: aiResult?.estimatedTime || 15,
-            tags: [...(aiResult?.tags || []), 'gmail'],
-            // Reported by the model. This was hardcoded to 0.8, so the "80% confident"
-            // shown on every draft card actually meant "this came from Gmail" -- a
-            // fabricated number rendered with the authority of a real one.
-            aiConfidence: aiResult?.confidence ?? null,
-            subtasks, // Include AI-extracted subtasks
-            meetingLink, // Include meeting link if found
-          };
-
-          const contentLower = `${subject} ${bodyText}`.toLowerCase();
-          const looksLikeEvent =
-            contentLower.includes('meeting') ||
-            contentLower.includes('invite') ||
-            contentLower.includes('invitation') ||
-            contentLower.includes('event') ||
-            contentLower.includes('calendar') ||
-            contentLower.includes('zoom') ||
-            contentLower.includes('google meet') ||
-            contentLower.includes('teams');
-
-          if (looksLikeEvent) {
-            // Treat as meeting: tag and attach a date/time based on email Date header
-            const meetingTags = [...baseTaskData.tags, 'meeting'];
-            const meetingDueDate = date ? new Date(date).getTime() : undefined;
-
-            const newTask = {
-              id: crypto.randomUUID(),
-              ...baseTaskData,
-              tags: meetingTags,
-              status: 'todo',
-              dependencies: [],
-              subtasks, // Include subtasks in meeting tasks too
-              meetingLink, // Include meeting link for easy join button
-              createdAt: Date.now(),
-              dueDate: meetingDueDate || null,
-            };
-
-            await syncTask(userId, newTask);
-            // Record immediately after the write. This path never wrote a
-            // draft_tasks row, so before the ledger existed its only trace was an
-            // HTML comment inside the task description -- which vanished the moment
-            // the user edited or deleted the task, re-importing the email forever.
-            await markGmailMessageProcessed(userId, message.id, {
-              taskId: newTask.id,
-              outcome: 'task',
-            });
-            createdTasks.push(newTask);
-            tasksCreated++;
-          } else {
-            // Create draft task (with built-in duplicate check)
-            const draftTask = await createDraftTask(userId, {
-              source: 'gmail',
-              sourceId: message.id,
-              ...baseTaskData,
-            });
-
-            await markGmailMessageProcessed(userId, message.id, { outcome: 'draft' });
-
-            // Only add to array if task was actually created (not skipped as duplicate)
-            if (draftTask) {
-              draftTasks.push(draftTask);
-            }
-          }
-        } catch (aiError) {
-          console.error(`AI parsing error for email ${message.id}:`, aiError);
-          // Deliberately NOT marked processed: a transient AI failure should be
-          // retried on the next scan, not silently swallowed forever.
-          // Continue with next email
-        }
-
-        // Mark email as read (optional - could be configurable)
-        // await gmail.users.messages.modify({
-        //   userId: 'me',
-        //   id: message.id,
-        //   requestBody: { removeLabelIds: ['UNREAD'] },
-        // });
-
+        });
+        await markGmailMessageProcessed(userId, message.id, { outcome: 'proposal' });
+        proposalsCreated++;
       } catch (error) {
-        console.error(`Error processing email ${message.id}:`, error);
-        // Continue with next email
+        console.error(`Error processing email ${message.id}:`, error.message);
+        // Unledgered on purpose: retry next scan.
       }
     }
 
-    // Update last_scan_at
     await query(
       'UPDATE gmail_integrations SET last_scan_at = CURRENT_TIMESTAMP WHERE user_id = $1',
       [userId]
     );
 
-    // Filter out any null drafts (from duplicate skips)
-    const validDrafts = draftTasks.filter(d => d !== null);
-    
-    return { success: true, draftsCreated: validDrafts.length, tasksCreated, tasks: createdTasks, drafts: validDrafts };
+    return {
+      success: true,
+      proposalsCreated,
+      ignored,
+      skipped: messages.length - pending.length,
+    };
   } catch (error) {
     console.error('Email scanning error:', error);
     throw error;
@@ -663,36 +500,22 @@ export const updateGmailSettings = async (userId, settings) => {
 /**
  * Reply to email thread (Reply All)
  */
-export const replyToEmail = async (userId, taskId, message, polishWithAI = false, polishInstructions = '') => {
+/**
+ * Send a threaded reply.
+ *
+ * Split out of replyToEmail, which could only reply to an email that had become a TASK
+ * (it read the metadata back out of the task's description). Proposals have no task, so
+ * the sending half -- reply-all recipient building, MIME assembly, In-Reply-To/References
+ * threading -- lives here and both callers share it. This is the only function in the
+ * codebase that puts mail in front of anyone.
+ */
+export const sendThreadReply = async (
+  userId,
+  { threadId, messageId, subject, message, polishWithAI = false, polishInstructions = '' }
+) => {
   try {
-    // Get task to extract email metadata
-    const taskResult = await query(
-      'SELECT description FROM tasks WHERE id = $1 AND user_id = $2',
-      [taskId, userId]
-    );
-
-    if (taskResult.rows.length === 0) {
-      throw new Error('Task not found');
-    }
-
-    const taskDescription = taskResult.rows[0].description;
-    
-    // Extract email metadata from description
-    const metadataMatch = taskDescription?.match(/<!-- Email metadata: ({.*?}) -->/);
-    if (!metadataMatch) {
-      throw new Error('Email metadata not found in task description');
-    }
-
-    let emailMetadata;
-    try {
-      emailMetadata = JSON.parse(metadataMatch[1]);
-    } catch (e) {
-      throw new Error('Invalid email metadata format');
-    }
-
-    const { threadId, messageId, participants, subject } = emailMetadata;
     if (!threadId || !messageId) {
-      throw new Error('Missing threadId or messageId in metadata');
+      throw new Error('Missing threadId or messageId');
     }
 
     const gmail = await getGmailClient(userId);
@@ -865,8 +688,40 @@ export const replyToEmail = async (userId, taskId, message, polishWithAI = false
       message: error.message,
       stack: error.stack,
       userId,
-      taskId,
+      threadId,
     });
     throw error;
   }
+};
+
+/**
+ * Reply to an email that became a task, by reading the metadata stored in its
+ * description. Kept for the task-completion auto-reply path; new callers should use
+ * sendThreadReply directly.
+ */
+export const replyToEmail = async (userId, taskId, message, polishWithAI = false, polishInstructions = '') => {
+  const taskResult = await query(
+    'SELECT description FROM tasks WHERE id = $1 AND user_id = $2',
+    [taskId, userId]
+  );
+  if (taskResult.rows.length === 0) throw new Error('Task not found');
+
+  const metadataMatch = taskResult.rows[0].description?.match(/<!-- Email metadata: ({.*?}) -->/);
+  if (!metadataMatch) throw new Error('Email metadata not found in task description');
+
+  let meta;
+  try {
+    meta = JSON.parse(metadataMatch[1]);
+  } catch {
+    throw new Error('Invalid email metadata format');
+  }
+
+  return sendThreadReply(userId, {
+    threadId: meta.threadId,
+    messageId: meta.messageId,
+    subject: meta.subject,
+    message,
+    polishWithAI,
+    polishInstructions,
+  });
 };

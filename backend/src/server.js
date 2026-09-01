@@ -10,11 +10,11 @@ import queryParamRoutes from './routes/queryParams.js';
 import gmailRoutes from './routes/gmail.js';
 import telegramRoutes from './routes/telegram.js';
 import slackRoutes from './routes/slack.js';
-import draftTasksRoutes from './routes/draftTasks.js';
 import githubRoutes from './routes/github.js';
 import reportsRoutes from './routes/reports.js';
 import agentRoutes from './routes/agent.js';
 import kpiRoutes from './routes/kpi.js';
+import proposalRoutes from './routes/proposals.js';
 import consoleRoutes from './routes/console.js';
 import { initializeBot } from './services/telegramService.js';
 import { startDailyReport } from './jobs/dailyReport.js';
@@ -56,7 +56,6 @@ app.use('/api/github', githubRoutes);
 app.use('/api/ai', aiRoutes);
 
 // Draft tasks routes (require authentication)
-app.use('/api/draft-tasks', authenticate, draftTasksRoutes);
 
 // Daily report routes (require authentication - already in the router)
 app.use('/api/reports', reportsRoutes);
@@ -68,6 +67,9 @@ app.use('/api/agent', agentRoutes);
 
 // Monthly KPI reporting (fleet facts + commit-derived figures + Google Sheet export).
 app.use('/api/kpi', kpiRoutes);
+
+// Email proposals — what the assistant suggests you reply, awaiting your approval.
+app.use('/api/proposals', proposalRoutes);
 
 // Live agent console (session auth + an explicit CONSOLE_USER_IDS allowlist,
 // both inside the router). Must be mounted here: taskRoutes below does a bare

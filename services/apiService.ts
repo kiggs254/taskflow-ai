@@ -1,5 +1,5 @@
 
-import { Task, User, UserStats, DraftTask } from '../types';
+import { Task, User, UserStats } from '../types';
 
 // TODO: Update this to your Coolify backend URL
 // Example: https://api.yourdomain.com or https://your-app-name.coolify.app
@@ -631,87 +631,6 @@ export const api = {
     },
   },
 
-  // Draft Tasks
-  draftTasks: {
-    getAll: async (token: string, status = 'pending'): Promise<DraftTask[]> => {
-      const res = await fetch(`${API_BASE}/draft-tasks?status=${status}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to get draft tasks');
-      return res.json();
-    },
-    getOne: async (token: string, id: number): Promise<DraftTask> => {
-      const res = await fetch(`${API_BASE}/draft-tasks/${id}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to get draft task');
-      return res.json();
-    },
-    approve: async (token: string, id: number, edits?: Partial<DraftTask>) => {
-      const res = await fetch(`${API_BASE}/draft-tasks/${id}/approve`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(edits || {}),
-      });
-      if (!res.ok) throw new Error('Failed to approve draft task');
-      return res.json();
-    },
-    reject: async (token: string, id: number) => {
-      const res = await fetch(`${API_BASE}/draft-tasks/${id}/reject`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to reject draft task');
-      return res.json();
-    },
-    edit: async (token: string, id: number, edits: Partial<DraftTask>): Promise<DraftTask> => {
-      const res = await fetch(`${API_BASE}/draft-tasks/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(edits),
-      });
-      if (!res.ok) throw new Error('Failed to edit draft task');
-      return res.json();
-    },
-    delete: async (token: string, id: number) => {
-      const res = await fetch(`${API_BASE}/draft-tasks/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to delete draft task');
-      return res.json();
-    },
-    bulkApprove: async (token: string, draftIds: number[]) => {
-      const res = await fetch(`${API_BASE}/draft-tasks/bulk-approve`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ draftIds }),
-      });
-      if (!res.ok) throw new Error('Failed to bulk approve draft tasks');
-      return res.json();
-    },
-    bulkReject: async (token: string, draftIds: number[]) => {
-      const res = await fetch(`${API_BASE}/draft-tasks/bulk-reject`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ draftIds }),
-      });
-      if (!res.ok) throw new Error('Failed to bulk reject draft tasks');
-      return res.json();
-    },
-  },
 
   /**
    * Live agent console. Errors surface the server's own message (`body.error`)
