@@ -336,25 +336,6 @@ export const api = {
     },
   },
 
-  // Analytics
-  analytics: {
-    summary: async (token: string, range: string) => {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await fetch(`${API_BASE}/analytics/summary?range=${range}&tz=${encodeURIComponent(tz)}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to load analytics');
-      return res.json();
-    },
-    narrative: async (token: string, range: string) => {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await fetch(`${API_BASE}/analytics/narrative?range=${range}&tz=${encodeURIComponent(tz)}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to load insights');
-      return res.json();
-    },
-  },
 
   // Daily report
   reports: {

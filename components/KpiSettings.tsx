@@ -82,7 +82,7 @@ export const KpiSettings: React.FC<Props> = ({ token }) => {
     <div className="bg-surface border border-slate-700 rounded-xl p-6">
       <div className="flex items-center gap-3 mb-6">
         <Gauge className="w-6 h-6 text-primary" />
-        <h2 className="text-xl font-semibold text-white">Monthly KPI Reporting</h2>
+        <h2 className="text-xl font-semibold text-white">Monthly Analytics</h2>
       </div>
 
       <div className="space-y-5">

@@ -13,7 +13,6 @@ import slackRoutes from './routes/slack.js';
 import draftTasksRoutes from './routes/draftTasks.js';
 import githubRoutes from './routes/github.js';
 import reportsRoutes from './routes/reports.js';
-import analyticsRoutes from './routes/analytics.js';
 import agentRoutes from './routes/agent.js';
 import kpiRoutes from './routes/kpi.js';
 import consoleRoutes from './routes/console.js';
@@ -62,8 +61,6 @@ app.use('/api/draft-tasks', authenticate, draftTasksRoutes);
 // Daily report routes (require authentication - already in the router)
 app.use('/api/reports', reportsRoutes);
 
-// Analytics routes (require authentication - already in the router)
-app.use('/api/analytics', analyticsRoutes);
 
 // Agent routes (mixed auth: API token for the machine paths, session for the UI
 // paths - each route names its own middleware)

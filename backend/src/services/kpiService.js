@@ -242,24 +242,30 @@ export const getFleetMetrics = async (userId, { fromDay, toDay }) => {
 export const getTaskMetrics = async (userId, { startMs, endMs }) => {
   const one = async (sql, params) => (await query(sql, params)).rows[0] ?? {};
 
-  // Issues that arrived from a client channel, and when -- the intake queue.
+  // When inbound client messages arrived, from the immutable ledgers rather than from
+  // draft_tasks.
+  //
+  // The old query read `draft_tasks WHERE source IN ('gmail','slack')`, which was wrong
+  // twice over: Slack never wrote drafts at all, and any Gmail message the old
+  // event-detector misfired on became a task directly and skipped drafts too. So it was
+  // really counting "Gmail messages that didn't look like an invite". The ledgers record
+  // every message actually handled on both channels, which is what the metric claims.
   const arrivals = (
     await query(
-      `SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS at
-         FROM draft_tasks
-        WHERE user_id = $1 AND source IN ('gmail','slack')
-          AND EXTRACT(EPOCH FROM created_at) * 1000 BETWEEN $2 AND $3
-        ORDER BY created_at ASC`,
+      `SELECT at FROM (
+         SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS at
+           FROM processed_gmail_messages
+          WHERE user_id = $1 AND COALESCE(outcome, '') <> 'irrelevant'
+         UNION ALL
+         SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS at
+           FROM processed_slack_messages
+          WHERE user_id = $1
+       ) a
+       WHERE at BETWEEN $2 AND $3
+       ORDER BY at ASC`,
       [userId, startMs, endMs]
     )
   ).rows.map((r) => Number(r.at));
-
-  const backlog = await one(
-    `SELECT COUNT(*)::int AS n FROM draft_tasks
-      WHERE user_id = $1 AND status = 'pending'
-        AND EXTRACT(EPOCH FROM created_at) * 1000 <= $2`,
-    [userId, endMs]
-  );
 
   // Delivery rate: of the work that existed for this month, how much got finished.
   const delivery = await one(
@@ -273,7 +279,6 @@ export const getTaskMetrics = async (userId, { startMs, endMs }) => {
   return {
     clientReportedIssues: arrivals.length,
     arrivals,
-    pendingBacklog: backlog.n ?? 0,
     tasksCompleted: delivery.completed ?? 0,
     tasksCreated: delivery.created ?? 0,
   };

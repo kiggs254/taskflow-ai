@@ -18,7 +18,6 @@ import { TelegramSettings } from './components/TelegramSettings';
 import { SlackSettings } from './components/SlackSettings';
 import { GitHubSettings } from './components/GitHubSettings';
 import { ReportSettings } from './components/ReportSettings';
-import { AnalyticsScreen } from './components/AnalyticsScreen';
 import { AgentSettings } from './components/AgentSettings';
 import { KpiSettings } from './components/KpiSettings';
 import { KpiReport } from './components/KpiReport';
@@ -1445,12 +1444,6 @@ const DependencyModal = ({
     </div>
   );
 };
-
-// --- Analytics Components ---
-
-// AnalyticsScreen now lives in components/AnalyticsScreen.tsx and reads from
-// GET /api/analytics/summary rather than deriving everything from the in-memory
-// task array on every render.
 
 const SettingsScreen = ({ user, onLogout, onBack, token }: { user: UserType, onLogout: () => void, onBack: () => void, token: string }) => {
   const [notifications, setNotifications] = useState(() => {
@@ -3346,19 +3339,12 @@ export default function App() {
                 >
                   <Calendar className="w-4 h-4" /> Meetings
                 </button>
-                {/* 3. Analytics */}
-                <button 
-                  onClick={() => setView(AppView.ANALYTICS)}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.ANALYTICS ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-                >
-                  <BarChart2 className="w-4 h-4" /> Analytics
-                </button>
-                {/* KPI report — monthly, in the format the review template expects */}
+                {/* Monthly analytics — the KPI review format, which is the only analytics kept */}
                 <button
                   onClick={() => setView(AppView.KPI_REPORT)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex items-center gap-3 ${view === AppView.KPI_REPORT ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
                 >
-                  <Gauge className="w-4 h-4" /> KPI Report
+                  <BarChart2 className="w-4 h-4" /> Analytics
                 </button>
                 {/* Live agent console */}
                 <button
@@ -3467,7 +3453,7 @@ export default function App() {
                      <button onClick={() => setView(AppView.COMPLETED_TASKS)} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800">
                         <CheckSquare className="w-4 h-4" />
                      </button>
-                     <button onClick={() => setView(AppView.ANALYTICS)} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800">
+                     <button onClick={() => setView(AppView.KPI_REPORT)} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800">
                         <BarChart2 className="w-4 h-4" />
                      </button>
                      <button onClick={() => setView(AppView.SETTINGS)} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800">
@@ -3838,7 +3824,6 @@ export default function App() {
           )}
 
           {/* Analytics View */}
-          {view === AppView.ANALYTICS && <AnalyticsScreen token={token} onBack={() => setView(AppView.DASHBOARD)} />}
           {view === AppView.KPI_REPORT && <KpiReport token={token!} onBack={() => setView(AppView.DASHBOARD)} />}
           {view === AppView.AGENTS && token && <AgentConsole token={token} onBack={() => setView(AppView.DASHBOARD)} />}
           

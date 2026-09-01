@@ -86,7 +86,7 @@ export const KpiReport: React.FC<Props> = ({ token, onBack }) => {
         <button onClick={onBack} className="text-slate-400 hover:text-white transition-colors">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-2xl font-bold text-white">Monthly KPI Report</h1>
+        <h1 className="text-2xl font-bold text-white">Monthly Analytics</h1>
       </div>
 
       <div className="bg-surface border border-slate-700 rounded-xl p-4 flex flex-wrap items-end gap-3">
