@@ -118,7 +118,7 @@ export const toGrid = (report) => {
         m.targetLabel ?? m.target?.label ?? 'Tracked',
         // An unproven figure is left blank for a human, never zero-filled.
         m.value === null || m.value === undefined ? '' : String(m.value),
-        { met: 'Met', missed: 'Missed', 'no-data': 'No data', 'no-target': '' }[m.status] ?? '',
+        { met: 'Met', missed: 'Missed', 'no-data': 'No data', 'n/a': 'N/A', 'no-target': '' }[m.status] ?? '',
         m.source,
         m.note || '',
       ]);

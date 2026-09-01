@@ -153,3 +153,27 @@ test('coverage is 0 when nothing at all could be scored', () => {
   assert.equal(overall, null, 'null, not 0 — an unscored report has no score');
   assert.equal(coverage, 0);
 });
+
+test('an n/a metric is excluded from scoring, not counted as a miss', () => {
+  // The whole point: a metric that presupposes a team process must not drag the score
+  // down for a solo developer who has no such process.
+  const cats = [cat('Bugs', 100, [
+    M(90, { label: '≥ 85', op: 'gte', value: 85 }),
+    { metric: 'Bug Re-open Rate', value: null, na: true, target: { label: 'n/a', op: null } },
+  ])];
+  const { overall } = scoreReport(cats);
+  assert.equal(cats[0].metrics[1].status, 'n/a');
+  assert.equal(cats[0].metricsScored, 1, 'only the applicable metric is scored');
+  assert.equal(overall, 100, 'the n/a metric neither helps nor hurts');
+});
+
+test('a category that is entirely n/a has no score at all', () => {
+  const cats = [
+    cat('Applicable', 50, [M(100, { label: '≥ 85', op: 'gte', value: 85 })]),
+    cat('TeamOnly', 50, [{ value: null, na: true, target: { label: 'n/a', op: null } }]),
+  ];
+  const { overall, coverage } = scoreReport(cats);
+  assert.equal(cats[1].score, null);
+  assert.equal(overall, 100);
+  assert.equal(coverage, 50, 'coverage shows the score rests on half the weighting');
+});

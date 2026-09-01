@@ -311,6 +311,14 @@ const gte = (v, label) => ({ label: label ?? `≥ ${v}`, op: 'gte', value: v });
 const lte = (v, label) => ({ label: label ?? `< ${v}`, op: 'lte', value: v });
 const eq0 = (label) => ({ label: label ?? '0', op: 'eq', value: 0 });
 const tracked = { label: 'Tracked', op: null };
+/**
+ * A metric the review template asks for that this role cannot produce: it presupposes a
+ * team process (sprint commitments, a triaged bug queue, a tracker with reopen state)
+ * that a solo developer on many client systems does not run. Kept visible so the
+ * template is still answered, but excluded from scoring -- substituting a lookalike
+ * proxy and scoring against it measured the proxy, not the work.
+ */
+const notApplicable = (reason) => ({ target: { label: 'n/a — solo developer', op: null }, na: true, value: null, source: 'n/a', note: reason });
 
 /**
  * Score one metric.
@@ -319,7 +327,8 @@ const tracked = { label: 'Tracked', op: null };
  * scored as a failure, or the total quietly punishes gaps in instrumentation rather
  * than gaps in the work.
  */
-const scoreMetric = (value, target) => {
+const scoreMetric = (value, target, na) => {
+  if (na) return 'n/a';
   if (!target?.op) return 'no-target';
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'no-data';
   const n = Number(value);
@@ -344,7 +353,7 @@ export const scoreReport = (categories) => {
     let met = 0;
     let missed = 0;
     for (const m of c.metrics) {
-      m.status = scoreMetric(m.value, m.target);
+      m.status = scoreMetric(m.value, m.target, m.na);
       if (m.status === 'met') met++;
       else if (m.status === 'missed') missed++;
       // Flatten the target back to its printable label for renderers.
@@ -409,7 +418,9 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
   // Releases: real deploy runs when the fleet is connected, otherwise commits that
   // reached a production branch.
   const releases = del?.deployRuns ?? null;
-  const rollbacks = (del?.failedDeployRuns ?? 0) + revertCount;
+  // Reverts only. A deploy that FAILED never reached production, so it is a broken
+  // build, not a release that had to be rolled back -- counting it doubled the rate.
+  const rollbacks = revertCount;
   const rollbackPct = releases ? pct(rollbacks, releases) : pct(revertCount, featCount + fixCount);
 
   const categories = [
@@ -421,8 +432,8 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
           ...measured(featCount, `feat: commits across ${commits.repos} repo(s)`) },
         { metric: 'Client Systems Receiving Features', target: tracked,
           ...measured(commits.reposWithFeatures, 'Distinct client systems that received feature work') },
-        { metric: '% of Sub Features Released On Schedule', target: gte(85),
-          ...measured(pct(commits.featOnDefault, commits.featTotal), 'Features that reached the production branch in-month') },
+        { metric: '% of Sub Features Released On Schedule',
+          ...notApplicable('No release schedule or sprint commitment is recorded anywhere. Branch-merge timing was standing in for it, which measures merge habits, not lateness') },
         { metric: 'Major Features / New Systems Launched', target: tracked,
           ...measured(
             flt?.monitored ? (flt.launchedInPeriod ?? 0) + commits.breaking : (commits.breaking || null),
@@ -441,8 +452,8 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
       name: 'Bugs',
       weight: 20,
       metrics: [
-        { metric: 'Number of Bugs Reported', target: tracked,
-          ...measured(tasks.clientReportedIssues, 'Inbound client messages (email/Slack) — includes requests as well as defects') },
+        { metric: 'Number of Bugs Reported',
+          ...notApplicable(`No bug tracker. ${tasks.clientReportedIssues} inbound client messages were received, but those are requests and conversation, not filed defects`) },
         { metric: 'Number of Bugs Fixed', target: tracked,
           ...measured(fixCount, 'fix: commits') },
         { metric: 'Max Bug Fixing Time', target: lte(3, '< 3 days'),
@@ -451,12 +462,12 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
           ...measured(commits.criticalFixes, 'Fixes on critical paths: checkout, payments, orders, stock, auth') },
         { metric: 'Critical Bug Fixing Time', target: lte(24, '< 24 hours'),
           ...fromFleet(sys?.mttrHours ?? null, 'Mean time to resolve an incident') },
-        { metric: 'Bug Re-open Rate', target: lte(5, '< 5%'),
-          ...measured(pct(commits.recurringFixes, fixCount), 'Areas needing a second fix within 72h — a fix that did not hold') },
-        { metric: 'Bug Backlog (open at end of period)', target: lte(5, '< 5'),
-          ...measured(tasks.pendingBacklog, 'Unactioned client reports at month end') },
-        { metric: 'Average Bug Triage Time', target: lte(24, '< 24 hours'),
-          ...measured(responseHours(tasks.arrivals, commits.fixTimestamps), 'Median hours from a client report to the next fix shipped') },
+        { metric: 'Bug Re-open Rate',
+          ...notApplicable('Nothing records a bug being reopened. Repeat commits to one area were standing in for it, which is ordinary iteration while building') },
+        { metric: 'Bug Backlog (open at end of period)',
+          ...notApplicable(`No triaged bug queue. ${tasks.pendingBacklog} unreviewed AI task suggestions sat in the inbox, which is not the same thing`) },
+        { metric: 'Average Bug Triage Time',
+          ...notApplicable('No triage step exists to time. Report-to-next-fix was standing in for it, which is responsiveness, not triage') },
       ],
     },
     {
@@ -464,9 +475,15 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
       weight: 30,
       metrics: [
         { metric: 'System Downtime Hours', target: lte(1, '< 1 hour'),
-          ...fromFleet(sys?.downtimeHours ?? null, 'Across work systems only') },
+          ...fromFleet(sys?.downtimeHours ?? null,
+            sys?.daysMonitored != null && sys.daysMonitored < (sys.daysInPeriod ?? 0)
+              ? `Across work systems · only ${sys.daysMonitored} of ${sys.daysInPeriod} days were monitored`
+              : 'Across work systems only') },
         { metric: 'System Uptime %', target: gte(99.5),
-          ...fromFleet(sys?.uptimePct ?? null, sys?.worstInstance ? `Worst system ${sys.worstInstance.uptimePct}%` : 'Health probes') },
+          ...fromFleet(sys?.uptimePct ?? null,
+            [sys?.worstInstance ? `Worst system ${sys.worstInstance.uptimePct}%` : 'Health probes',
+             sys?.daysMonitored != null && sys.daysMonitored < (sys.daysInPeriod ?? 0)
+               ? `${sys.daysMonitored}/${sys.daysInPeriod} days monitored` : null].filter(Boolean).join(' · ')) },
         { metric: 'Number of Alerts Opened', target: tracked,
           ...fromFleet(sys?.criticalIncidents ?? null, 'All severities — not only P0/P1, which are not separately labelled') },
         { metric: 'Mean Time to Resolve (MTTR)', target: lte(3, '< 3 hours'),
@@ -502,11 +519,11 @@ const buildMonthlyKpi = async (userId, { month, timezone = DEFAULT_TIMEZONE } = 
             ? fromFleet(releases, `Deploy runs across ${del?.instancesDeployed ?? 0} system(s)`)
             : measured(commits.featOnDefault, 'Commits reaching a production branch (fleet not connected)')) },
         { metric: '% of Releases Requiring Rollback/Hotfix', target: lte(3, '< 3%'),
-          ...measured(rollbackPct, `${rollbacks} failed deploy(s) or revert(s)`) },
-        { metric: 'Delivery Completion Rate', target: gte(85),
-          ...measured(pct(tasks.tasksCompleted, tasks.tasksCreated), 'Tasks completed vs. raised this month') },
+          ...measured(rollbackPct, `${revertCount} revert commit(s)${del?.failedDeployRuns ? ` · ${del.failedDeployRuns} deploy(s) failed before shipping, not counted as rollbacks` : ''}`) },
+        { metric: 'Team Sprint Completion Rate',
+          ...notApplicable('No sprints are run. Completed-vs-raised was standing in for it, and "raised" is inflated by auto-generated task suggestions') },
         { metric: 'Number of Client-Reported Issues', target: tracked,
-          ...measured(tasks.clientReportedIssues, 'From email and Slack') },
+          ...measured(tasks.clientReportedIssues, 'All inbound client messages (email/Slack) — volume, not filed issues') },
       ],
     },
   ];
