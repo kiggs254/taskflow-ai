@@ -239,6 +239,13 @@ function describeBash(cmd: string): string {
   if (/^(grep|rg|ag)\b/.test(c) || /\|\s*grep\b/.test(c)) return q ? `Searched for “${q}”` : 'Searched the code';
   if (/^find\b/.test(c)) { const p = pathIn(c); return p ? `Looked for files in ${p}` : 'Looked for files'; }
   if (/^awk\b|^cut\b|^sort\b|^uniq\b|^wc\b/.test(c)) return 'Processed some output';
+  // `which ssh` / `command -v coolify` rendered as "Ran which" / "Ran command",
+  // which says nothing. Name the thing being looked for instead.
+  if (/^(which|type)\b|^command\s+-v\b/.test(c)) {
+    const m = c.match(/^(?:which|type|command\s+-v)\s+([A-Za-z0-9_.\-]+)/);
+    return m ? `Checked whether ${m[1]} is installed` : 'Checked which tools are available';
+  }
+  if (/^printenv\b|^env\b/.test(c)) return 'Checked the environment settings';
 
   if (/^git\s+push/.test(c)) return 'Pushed to git';
   if (/^git\s+commit/.test(c)) return 'Committed changes';
