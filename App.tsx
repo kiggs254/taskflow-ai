@@ -3355,7 +3355,7 @@ export default function App() {
           
           {/* Tasks View */}
           {view === AppView.DASHBOARD && token && (
-            <HomeScreen token={token} onOpenAgents={() => setView(AppView.AGENTS)} />
+            <HomeScreen token={token} />
           )}
 
           {/* Analytics View */}
