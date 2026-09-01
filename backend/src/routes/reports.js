@@ -38,9 +38,12 @@ router.get('/completed-today', asyncHandler(async (req, res) => {
   // When the next report actually fires, and where its window starts -- so the preview
   // reflects the pending report (tomorrow, once today's has gone out), not the whole day.
   const nextSend = nextReportInfo(settings);
+  // ?window=day asks for the calendar day rather than the pending report's window.
+  // The report window runs from the last send, so after 16:30 it answers "what's queued
+  // for tomorrow" -- right for the preview, wrong for a dashboard that says "done today".
   const report = await getCompletedToday(req.user.id, {
     timezone: req.query.tz || settings.timezone,
-    since: nextSend.windowSince,
+    since: req.query.window === 'day' ? null : nextSend.windowSince,
   });
   // Same narratives the real send renders, so the preview is faithful.
   await attachNarratives(report, req.user.id);

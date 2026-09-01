@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-TASKFLOW.AI is a gamified (XP/levels/streaks) task manager for developers. Two independently deployed halves live in one repo:
+TASKFLOW.AI is a proactive assistant for a solo developer running many client systems. It reads mail, decides what needs a human reply, drafts it, and waits for approval; it shows what the agent is doing and what actually got done. It is **no longer a task manager** — the email→task pipeline and the task-list home screen were removed, though task *records* still exist invisibly as the work log behind the daily and monthly reports.
+
+Two independently deployed halves live in one repo:
 
 - **Frontend** (repo root): React 19 + Vite + TypeScript, deployed to Netlify.
 - **Backend** (`backend/`): Node/Express + PostgreSQL, ESM, deployed to Coolify.
@@ -92,7 +94,18 @@ All AI runs server-side in `backend/src/services/aiService.js` via the `openai` 
 
 `parseTask` takes `options.userId` + `options.activeWorkspace` and grounds the model via `services/ai/context.js` (active tab, enabled workspaces, top tags, recent titles, stored `promptInstructions`). Keep the stable context first in the message array — Deepseek's prompt cache keys on the prefix. Output is coerced, not rejected, by `services/ai/taskSchema.js`, which **never returns a workspace whose tab the user has hidden**.
 
-### Integrations → draft tasks
+### Email → proposals (not tasks)
+
+`gmailService.scanEmails` triages **one thread at a time** and produces an `email_proposals` row **only when a human must reply**. `emailTriage.triageThread` returns a required `needsReply` boolean plus a classification enum, so "no reply needed" is a first-class answer — the pipeline it replaced had no way to express that, and turned every receipt and cron alert into a task.
+
+Three invariants here, each encoding a bug that shipped:
+- **Keyed on thread, never message.** The old loop parsed the thread once per new *message*, so three new messages produced three near-identical drafts.
+- **A triage failure returns `null` and leaves the message unledgered**, so the next scan retries. Treating an outage as "no reply needed" would silently swallow real client mail.
+- **A meeting time is only ever the model's explicit ISO value.** The old code decided "is an event" via unanchored `includes()` over the whole body (`'event'` matches *prevent*) and then set the due date to the email's own `Date` header — which is why every task showed "Meeting Time: \<when the mail arrived\>".
+
+`sendThreadReply` is the **only** function that sends mail, and it is reachable only from `POST /api/proposals/:id/send` — an explicit user action. Nothing in the scanner can reach it.
+
+### Other integrations → tasks
 
 Gmail, Telegram, and Slack scanners (`backend/src/jobs/`, cron `* * * * *`) pull messages, run them through AI, and create **draft tasks** (`status: pending`) rather than real tasks. The user approves/rejects drafts in `DraftTasksView`; approval promotes a draft into a real task. `overdueNotifier.js` runs hourly at :15 and a daily summary at 06:00. OAuth tokens are encrypted at rest via `backend/src/utils/encryption.js` using `ENCRYPTION_KEY`.
 

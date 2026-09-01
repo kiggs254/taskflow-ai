@@ -358,9 +358,10 @@ export const api = {
       if (!res.ok) throw new Error('Failed to save report settings');
       return res.json();
     },
-    completedToday: async (token: string) => {
+    /** `window: 'day'` asks for the calendar day rather than the pending report window. */
+    completedToday: async (token: string, window?: 'day') => {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await fetch(`${API_BASE}/reports/completed-today?tz=${encodeURIComponent(tz)}`, {
+      const res = await fetch(`${API_BASE}/reports/completed-today?tz=${encodeURIComponent(tz)}${window ? `&window=${window}` : ''}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to load today\'s report');
@@ -382,6 +383,48 @@ export const api = {
         body: JSON.stringify({ force: true, ...opts }),
       });
       if (!res.ok) throw new Error('Failed to send test report');
+      return res.json();
+    },
+  },
+
+  // Email proposals — what the assistant suggests you reply, awaiting approval.
+  proposals: {
+    list: async (token: string, status = 'pending') => {
+      const res = await fetch(`${API_BASE}/proposals?status=${encodeURIComponent(status)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to load proposals');
+      return res.json();
+    },
+    /** Save an edited draft without sending it. */
+    saveDraft: async (token: string, id: number, draftReply: string) => {
+      const res = await fetch(`${API_BASE}/proposals/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ draftReply }),
+      });
+      if (!res.ok) throw new Error('Failed to save the draft');
+      return res.json();
+    },
+    /** The only call that sends mail. Always user-initiated. */
+    send: async (token: string, id: number, draftReply?: string) => {
+      const res = await fetch(`${API_BASE}/proposals/${id}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(draftReply ? { draftReply } : {}),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to send the reply');
+      }
+      return res.json();
+    },
+    dismiss: async (token: string, id: number) => {
+      const res = await fetch(`${API_BASE}/proposals/${id}/dismiss`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to dismiss');
       return res.json();
     },
   },
