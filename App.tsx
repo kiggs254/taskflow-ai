@@ -3246,16 +3246,45 @@ export default function App() {
         
         {/* Sidebar (Desktop) / Topbar (Mobile) */}
         <div className="md:w-64 p-4 md:p-6 md:h-screen md:sticky md:top-0 flex flex-col md:border-r border-slate-800 bg-background/95 backdrop-blur z-20">
-          <div className="flex items-center gap-3 mb-8 cursor-pointer group" onClick={() => setView(AppView.DASHBOARD)}>
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform">
-              <Brain className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="font-bold text-lg tracking-tight text-white group-hover:text-primary transition-colors">TASKFLOW</h1>
-              <div className="text-xs text-slate-500 font-mono flex items-center gap-1">
-                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                 Lvl {stats.level} Dev
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setView(AppView.DASHBOARD)}>
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform">
+                <Brain className="w-6 h-6 text-white" />
               </div>
+              <div>
+                <h1 className="font-bold text-lg tracking-tight text-white group-hover:text-primary transition-colors">TASKFLOW</h1>
+                <div className="text-xs text-slate-500 font-mono flex items-center gap-1">
+                   <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                   Lvl {stats.level} Dev
+                </div>
+              </div>
+            </div>
+            {/* Analytics, Agent Console, and Completed have no slot in the
+                mobile bottom nav (Today, Meetings, Add, Settings already
+                fill it) -- surfaced here in the topbar every view shares,
+                so they stay reachable on mobile instead of disappearing. */}
+            <div className="flex md:hidden items-center gap-1">
+              <button
+                onClick={() => setView(AppView.COMPLETED_TASKS)}
+                className={`p-2 rounded-lg transition-colors ${view === AppView.COMPLETED_TASKS ? 'text-primary bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                title="Completed"
+              >
+                <CheckSquare className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setView(AppView.AGENTS)}
+                className={`p-2 rounded-lg transition-colors ${view === AppView.AGENTS ? 'text-primary bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                title="Agent Console"
+              >
+                <Terminal className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setView(AppView.KPI_REPORT)}
+                className={`p-2 rounded-lg transition-colors ${view === AppView.KPI_REPORT ? 'text-primary bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                title="Analytics"
+              >
+                <BarChart2 className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
