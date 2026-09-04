@@ -3259,31 +3259,16 @@ export default function App() {
                 </div>
               </div>
             </div>
-            {/* Analytics, Agent Console, and Completed have no slot in the
-                mobile bottom nav (Today, Meetings, Add, Settings already
-                fill it) -- surfaced here in the topbar every view shares,
-                so they stay reachable on mobile instead of disappearing. */}
+            {/* Settings has a topbar slot on mobile so the bottom nav's
+                center slot (freed up by dropping the Quick Add FAB) can
+                carry Completed, Agent Console, and Analytics instead. */}
             <div className="flex md:hidden items-center gap-1">
               <button
-                onClick={() => setView(AppView.COMPLETED_TASKS)}
-                className={`p-2 rounded-lg transition-colors ${view === AppView.COMPLETED_TASKS ? 'text-primary bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-                title="Completed"
+                onClick={() => setView(AppView.SETTINGS)}
+                className={`p-2 rounded-lg transition-colors ${view === AppView.SETTINGS ? 'text-primary bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+                title="Settings"
               >
-                <CheckSquare className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setView(AppView.AGENTS)}
-                className={`p-2 rounded-lg transition-colors ${view === AppView.AGENTS ? 'text-primary bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-                title="Agent Console"
-              >
-                <Terminal className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setView(AppView.KPI_REPORT)}
-                className={`p-2 rounded-lg transition-colors ${view === AppView.KPI_REPORT ? 'text-primary bg-slate-800' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-                title="Analytics"
-              >
-                <BarChart2 className="w-4 h-4" />
+                <SettingsIcon className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -3443,20 +3428,28 @@ export default function App() {
             <span className="text-[10px] font-medium">Meetings</span>
           </button>
           
-          <button 
-            onClick={() => setShowQuickAdd(true)}
-            className="flex items-center justify-center w-12 h-12 -mt-4 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg shadow-blue-500/40"
+          <button
+            onClick={() => setView(AppView.COMPLETED_TASKS)}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.COMPLETED_TASKS ? 'text-primary' : 'text-slate-400'}`}
           >
-            <Plus className="w-6 h-6" />
+            <CheckSquare className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Completed</span>
           </button>
-          
-          
-          <button 
-            onClick={() => setView(AppView.SETTINGS)}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.SETTINGS ? 'text-primary' : 'text-slate-400'}`}
+
+          <button
+            onClick={() => setView(AppView.AGENTS)}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.AGENTS ? 'text-primary' : 'text-slate-400'}`}
           >
-            <SettingsIcon className="w-5 h-5" />
-            <span className="text-[10px] font-medium">Settings</span>
+            <Terminal className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Agents</span>
+          </button>
+
+          <button
+            onClick={() => setView(AppView.KPI_REPORT)}
+            className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors min-w-[60px] ${view === AppView.KPI_REPORT ? 'text-primary' : 'text-slate-400'}`}
+          >
+            <BarChart2 className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Analytics</span>
           </button>
         </div>
       </nav>
