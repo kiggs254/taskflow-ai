@@ -1,5 +1,5 @@
 import { query } from '../config/database.js';
-import { getClientForUser, nextPageUrl } from './githubAuth.js';
+import { getClientForIntegration, getIntegrations, nextPageUrl } from './githubAuth.js';
 import { DEFAULT_TIMEZONE, isValidTimezone } from '../utils/time.js';
 
 /**
@@ -57,8 +57,8 @@ export const monthRange = (month) => {
 const MAX_PAGES = 10;
 const MAX_BRANCHES = 100;
 
-/** Every commit by this author in one repo in the window, across all branches. */
-const fetchRepoMonthCommits = async (client, repo, { login, sinceIso, untilIso, defaultBranch }) => {
+/** Every commit by this user in one repo in the window, across all branches. */
+const fetchRepoMonthCommits = async (client, repo, { logins = [], sinceIso, untilIso, defaultBranch }) => {
   let branches = [];
   try {
     let url = `/repos/${repo.owner}/${repo.name}/branches?per_page=100`;
@@ -86,13 +86,21 @@ const fetchRepoMonthCommits = async (client, repo, { login, sinceIso, untilIso, 
       `&since=${encodeURIComponent(sinceIso)}` +
       `&until=${encodeURIComponent(untilIso)}` +
       `&per_page=100` +
-      (login ? `&author=${encodeURIComponent(login)}` : '');
+      // `author=` takes one value, so it is only usable when a single login is known;
+      // with several connected accounts we filter locally instead (see authoredBy).
+      (logins.length === 1 ? `&author=${encodeURIComponent(logins[0])}` : '');
     let pages = 0;
     try {
       while (url && pages < MAX_PAGES) {
         const res = await client.request(url);
-          for (const c of res.data || []) {
+        for (const c of res.data || []) {
           if (!c?.sha || bySha.has(c.sha)) continue;
+          // Skipped when the server already filtered: GitHub matched it, so re-testing
+          // could only discard a commit it deliberately included.
+          if (logins.length > 1) {
+            const author = c.author?.login;
+            if (!author || !logins.some((l) => l.toLowerCase() === author.toLowerCase())) continue;
+          }
           c.__onDefault = branch === primary;
           bySha.set(c.sha, c);
         }
@@ -118,17 +126,12 @@ const CRITICAL_SCOPES = /(checkout|payment|pay|order|cart|stock|inventory|auth|l
 export const getCommitMetrics = async (userId, { sinceIso, untilIso, startMs, endMs }) => {
   const repos = (
     await query(
-      `SELECT repo_id, owner, name, default_branch
-         FROM github_repos WHERE user_id = $1 AND selected = true`,
+      `SELECT repo_id, owner, name, default_branch, installation_id
+         FROM github_repos
+        WHERE user_id = $1 AND selected = true AND access_lost_at IS NULL`,
       [userId]
     )
   ).rows;
-
-  const integration = await query(
-    'SELECT github_login FROM github_integrations WHERE user_id = $1',
-    [userId]
-  );
-  const login = integration.rows[0]?.github_login;
 
   const empty = {
     repos: 0, commits: 0, unconventional: 0, byType: {}, perRepo: [],
@@ -137,7 +140,21 @@ export const getCommitMetrics = async (userId, { sinceIso, untilIso, startMs, en
   };
   if (!repos.length) return empty;
 
-  const client = await getClientForUser(userId);
+  // One client per connected account, and the union of their author logins: the same
+  // person's month spans their personal repos and their org's, and a single per-user
+  // client would 404 on every repo outside whichever account sorted first.
+  const integrations = await getIntegrations(userId);
+  const logins = [...new Set(integrations.map((i) => i.author_login).filter(Boolean))];
+  const clients = new Map();
+  for (const integration of integrations) {
+    try {
+      const client = await getClientForIntegration(integration);
+      if (client) clients.set(String(integration.installation_id), client);
+    } catch (error) {
+      console.error(`KPI: GitHub auth failed for installation ${integration.installation_id}:`, error.message);
+    }
+  }
+
   const byType = {};
   const perRepo = [];
   let totalCommits = 0;
@@ -152,8 +169,15 @@ export const getCommitMetrics = async (userId, { sinceIso, untilIso, startMs, en
   const fixTimestamps = [];
 
   for (const repo of repos) {
+    const client = clients.get(String(repo.installation_id));
+    // No client means that account is disconnected or its token failed. Skipping is
+    // right -- but silently reporting zero commits for the repo is not, so say so.
+    if (!client) {
+      console.warn(`KPI: no GitHub client for ${repo.owner}/${repo.name}; skipping.`);
+      continue;
+    }
     const defaultBranch = repo.default_branch || 'main';
-    const commits = await fetchRepoMonthCommits(client, repo, { login, sinceIso, untilIso, defaultBranch });
+    const commits = await fetchRepoMonthCommits(client, repo, { logins, sinceIso, untilIso, defaultBranch });
     const real = commits.filter((c) => (c.parents?.length ?? 1) <= 1);
     let repoFeat = 0;
     let repoFix = 0;

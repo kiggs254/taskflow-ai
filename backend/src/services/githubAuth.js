@@ -148,40 +148,82 @@ const installationToken = async (installationId) => {
 };
 
 /**
- * Resolve the right bearer token for a user, whichever auth kind they connected with.
+ * Metadata about one installation, read with the app JWT.
+ *
+ * This is the only honest source for "whose account is this installed on". The
+ * install callback gives us an installation_id and nothing else, and the repo list
+ * gives us an owner -- which is the ORG once repos are transferred, and an org is
+ * not a person. `account.type` is what tells the two apart.
  */
-const tokenForUser = async (userId) => {
-  // Deliberately does NOT filter on `enabled`. That column means "should the
-  // background scanner run", not "is GitHub connected" -- conflating the two meant a
-  // row with enabled=false made the client unusable, so listing repos, refreshing and
-  // Scan Now all failed with a misleading "not connected" while /status happily
-  // reported Connected. The scanner filters on `enabled` itself, which is the only
-  // place that distinction belongs.
-  const result = await query(
-    `SELECT auth_kind, installation_id, access_token
-     FROM github_integrations WHERE user_id = $1`,
-    [userId]
-  );
-  const row = result.rows[0];
-  if (!row) return null;
-
-  if (row.auth_kind === 'oauth_app') {
-    return row.access_token ? decrypt(row.access_token) : null;
+export const fetchInstallation = async (installationId) => {
+  const res = await fetch(`${API}/app/installations/${installationId}`, {
+    headers: {
+      Authorization: `Bearer ${appJwt()}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': UA,
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) {
+    throw new Error(`GitHub: could not read installation ${installationId} (${res.status})`);
   }
-  if (!row.installation_id) return null;
-  return installationToken(row.installation_id);
+  const body = await res.json();
+  return {
+    installationId: Number(body.id),
+    accountLogin: body.account?.login ?? null,
+    // 'User' | 'Organization'. Only a 'User' account login can be a commit author.
+    accountType: body.account?.type ?? null,
+  };
 };
 
 /**
- * Minimal GitHub client scoped to one user.
+ * Build a client for ONE integration row.
+ *
+ * Per-integration rather than per-user because a user can now have several accounts
+ * connected at once, and each installation has its own token. Picking `rows[0]` (as
+ * this used to) would authenticate every repo against whichever account happened to
+ * sort first, and 404 on all the others.
+ */
+export const getClientForIntegration = async (row) => {
+  if (!row) return null;
+
+  let token;
+  if (row.auth_kind === 'oauth_app') {
+    token = row.access_token ? decrypt(row.access_token) : null;
+  } else {
+    token = row.installation_id ? await installationToken(row.installation_id) : null;
+  }
+  if (!token) return null;
+  return buildClient(token);
+};
+
+/**
+ * Every integration row for a user, whether or not the scanner is enabled for it.
+ *
+ * Deliberately does NOT filter on `enabled`. That column means "should the
+ * background scanner run", not "is GitHub connected" -- conflating the two meant a
+ * row with enabled=false made the client unusable, so listing repos, refreshing and
+ * Scan Now all failed with a misleading "not connected" while /status happily
+ * reported Connected. The scanner filters on `enabled` itself, which is the only
+ * place that distinction belongs.
+ */
+export const getIntegrations = async (userId) => {
+  const result = await query(
+    `SELECT id, auth_kind, installation_id, access_token, account_login, account_type,
+            author_login, github_login, last_scan_at, scan_frequency, enabled, last_error
+     FROM github_integrations WHERE user_id = $1 ORDER BY id ASC`,
+    [userId]
+  );
+  return result.rows;
+};
+
+/**
+ * Minimal GitHub client bound to one token.
  *
  * Centralises the two things that are easy to get wrong at every call site:
  * conditional requests (a 304 costs no rate limit at all) and rate-limit headers.
  */
-export const getClientForUser = async (userId) => {
-  const token = await tokenForUser(userId);
-  if (!token) return null;
-
+const buildClient = (token) => {
   const request = async (path, { etag, ...opts } = {}) => {
     const headers = {
       Authorization: `Bearer ${token}`,

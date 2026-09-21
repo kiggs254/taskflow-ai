@@ -19,6 +19,10 @@ const router = express.Router();
 
 /**
  * POST /api/github/connect -> { authUrl }
+ *
+ * Also how a *second* account is added: GitHub's installation screen lets the user
+ * pick which account to install on, and the callback keys on (user, installation)
+ * rather than user alone, so each one lands as its own row.
  */
 router.post('/connect', authenticate, asyncHandler(async (req, res) => {
   if (!isGithubConfigured()) {
@@ -71,15 +75,20 @@ router.get('/status', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/github/repos?refresh=1
+ * GET /api/github/repos?refresh=1[&installationId=]
  * Refreshing re-reads the repo set from GitHub. Needed because the user can change
- * which repos the installation can see at any time, on GitHub, without telling us.
+ * which repos the installation can see at any time, on GitHub, without telling us --
+ * and because a repo transferred to an org moves between installations while keeping
+ * its numeric id, which is only picked up by re-reading.
  */
 router.get('/repos', authenticate, asyncHandler(async (req, res) => {
   let error = null;
   if (req.query.refresh) {
-    const result = await refreshRepos(req.user.id);
-    if (!result.ok) error = result.error;
+    const installationId = req.query.installationId ? Number(req.query.installationId) : null;
+    const result = await refreshRepos(req.user.id, { installationId });
+    // `error` is set even on ok:true -- with several accounts connected, some can fail
+    // while others succeed, and reporting only total failure would hide that.
+    error = result.error ?? null;
   }
   res.json({ repos: await listRepos(req.user.id), error });
 }));
@@ -93,17 +102,39 @@ router.put('/repos', authenticate, asyncHandler(async (req, res) => {
   res.json({ repos: await setSelectedRepos(req.user.id, repoIds) });
 }));
 
+/** POST /api/github/scan-now  body: { timezone?, installationId? } */
 router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
-  res.json(await scanCommits(req.user.id, { timezone: req.body?.timezone }));
+  res.json(
+    await scanCommits(req.user.id, {
+      timezone: req.body?.timezone,
+      installationId: req.body?.installationId ?? null,
+    })
+  );
 }));
 
+/**
+ * PUT /api/github/settings
+ * body: { installationId?, scanFrequency?, enabled?, authorLogin? }
+ *
+ * Omitting installationId applies the change to every connected account.
+ * `authorLogin` is the escape hatch for an org-only installation: an org is not a
+ * commit author, so there is nothing to derive it from and it has to be told.
+ */
 router.put('/settings', authenticate, asyncHandler(async (req, res) => {
-  const { scanFrequency, enabled } = req.body;
-  res.json(await updateGithubSettings(req.user.id, { scanFrequency, enabled }));
+  const { installationId, scanFrequency, enabled, authorLogin } = req.body ?? {};
+  res.json(
+    await updateGithubSettings(req.user.id, {
+      installationId: installationId ?? null,
+      scanFrequency,
+      enabled,
+      authorLogin,
+    })
+  );
 }));
 
+/** POST /api/github/disconnect  body: { installationId? } — omitted disconnects all. */
 router.post('/disconnect', authenticate, asyncHandler(async (req, res) => {
-  res.json(await disconnectGithub(req.user.id));
+  res.json(await disconnectGithub(req.user.id, { installationId: req.body?.installationId ?? null }));
 }));
 
 export default router;

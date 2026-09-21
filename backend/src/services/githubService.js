@@ -3,18 +3,43 @@ import { query } from '../config/database.js';
 import { truncateAtWord } from '../utils/text.js';
 import { syncTask } from './taskService.js';
 import { callAI } from './ai/callAI.js';
-import { getClientForUser, nextPageUrl, isGithubConfigured } from './githubAuth.js';
+import {
+  getClientForIntegration,
+  getIntegrations,
+  fetchInstallation,
+  nextPageUrl,
+  isGithubConfigured,
+} from './githubAuth.js';
 import { DEFAULT_TIMEZONE, localDateString, startOfLocalDayMs } from '../utils/time.js';
 
 const MAX_PAGES = 5; // 500 commits/repo/day/branch; beyond this something is wrong
 const MAX_BRANCHES = 100; // cap the fan-out on a repo with a runaway number of branches
 
 /**
- * Complete the GitHub App installation callback.
- * `userId` comes from the *verified* signed state, never from the query string.
+ * The logins whose commits count as this user's own work, across every connected
+ * account.
+ *
+ * This is deliberately a *set*, and deliberately separate from the account an
+ * installation sits on. `github_login` used to be `repos[0].owner.login`, which is
+ * the ORG once repos are transferred to one -- and an org cannot author a commit, so
+ * `&author=<org>` matched nothing and commit tracking stopped silently. An org
+ * installation contributes no author login at all; it borrows the set built from the
+ * user's personal installations (or whatever they typed in Settings).
+ *
+ * Empty means "don't filter" -- ingest every commit. That's the honest degradation:
+ * over-reporting is visible, under-reporting is not.
  */
+export const authorLoginsFor = async (userId) => {
+  const result = await query(
+    `SELECT DISTINCT author_login FROM github_integrations
+      WHERE user_id = $1 AND author_login IS NOT NULL AND author_login <> ''`,
+    [userId]
+  );
+  return result.rows.map((r) => r.author_login);
+};
+
 /**
- * Pull the repo list GitHub currently grants this installation and cache it.
+ * Pull the repo list one installation currently grants and cache it.
  *
  * This has to be callable at any time, not just at install. The repo set changes
  * whenever the user edits the installation on GitHub, and the first fetch can fail
@@ -25,15 +50,9 @@ const MAX_BRANCHES = 100; // cap the fan-out on a repo with a runaway number of 
  * Never throws: returns {ok, error} so callers can surface the reason instead of
  * turning it into an opaque failure.
  */
-export const refreshRepos = async (userId) => {
-  let client;
-  try {
-    client = await getClientForUser(userId);
-  } catch (error) {
-    console.error(`GitHub: auth failed for user ${userId}:`, error.message);
-    return { ok: false, error: error.message };
-  }
-  if (!client) return { ok: false, error: 'GitHub is not connected for this user.' };
+const refreshOne = async (userId, integration) => {
+  const client = await getClientForIntegration(integration);
+  if (!client) return { ok: false, error: 'This GitHub account is no longer authorised.' };
 
   try {
     const all = [];
@@ -47,29 +66,94 @@ export const refreshRepos = async (userId) => {
       pages++;
     }
 
-    // Needed to filter commits by author.
-    const login = all[0]?.owner?.login ?? null;
-    if (login) {
-      await query('UPDATE github_integrations SET github_login = $2 WHERE user_id = $1', [userId, login]);
+    // Who this installation belongs to, from GitHub rather than inferred from a repo
+    // owner. `account.type` is the whole point: only a 'User' account can be a commit
+    // author, and reading it from repos[0].owner.login is what broke on transfer.
+    let account = { accountLogin: null, accountType: null };
+    if (integration.installation_id) {
+      try {
+        account = await fetchInstallation(integration.installation_id);
+      } catch (error) {
+        // Non-fatal: the repo list is the useful part. A missing account label is
+        // cosmetic; a missing repo list is not.
+        console.warn(`GitHub: could not read installation metadata: ${error.message}`);
+      }
     }
 
-    await upsertRepos(userId, all);
-    console.log(`GitHub: cached ${all.length} repo(s) for user ${userId}`);
+    // Never overwrite a login the user typed by hand, and never set an org as one.
+    const authorLogin =
+      integration.author_login ||
+      (account.accountType === 'User' ? account.accountLogin : null);
+
+    await query(
+      `UPDATE github_integrations
+          SET account_login = COALESCE($2, account_login),
+              account_type  = COALESCE($3, account_type),
+              author_login  = $4,
+              last_error    = NULL
+        WHERE id = $1`,
+      [integration.id, account.accountLogin, account.accountType, authorLogin]
+    );
+
+    await upsertRepos(userId, integration.installation_id, all);
+    await markLostRepos(userId, integration.installation_id, all);
+
+    console.log(
+      `GitHub: cached ${all.length} repo(s) for user ${userId} ` +
+        `(${account.accountLogin ?? 'installation ' + integration.installation_id})`
+    );
     return { ok: true, count: all.length };
   } catch (error) {
     console.error(`GitHub: failed to list repositories for user ${userId}:`, error.message);
+    await query('UPDATE github_integrations SET last_error = $2 WHERE id = $1', [
+      integration.id,
+      error.message,
+    ]);
     return { ok: false, error: error.message };
   }
 };
 
+/**
+ * Refresh every connected account, or one of them.
+ *
+ * Aggregates rather than short-circuits: one broken installation (revoked, suspended)
+ * must not stop the others from refreshing, or connecting a second account would make
+ * the first one's repos unreachable.
+ */
+export const refreshRepos = async (userId, { installationId = null } = {}) => {
+  const integrations = (await getIntegrations(userId)).filter(
+    (i) => installationId === null || Number(i.installation_id) === Number(installationId)
+  );
+  if (!integrations.length) return { ok: false, error: 'GitHub is not connected for this user.' };
+
+  let count = 0;
+  const errors = [];
+  for (const integration of integrations) {
+    const result = await refreshOne(userId, integration);
+    if (result.ok) count += result.count;
+    else errors.push(`${integration.account_login ?? integration.installation_id}: ${result.error}`);
+  }
+
+  return errors.length === integrations.length
+    ? { ok: false, error: errors.join('; '), count }
+    : { ok: true, count, error: errors.length ? errors.join('; ') : null };
+};
+
+/**
+ * Record an installation.
+ *
+ * ON CONFLICT is on (user_id, installation_id), not (user_id): a user can connect
+ * several GitHub accounts, and keying on the user alone meant installing the app on
+ * an org *replaced* the personal account's row -- its repos were left pointing at an
+ * installation the user could no longer authenticate against.
+ */
 export const handleInstallCallback = async (userId, installationId) => {
-  await query(
+  const inserted = await query(
     `INSERT INTO github_integrations (user_id, installation_id, auth_kind, enabled)
      VALUES ($1, $2, 'github_app', true)
-     ON CONFLICT (user_id) DO UPDATE
-       SET installation_id = EXCLUDED.installation_id,
-           auth_kind = 'github_app',
-           enabled = true`,
+     ON CONFLICT (user_id, installation_id) WHERE installation_id IS NOT NULL
+     DO UPDATE SET enabled = true, last_error = NULL
+     RETURNING *`,
     [userId, installationId]
   );
 
@@ -77,30 +161,61 @@ export const handleInstallCallback = async (userId, installationId) => {
   // real and recorded; the repo list is recoverable and is re-fetched by /status and
   // /repos. Throwing here used to abort the callback *after* the row was written,
   // which left exactly the state this fixes: "Connected", zero repos, no way back.
-  const result = await refreshRepos(userId);
+  const result = await refreshOne(userId, inserted.rows[0]);
   return { repos: result.count ?? 0, error: result.ok ? null : result.error };
 };
 
-const upsertRepos = async (userId, repos) => {
+const upsertRepos = async (userId, installationId, repos) => {
   for (const r of repos) {
     await query(
-      `INSERT INTO github_repos (user_id, repo_id, owner, name, default_branch)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO github_repos (user_id, repo_id, owner, name, default_branch, installation_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (user_id, repo_id) DO UPDATE
          SET owner = EXCLUDED.owner,
              name = EXCLUDED.name,
-             default_branch = EXCLUDED.default_branch`,
-      [userId, r.id, r.owner.login, r.name, r.default_branch]
+             default_branch = EXCLUDED.default_branch,
+             -- A transfer moves a repo between installations while keeping its
+             -- numeric id, so the row follows it rather than 404ing against the old
+             -- account's token forever.
+             installation_id = EXCLUDED.installation_id,
+             access_lost_at = NULL`,
+      [userId, r.id, r.owner.login, r.name, r.default_branch, installationId]
     );
   }
 };
 
+/**
+ * Tombstone repos this installation no longer grants.
+ *
+ * Not a DELETE. `repo_id` is the identity behind processed_commits and every
+ * `gh-{uid}-{repoId}-...` task id, and `selected` is the user's own choice -- drop
+ * the row and a repo that comes back (transferred to an org the app is also installed
+ * on, say) re-ingests its whole history as brand new work.
+ */
+const markLostRepos = async (userId, installationId, repos) => {
+  const ids = repos.map((r) => Number(r.id)).filter(Number.isFinite);
+  await query(
+    `UPDATE github_repos
+        SET access_lost_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1 AND installation_id = $2
+        AND access_lost_at IS NULL
+        AND NOT (repo_id = ANY($3::bigint[]))`,
+    [userId, installationId, ids]
+  );
+};
+
 export const listRepos = async (userId) => {
   const result = await query(
-    `SELECT repo_id AS "repoId", owner, name, default_branch AS "defaultBranch",
-            selected, last_polled_at AS "lastPolledAt"
-     FROM github_repos WHERE user_id = $1
-     ORDER BY selected DESC, owner, name`,
+    `SELECT r.repo_id AS "repoId", r.owner, r.name, r.default_branch AS "defaultBranch",
+            r.selected, r.last_polled_at AS "lastPolledAt",
+            r.installation_id AS "installationId",
+            r.access_lost_at AS "accessLostAt",
+            i.account_login AS "accountLogin"
+     FROM github_repos r
+     LEFT JOIN github_integrations i
+       ON i.user_id = r.user_id AND i.installation_id = r.installation_id
+     WHERE r.user_id = $1
+     ORDER BY r.selected DESC, r.owner, r.name`,
     [userId]
   );
   return result.rows;
@@ -124,40 +239,76 @@ export const getGithubStatus = async (userId) => {
     return { connected: false, configured: false };
   }
 
-  const result = await query(
-    `SELECT github_login, last_scan_at, scan_frequency, enabled
-     FROM github_integrations WHERE user_id = $1`,
-    [userId]
-  );
-  const row = result.rows[0];
-  if (!row) return { connected: false, configured: true };
+  const integrations = await getIntegrations(userId);
+  if (!integrations.length) return { connected: false, configured: true, accounts: [], repos: [] };
 
   let repos = await listRepos(userId);
   let repoError = null;
 
-  // Self-heal: an empty cache means the install-time fetch failed or the user has
-  // since changed which repos the app can see. Re-fetch rather than telling them to
-  // reinstall, and report *why* if GitHub refuses.
-  if (repos.length === 0) {
-    const refreshed = await refreshRepos(userId);
-    if (refreshed.ok) repos = await listRepos(userId);
-    else repoError = refreshed.error;
+  // Self-heal, on two triggers:
+  //
+  //  - an empty cache means the install-time fetch failed, or the user has since
+  //    changed which repos the app can see;
+  //  - an account with no repos at all means the same for that one account, which the
+  //    user-wide emptiness check used to miss entirely once a second account existed.
+  //
+  // Re-fetch rather than telling them to reinstall, and report *why* if GitHub
+  // refuses.
+  const starved = integrations.filter(
+    (i) => !repos.some((r) => Number(r.installationId) === Number(i.installation_id))
+  );
+  if (starved.length) {
+    for (const integration of starved) {
+      const refreshed = await refreshOne(userId, integration);
+      if (!refreshed.ok) repoError = refreshed.error;
+    }
+    repos = await listRepos(userId);
   }
+
+  const fresh = await getIntegrations(userId);
+  const authorLogins = [...new Set(fresh.map((i) => i.author_login).filter(Boolean))];
 
   return {
     connected: true,
     configured: true,
-    login: row.github_login,
-    lastScanAt: row.last_scan_at,
-    scanFrequency: row.scan_frequency,
-    enabled: row.enabled,
+    accounts: fresh.map((i) => ({
+      installationId: i.installation_id === null ? null : Number(i.installation_id),
+      accountLogin: i.account_login,
+      accountType: i.account_type,
+      authorLogin: i.author_login,
+      lastScanAt: i.last_scan_at,
+      scanFrequency: i.scan_frequency,
+      enabled: i.enabled,
+      lastError: i.last_error,
+      repoCount: repos.filter((r) => Number(r.installationId) === Number(i.installation_id)).length,
+      selectedCount: repos.filter(
+        (r) => Number(r.installationId) === Number(i.installation_id) && r.selected
+      ).length,
+    })),
+    // An empty author set means no commit is filtered out -- every contributor's work
+    // would be logged as yours. Surfaced so it can be fixed rather than discovered in
+    // a report.
+    authorLogins,
+    authorLoginMissing: authorLogins.length === 0,
     repos,
     repoError,
     selectedCount: repos.filter((r) => r.selected).length,
+    // Kept for the previous single-account shape of this response.
+    login: authorLogins[0] ?? fresh[0]?.account_login ?? null,
+    lastScanAt: fresh.map((i) => i.last_scan_at).filter(Boolean).sort().pop() ?? null,
+    scanFrequency: fresh[0]?.scan_frequency ?? 30,
+    enabled: fresh.some((i) => i.enabled),
   };
 };
 
-export const updateGithubSettings = async (userId, { scanFrequency, enabled }) => {
+/**
+ * Per-account settings. `installationId` selects which account; omitting it applies
+ * to all of them, which is what the frequency control does.
+ */
+export const updateGithubSettings = async (
+  userId,
+  { installationId = null, scanFrequency, enabled, authorLogin } = {}
+) => {
   const sets = [];
   const params = [userId];
   if (Number.isFinite(scanFrequency)) {
@@ -168,19 +319,49 @@ export const updateGithubSettings = async (userId, { scanFrequency, enabled }) =
     params.push(enabled);
     sets.push(`enabled = $${params.length}`);
   }
+  if (typeof authorLogin === 'string') {
+    // Trimmed to null rather than stored as '' -- authorLoginsFor filters on NULL,
+    // and an empty string would sneak into the set and match no commits at all.
+    const trimmed = authorLogin.trim();
+    params.push(trimmed || null);
+    sets.push(`author_login = $${params.length}`);
+  }
+
   if (sets.length) {
-    await query(`UPDATE github_integrations SET ${sets.join(', ')} WHERE user_id = $1`, params);
+    let where = 'user_id = $1';
+    if (installationId !== null && installationId !== undefined) {
+      params.push(installationId);
+      where += ` AND installation_id = $${params.length}`;
+    }
+    await query(`UPDATE github_integrations SET ${sets.join(', ')} WHERE ${where}`, params);
   }
   return getGithubStatus(userId);
 };
 
-export const disconnectGithub = async (userId) => {
-  // Repos and the ledger go too -- but note the ledger's task_id is ON DELETE SET
-  // NULL from the *tasks* side; deleting the integration is an explicit user action,
-  // so clearing history here is intended.
-  await query('DELETE FROM github_repos WHERE user_id = $1', [userId]);
-  await query('DELETE FROM github_integrations WHERE user_id = $1', [userId]);
-  return { success: true };
+/**
+ * Disconnect one account, or all of them.
+ *
+ * Only that account's repos go. Deleting every repo row when one of several accounts
+ * is removed would wipe the tracked-repo selection for accounts the user kept -- and
+ * because `repo_id` is the identity behind processed_commits, re-adding them would
+ * have re-ingested nothing but still lost the selection.
+ */
+export const disconnectGithub = async (userId, { installationId = null } = {}) => {
+  if (installationId === null || installationId === undefined) {
+    await query('DELETE FROM github_repos WHERE user_id = $1', [userId]);
+    await query('DELETE FROM github_integrations WHERE user_id = $1', [userId]);
+    return { success: true, removed: 'all' };
+  }
+
+  await query('DELETE FROM github_repos WHERE user_id = $1 AND installation_id = $2', [
+    userId,
+    installationId,
+  ]);
+  await query('DELETE FROM github_integrations WHERE user_id = $1 AND installation_id = $2', [
+    userId,
+    installationId,
+  ]);
+  return { success: true, removed: Number(installationId) };
 };
 
 /**
@@ -205,15 +386,37 @@ const listBranches = async (client, repo) => {
   return names.slice(0, MAX_BRANCHES);
 };
 
-/** Today's commits by the author on ONE branch. */
-const fetchBranchCommits = async (client, repo, branch, { login, sinceIso }) => {
+/**
+ * Whether a commit was authored by one of the user's logins.
+ *
+ * `c.author` is the *linked GitHub account*, which is what the API's `author=` filter
+ * resolves to as well -- so this is the same test, just done locally. It is null for a
+ * commit whose email isn't attached to any account, and those are excluded either way.
+ */
+const authoredBy = (commit, logins) => {
+  if (!logins.length) return true; // no known login -> no filter
+  const login = commit?.author?.login;
+  return login ? logins.some((l) => l.toLowerCase() === login.toLowerCase()) : false;
+};
+
+/**
+ * Today's commits on ONE branch.
+ *
+ * `author=` takes a single value, so it's only usable as a payload optimisation when
+ * exactly one login is known. With several connected accounts we fetch the branch
+ * unfiltered and apply `authoredBy` locally -- `since` already bounds this to one day,
+ * so the extra rows are few, and the alternative (one request per login per branch)
+ * multiplies the fan-out for no gain.
+ */
+const fetchBranchCommits = async (client, repo, branch, { logins = [], sinceIso }) => {
   const commits = [];
+  const serverFilter = logins.length === 1 ? logins[0] : null;
   let url =
     `/repos/${repo.owner}/${repo.name}/commits` +
     `?sha=${encodeURIComponent(branch)}` +
     `&since=${encodeURIComponent(sinceIso)}` +
     `&per_page=100` +
-    (login ? `&author=${encodeURIComponent(login)}` : '');
+    (serverFilter ? `&author=${encodeURIComponent(serverFilter)}` : '');
 
   let pages = 0;
   while (url && pages < MAX_PAGES) {
@@ -248,7 +451,7 @@ const fetchBranchCommits = async (client, repo, branch, { login, sinceIso }) => 
  *
  * Exported for testing against a fake client.
  */
-export const fetchRepoCommits = async (client, repo, { login, sinceIso }) => {
+export const fetchRepoCommits = async (client, repo, { logins = [], sinceIso }) => {
   const branches = await listBranches(client, repo);
   // If a repo somehow reports no branches, fall back to its recorded default so a
   // single-branch repo still works.
@@ -260,7 +463,7 @@ export const fetchRepoCommits = async (client, repo, { login, sinceIso }) => {
   for (const branch of scan) {
     let commits;
     try {
-      commits = await fetchBranchCommits(client, repo, branch, { login, sinceIso });
+      commits = await fetchBranchCommits(client, repo, branch, { logins, sinceIso });
     } catch (err) {
       // A rate-limit must stop the whole scan; a branch deleted/renamed mid-scan
       // (404/409) should just be skipped rather than abort the repo.
@@ -268,6 +471,9 @@ export const fetchRepoCommits = async (client, repo, { login, sinceIso }) => {
       continue;
     }
     for (const c of commits) {
+      // Skipped when the server already filtered (one login): GitHub matched it, so
+      // re-testing could only ever discard a commit it deliberately included.
+      if (logins.length > 1 && !authoredBy(c, logins)) continue;
       if (c?.sha && !bySha.has(c.sha)) {
         bySha.set(c.sha, c);
         branchOf.set(c.sha, branch);
@@ -363,24 +569,46 @@ const summariseDay = async (userId, repoName, commits) => {
  *   2. processed_commits records every SHA, so a deleted task is never rebuilt from
  *      commits that were already accounted for.
  */
-export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) => {
-  const client = await getClientForUser(userId);
-  if (!client) return { success: false, reason: 'not_connected' };
-
-  const integration = await query(
-    'SELECT github_login FROM github_integrations WHERE user_id = $1',
-    [userId]
+export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE, installationId = null } = {}) => {
+  const integrations = (await getIntegrations(userId)).filter(
+    (i) => installationId === null || Number(i.installation_id) === Number(installationId)
   );
-  const login = integration.rows[0]?.github_login;
+  if (!integrations.length) return { success: false, reason: 'not_connected' };
 
-  const repos = (
-    await query(
-      `SELECT repo_id, owner, name, default_branch, etag
-       FROM github_repos WHERE user_id = $1 AND selected = true`,
-      [userId]
-    )
-  ).rows;
+  // One set for the whole sweep: the same human authors commits in their personal
+  // repos and in their org's, so the filter is per-user, not per-installation.
+  const logins = await authorLoginsFor(userId);
 
+  // Flattened so each repo carries the client that can actually reach it. A single
+  // per-user client authenticated every repo against one installation, which 404s on
+  // every repo belonging to any other connected account.
+  const repos = [];
+  const scannedIds = [];
+  for (const integration of integrations) {
+    let client;
+    try {
+      client = await getClientForIntegration(integration);
+    } catch (error) {
+      console.error(`GitHub: auth failed for installation ${integration.installation_id}:`, error.message);
+      await query('UPDATE github_integrations SET last_error = $2 WHERE id = $1', [integration.id, error.message]);
+      continue;
+    }
+    if (!client) continue;
+    scannedIds.push(integration.id);
+
+    const rows = (
+      await query(
+        `SELECT repo_id, owner, name, default_branch, etag
+         FROM github_repos
+         WHERE user_id = $1 AND installation_id = $2
+           AND selected = true AND access_lost_at IS NULL`,
+        [userId, integration.installation_id]
+      )
+    ).rows;
+    for (const r of rows) repos.push({ ...r, client });
+  }
+
+  if (!scannedIds.length) return { success: false, reason: 'not_connected' };
   if (!repos.length) return { success: true, tasksCreated: 0, commitsIngested: 0, reason: 'no_repos' };
 
   // Pinning `since` to local midnight keeps the request URL stable all day, which is
@@ -394,7 +622,7 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
 
   for (const repo of repos) {
     try {
-      const { commits, branchOf } = await fetchRepoCommits(client, repo, { login, sinceIso });
+      const { commits, branchOf } = await fetchRepoCommits(repo.client, repo, { logins, sinceIso });
 
       await query(
         'UPDATE github_repos SET last_polled_at = CURRENT_TIMESTAMP WHERE user_id = $1 AND repo_id = $2',
@@ -511,6 +739,22 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
         console.warn(`GitHub: rate limited for user ${userId}; ending scan early.`);
         break;
       }
+      if (error.status === 404) {
+        // GitHub answers 404 (not 403) for a repo an installation cannot see, so this
+        // is what a transfer or a revoked grant looks like from inside a scan. Tombstone
+        // it here rather than waiting for someone to press Refresh: otherwise the repo
+        // just stops producing commits, which is indistinguishable from a quiet week.
+        await query(
+          `UPDATE github_repos SET access_lost_at = CURRENT_TIMESTAMP
+            WHERE user_id = $1 AND repo_id = $2 AND access_lost_at IS NULL`,
+          [userId, repo.repo_id]
+        );
+        console.warn(
+          `GitHub: lost access to ${repo.owner}/${repo.name}; it was transferred or its ` +
+            `grant was revoked. Connect the account that owns it now to resume tracking.`
+        );
+        continue;
+      }
       console.error(`GitHub: failed scanning ${repo.owner}/${repo.name}:`, error.message);
     }
   }
@@ -525,9 +769,11 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE } = {}) 
     [userId]
   );
 
+  // Only the accounts actually reached. Stamping every row would hide a broken
+  // installation behind a fresh "last scan" time and mute the scanner's own gate.
   await query(
-    'UPDATE github_integrations SET last_scan_at = CURRENT_TIMESTAMP WHERE user_id = $1',
-    [userId]
+    'UPDATE github_integrations SET last_scan_at = CURRENT_TIMESTAMP WHERE id = ANY($1::int[])',
+    [scannedIds]
   );
 
   return { success: true, tasksCreated: tasksTouched, commitsIngested };

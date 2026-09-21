@@ -514,8 +514,11 @@ export const api = {
       if (!res.ok) throw new Error('Failed to get GitHub status');
       return res.json();
     },
-    refreshRepos: async (token: string) => {
-      const res = await fetch(`${API_BASE}/github/repos?refresh=1`, {
+    // installationId narrows the refresh to one connected account; omitted refreshes
+    // all of them.
+    refreshRepos: async (token: string, installationId?: number) => {
+      const qs = installationId ? `&installationId=${installationId}` : '';
+      const res = await fetch(`${API_BASE}/github/repos?refresh=1${qs}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to refresh repositories');
@@ -533,19 +536,30 @@ export const api = {
       if (!res.ok) throw new Error('Failed to update tracked repos');
       return res.json();
     },
-    scanNow: async (token: string) => {
+    scanNow: async (token: string, installationId?: number) => {
       const res = await fetch(`${API_BASE}/github/scan-now`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+        body: JSON.stringify({
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          installationId: installationId ?? null,
+        }),
       });
       if (!res.ok) throw new Error('Failed to scan GitHub');
       return res.json();
     },
-    updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean }) => {
+    updateSettings: async (
+      token: string,
+      settings: {
+        installationId?: number;
+        scanFrequency?: number;
+        enabled?: boolean;
+        authorLogin?: string;
+      }
+    ) => {
       const res = await fetch(`${API_BASE}/github/settings`, {
         method: 'PUT',
         headers: {
@@ -557,13 +571,16 @@ export const api = {
       if (!res.ok) throw new Error('Failed to update GitHub settings');
       return res.json();
     },
-    disconnect: async (token: string) => {
+    // No installationId disconnects every connected account, which is what the old
+    // single-account button did.
+    disconnect: async (token: string, installationId?: number) => {
       const res = await fetch(`${API_BASE}/github/disconnect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
+        body: JSON.stringify({ installationId: installationId ?? null }),
       });
       if (!res.ok) throw new Error('Failed to disconnect GitHub');
       return res.json();

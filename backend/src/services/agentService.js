@@ -144,9 +144,13 @@ export const findCoveredRepo = async (userId, gitRemote) => {
   if (!parsed) return null;
 
   const result = await query(
+    // access_lost_at guards the case this whole lookup exists for: a repo the GitHub
+    // scanner can no longer reach isn't covering anything, so treating it as covered
+    // would drop the session log and leave the work recorded nowhere at all.
     `SELECT repo_id, owner, name, selected
      FROM github_repos
-     WHERE user_id = $1 AND lower(owner) = lower($2) AND lower(name) = lower($3)`,
+     WHERE user_id = $1 AND lower(owner) = lower($2) AND lower(name) = lower($3)
+       AND access_lost_at IS NULL`,
     [userId, parsed.owner, parsed.name]
   );
 

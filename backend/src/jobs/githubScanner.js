@@ -16,10 +16,14 @@ export const startGithubScanner = () => {
 
   cron.schedule('* * * * *', async () => {
     try {
+      // One row per connected *account*, not per user. Each has its own installation
+      // token and its own scan_frequency, so each is due independently -- scanning
+      // per user would either re-scan every account whenever the earliest came due, or
+      // hold all of them back to the slowest.
       const result = await query(
-        `SELECT user_id, scan_frequency, last_scan_at
+        `SELECT user_id, installation_id, account_login, scan_frequency, last_scan_at
          FROM github_integrations
-         WHERE enabled = true`
+         WHERE enabled = true AND installation_id IS NOT NULL`
       );
 
       for (const integration of result.rows) {
@@ -31,16 +35,23 @@ export const startGithubScanner = () => {
             if (minutesSince < frequency) continue;
           }
 
-          const scan = await scanCommits(integration.user_id);
+          const scan = await scanCommits(integration.user_id, {
+            installationId: integration.installation_id,
+          });
           if (scan?.commitsIngested > 0) {
             console.log(
-              `GitHub scan for user ${integration.user_id}: ` +
+              `GitHub scan for user ${integration.user_id} ` +
+                `(${integration.account_login ?? integration.installation_id}): ` +
                 `${scan.commitsIngested} new commit(s) across ${scan.tasksCreated} task(s)`
             );
           }
         } catch (error) {
-          // One user's failure must not abort the sweep.
-          console.error(`GitHub scan failed for user ${integration.user_id}:`, error.message);
+          // One account's failure must not abort the sweep.
+          console.error(
+            `GitHub scan failed for user ${integration.user_id} ` +
+              `(${integration.account_login ?? integration.installation_id}):`,
+            error.message
+          );
         }
       }
     } catch (error) {
