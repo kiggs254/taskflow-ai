@@ -45,6 +45,54 @@ interface Status {
 
 type Alert = { isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' };
 
+interface ScanResult {
+  commitsIngested?: number;
+  tasksCreated?: number;
+  authorLogins?: string[];
+  reposScanned?: number;
+  commitsMatched?: number;   // in today's window AND authored by one of authorLogins
+  commitsInWindow?: number;  // in today's window at all, whoever wrote them
+}
+
+/**
+ * Say why a scan found nothing.
+ *
+ * A flat "No new commits since the last scan" is three different outcomes wearing one
+ * sentence: the repos were quiet, the commits were already recorded, or the author
+ * filter matched nobody. Only the last is a fault, and it is invisible — it's how an
+ * account name sitting in the wrong field silently zeroed commit tracking. The scan
+ * now reports what it filtered on and what it saw, so the answer is on screen rather
+ * than in a server log.
+ */
+const describeScan = (result: ScanResult): string => {
+  const ingested = result.commitsIngested ?? 0;
+  const tasks = result.tasksCreated ?? 0;
+  if (ingested > 0) {
+    return `Found ${ingested} new commit${ingested === 1 ? '' : 's'} across ${tasks} task${tasks === 1 ? '' : 's'}.`;
+  }
+
+  const authors = result.authorLogins ?? [];
+  const matched = result.commitsMatched ?? 0;
+  const inWindow = result.commitsInWindow ?? 0;
+  const repos = result.reposScanned ?? 0;
+  const by = authors.length ? authors.join(' or ') : 'anyone';
+
+  // Commits exist today, but none are attributed to the configured author.
+  if (matched === 0 && inWindow > 0) {
+    return (
+      `${repos} repo${repos === 1 ? '' : 's'} scanned. There are commits today, but none by ` +
+      `${by} — so nothing was recorded. Check "Commit author login" above: it must be the ` +
+      `GitHub username you commit as, not the account that owns the repos.`
+    );
+  }
+
+  if (matched === 0) {
+    return `No commits at all today in the ${repos} repo${repos === 1 ? '' : 's'} being tracked (filtering by ${by}).`;
+  }
+
+  return `Found ${matched} commit${matched === 1 ? '' : 's'} today by ${by}, all already recorded.`;
+};
+
 export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ token }) => {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(false);
@@ -153,14 +201,7 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ token }) => {
       } else if (result.reason === 'not_connected') {
         setAlertModal({ isOpen: true, title: 'Not Connected', message: 'That GitHub account could not be authenticated. Try reconnecting it.', type: 'error' });
       } else {
-        setAlertModal({
-          isOpen: true,
-          title: 'Scan Complete',
-          message: result.commitsIngested > 0
-            ? `Found ${result.commitsIngested} new commit${result.commitsIngested === 1 ? '' : 's'} across ${result.tasksCreated} task${result.tasksCreated === 1 ? '' : 's'}.`
-            : 'No new commits since the last scan.',
-          type: 'success',
-        });
+        setAlertModal({ isOpen: true, title: 'Scan Complete', message: describeScan(result), type: 'success' });
       }
       await loadStatus();
     } catch (error: any) {

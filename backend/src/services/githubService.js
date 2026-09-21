@@ -436,6 +436,28 @@ const fetchBranchCommits = async (client, repo, branch, { logins = [], sinceIso 
 };
 
 /**
+ * How many commits the branch had in the window, ignoring authorship.
+ *
+ * Only called when the author filter produced nothing, and only to answer "was the
+ * repo quiet, or is the filter wrong?" -- the question a bare "0 new commits" leaves
+ * you to guess at, and the one that hid an org name sitting in the author field. One
+ * page is plenty: we need "some" vs "none", not a total.
+ */
+const countUnfilteredCommits = async (client, repo, branch, sinceIso) => {
+  try {
+    const res = await client.request(
+      `/repos/${repo.owner}/${repo.name}/commits` +
+        `?sha=${encodeURIComponent(branch)}` +
+        `&since=${encodeURIComponent(sinceIso)}` +
+        `&per_page=100`
+    );
+    return (res.data || []).length;
+  } catch {
+    return 0; // diagnostics must never fail a scan
+  }
+};
+
+/**
  * All of today's commits across EVERY branch, deduped by SHA.
  *
  * The commits API has no "all branches" mode -- `sha` selects a single ref and defaults
@@ -451,7 +473,7 @@ const fetchBranchCommits = async (client, repo, branch, { logins = [], sinceIso 
  *
  * Exported for testing against a fake client.
  */
-export const fetchRepoCommits = async (client, repo, { logins = [], sinceIso }) => {
+export const fetchRepoCommits = async (client, repo, { logins = [], sinceIso, diagnose = false }) => {
   const branches = await listBranches(client, repo);
   // If a repo somehow reports no branches, fall back to its recorded default so a
   // single-branch repo still works.
@@ -459,6 +481,10 @@ export const fetchRepoCommits = async (client, repo, { logins = [], sinceIso }) 
 
   const bySha = new Map();
   const branchOf = new Map();
+  // Commits the repo had in the window at all, before the author filter. The whole
+  // point of tracking it: "0 commits" and "0 commits *by you*" are different answers
+  // to "why is my report empty", and only one of them is a bug.
+  const seenShas = new Set();
 
   for (const branch of scan) {
     let commits;
@@ -471,6 +497,7 @@ export const fetchRepoCommits = async (client, repo, { logins = [], sinceIso }) 
       continue;
     }
     for (const c of commits) {
+      if (c?.sha) seenShas.add(c.sha);
       // Skipped when the server already filtered (one login): GitHub matched it, so
       // re-testing could only ever discard a commit it deliberately included.
       if (logins.length > 1 && !authoredBy(c, logins)) continue;
@@ -481,7 +508,19 @@ export const fetchRepoCommits = async (client, repo, { logins = [], sinceIso }) 
     }
   }
 
-  return { commits: [...bySha.values()], branchOf, notModified: false };
+  const matched = [...bySha.values()];
+
+  // With a single login GitHub did the filtering, so seenShas only holds what already
+  // matched -- ask again without the filter, but only when the answer matters.
+  let seen = seenShas.size;
+  if (diagnose && matched.length === 0 && logins.length === 1) {
+    for (const branch of scan) {
+      seen += await countUnfilteredCommits(client, repo, branch, sinceIso);
+      if (seen > 0) break; // "any" is the whole question
+    }
+  }
+
+  return { commits: matched, branchOf, notModified: false, seen };
 };
 
 // Same commits + same label -> same title, so rebuilding a branch's task on every scan
@@ -569,7 +608,10 @@ const summariseDay = async (userId, repoName, commits) => {
  *   2. processed_commits records every SHA, so a deleted task is never rebuilt from
  *      commits that were already accounted for.
  */
-export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE, installationId = null } = {}) => {
+export const scanCommits = async (
+  userId,
+  { timezone = DEFAULT_TIMEZONE, installationId = null, diagnose = false } = {}
+) => {
   const integrations = (await getIntegrations(userId)).filter(
     (i) => installationId === null || Number(i.installation_id) === Number(installationId)
   );
@@ -609,7 +651,9 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE, install
   }
 
   if (!scannedIds.length) return { success: false, reason: 'not_connected' };
-  if (!repos.length) return { success: true, tasksCreated: 0, commitsIngested: 0, reason: 'no_repos' };
+  if (!repos.length) {
+    return { success: true, tasksCreated: 0, commitsIngested: 0, reason: 'no_repos', authorLogins: logins };
+  }
 
   // Pinning `since` to local midnight keeps the request URL stable all day, which is
   // what makes the ETag actually match and the poll cost nothing.
@@ -619,10 +663,21 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE, install
 
   let commitsIngested = 0;
   let tasksTouched = 0;
+  // Diagnostics, so an empty scan can say WHY it was empty.
+  let commitsMatched = 0;   // in the window and authored by one of `logins`
+  let commitsInWindow = 0;  // in the window at all, whoever wrote them
 
   for (const repo of repos) {
     try {
-      const { commits, branchOf } = await fetchRepoCommits(repo.client, repo, { logins, sinceIso });
+      const { commits, branchOf, seen } = await fetchRepoCommits(repo.client, repo, {
+        logins,
+        sinceIso,
+        // Only pay for the unfiltered probe on a hand-run scan. The cron sweep runs
+        // every 30 minutes across every repo and nobody reads its reasoning.
+        diagnose,
+      });
+      commitsMatched += commits.length;
+      commitsInWindow += seen ?? commits.length;
 
       await query(
         'UPDATE github_repos SET last_polled_at = CURRENT_TIMESTAMP WHERE user_id = $1 AND repo_id = $2',
@@ -776,7 +831,17 @@ export const scanCommits = async (userId, { timezone = DEFAULT_TIMEZONE, install
     [scannedIds]
   );
 
-  return { success: true, tasksCreated: tasksTouched, commitsIngested };
+  return {
+    success: true,
+    tasksCreated: tasksTouched,
+    commitsIngested,
+    // Everything needed to explain a zero without reading the server log.
+    authorLogins: logins,
+    reposScanned: repos.length,
+    commitsMatched,
+    commitsInWindow,
+    day,
+  };
 };
 
 /** Commit-derived completed tasks for a local day. Gates the daily report. */

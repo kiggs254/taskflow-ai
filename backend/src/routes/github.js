@@ -108,6 +108,9 @@ router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
     await scanCommits(req.user.id, {
       timezone: req.body?.timezone,
       installationId: req.body?.installationId ?? null,
+      // A hand-run scan is someone asking a question, so it pays for the extra probe
+      // that distinguishes "nothing happened" from "the author filter matched nothing".
+      diagnose: true,
     })
   );
 }));

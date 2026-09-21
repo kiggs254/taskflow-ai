@@ -144,3 +144,52 @@ test('an org name is not a commit author, so it never reaches the filter', async
   });
   assert.deepEqual(commits.map((c) => c.sha), ['a1'], 'the real author still matches');
 });
+
+/**
+ * Diagnostics. A scan that finds nothing must be able to say which nothing it found:
+ * a quiet day, or an author filter matching nobody. The second is what hid an account
+ * name sitting in the commit-author field -- tracking went to zero with no error.
+ */
+
+test('an empty result reports how many commits the window held regardless of author', async () => {
+  // One login -> GitHub filters server-side, so the fake returns nothing for the
+  // filtered request and the unfiltered probe is what finds the day was not quiet.
+  let sawUnfiltered = false;
+  const client = {
+    requests: [],
+    request: async (url) => {
+      client.requests.push(url);
+      if (url.includes('/branches')) return { data: [{ name: 'main' }], link: null };
+      if (url.includes('author=')) return { data: [], link: null };
+      sawUnfiltered = true;
+      return { data: [{ sha: 'someone-elses' }], link: null };
+    },
+  };
+
+  const { commits, seen } = await fetchRepoCommits(client, repo, {
+    logins: ['wrong-login'],
+    sinceIso: 'S',
+    diagnose: true,
+  });
+  assert.deepEqual(commits, [], 'the filter matched nothing');
+  assert.equal(sawUnfiltered, true, 'the probe ran');
+  assert.equal(seen, 1, 'the day was not quiet -- so the filter is the problem');
+});
+
+test('the unfiltered probe is skipped unless asked for', async () => {
+  const client = makeClient({ main: [] });
+  await fetchRepoCommits(client, repo, { logins: ['x'], sinceIso: 'S' });
+  const unfiltered = client.requests.filter((u) => u.includes('/commits') && !u.includes('author='));
+  assert.equal(unfiltered.length, 0, 'the cron sweep must not pay for diagnostics nobody reads');
+});
+
+test('a genuinely quiet day reports zero seen, not a false alarm', async () => {
+  const client = makeClient({ main: [] });
+  const { commits, seen } = await fetchRepoCommits(client, repo, {
+    logins: ['me'],
+    sinceIso: 'S',
+    diagnose: true,
+  });
+  assert.deepEqual(commits, []);
+  assert.equal(seen, 0, 'nothing happened, and that is a different answer');
+});
