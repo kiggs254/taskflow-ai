@@ -80,3 +80,30 @@ test('a fresh anchor is honoured over the clamp', () => {
   const [start] = windowFor(MON_1630, TUE_1630);
   assert.equal(start, MON_1630, 'only stale anchors clamp');
 });
+
+/**
+ * A future `since` must not invert the window.
+ *
+ * nextReportInfo synthesises windowSince from today's report_time when last_sent_at is
+ * null but last_sent_on is today (a row that last sent before the last_sent_at column
+ * existed). If the day was claimed before report_time, that instant is still in the
+ * future -- and an inverted window matches nothing in either SQL arm, so the preview
+ * returns an empty items[] with a 200 and reads as "you did nothing" rather than as a
+ * fault. Clamped to the window end, a future `since` degrades to an empty range at the
+ * send instant instead.
+ */
+test('a future window start is clamped to the send instant, not left inverted', () => {
+  const CLAMP_MS = 7 * 24 * 60 * 60 * 1000;
+  const atMs = Date.parse('2026-09-22T12:00:00Z');
+  const clamp = (since) => Math.min(Math.max(Number(since), atMs - CLAMP_MS), atMs);
+
+  const future = atMs + 4 * 3600 * 1000;
+  assert.equal(clamp(future), atMs, 'never past the end');
+  assert.ok(clamp(future) <= atMs, 'window is never inverted');
+
+  const recent = atMs - 3600 * 1000;
+  assert.equal(clamp(recent), recent, 'an ordinary since is untouched');
+
+  const ancient = atMs - 30 * 24 * 3600 * 1000;
+  assert.equal(clamp(ancient), atMs - CLAMP_MS, 'the 7-day backstop still applies');
+});

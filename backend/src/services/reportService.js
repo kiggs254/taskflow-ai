@@ -104,7 +104,15 @@ export const getCompletedToday = async (
   // account that has never sent (or hasn't in months, because require_commits kept it
   // quiet) would otherwise make its first report dump the entire backlog.
   const CLAMP_MS = 7 * 24 * 60 * 60 * 1000;
-  const windowStart = since ? Math.max(Number(since), atMs - CLAMP_MS) : midnight;
+  // Never past the end. A `since` in the future inverts the window, and an inverted
+  // window matches nothing in either arm -- so the request returns an empty items[]
+  // with a 200 and reads as "you did nothing today" rather than as a fault.
+  // nextReportInfo can synthesise exactly that: when last_sent_at is null but
+  // last_sent_on is today, it falls back to today's report_time, which is still in the
+  // future if the day was claimed before then.
+  const windowStart = since
+    ? Math.min(Math.max(Number(since), atMs - CLAMP_MS), windowEnd)
+    : midnight;
 
   // Candidates: completed in-window, OR carrying a subtask completed in-window.
   // The subtask arm is why this can't just be `status='done' AND completed_at ...`.
