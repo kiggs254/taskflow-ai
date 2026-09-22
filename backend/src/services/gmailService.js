@@ -344,6 +344,7 @@ const runScan = async (userId, maxEmails = 50) => {
     }
 
     // The immutable ledger, consulted before any fetch or AI billing.
+    // Returns a Set -- `.has` below is the whole reason it must be one.
     const unprocessedIds = await filterUnprocessedGmailIds(userId, messages.map((m) => m.id));
     const pending = messages.filter((m) => unprocessedIds.has(m.id));
 

@@ -96,6 +96,17 @@ All AI runs server-side in `backend/src/services/aiService.js` via the `openai` 
 
 ### Email → proposals (not tasks)
 
+**`filterUnprocessedGmailIds` returns a Set, and that is load-bearing.** Its only caller
+does `unprocessedIds.has(id)`. It once returned a plain array, so that call threw
+`TypeError: unprocessedIds.has is not a function` on every scan that matched any mail —
+before the triage loop and before the cursor update. The cursor froze at the last minute
+the mailbox happened to be empty, every later scan re-matched the same message and threw
+again, and the pipeline never created a single proposal while the UI showed a calm "last
+checked" time throughout. Nothing caught it: the throw is inside the scanner's own
+try/catch, the job only `console.error`s, and no test exercised the composition. The
+filtering is now a pure `unseenIds(messageIds, seen)` returning a Set, tested for its
+*type* as much as its contents.
+
 **The scan is the Primary tab, and a stalled scan says so.** The query is
 `in:inbox category:primary -in:sent -in:chats`. It was `-in:sent` alone, which is not a
 mailbox — it matches every message in the account, Promotions and Social and everything

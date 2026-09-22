@@ -12,11 +12,31 @@ import { query } from '../config/database.js';
  */
 
 /**
- * Message ids from `messageIds` that have already been processed for this user.
+ * The ids in `messageIds` that are not in `seen`, as a **Set**.
+ *
+ * Pure and exported so the return TYPE is testable, which is the whole point. The
+ * scanner's only use of this is `unprocessed.has(id)`, and when the async wrapper
+ * below returned a plain array instead, that call threw
+ * `TypeError: unprocessedIds.has is not a function` on every scan that found any mail
+ * at all. The scan died before its cursor advanced, so the cursor froze at the last
+ * minute the mailbox happened to be empty and every later scan re-matched the same
+ * message and threw again -- a self-sustaining outage in which not one proposal was
+ * ever created, and the UI showed a reassuring "last checked" time throughout.
+ *
+ * A Set is what the caller means; returning one makes the wrong call impossible rather
+ * than merely unlikely.
+ */
+export const unseenIds = (messageIds, seen) => {
+  const seenSet = seen instanceof Set ? seen : new Set(seen);
+  return new Set(messageIds.filter((id) => !seenSet.has(id)));
+};
+
+/**
+ * Message ids from `messageIds` not yet processed for this user, as a Set.
  * Batched into one query so a 50-message scan costs one round trip, not 50.
  */
 export const filterUnprocessedGmailIds = async (userId, messageIds) => {
-  if (!messageIds.length) return [];
+  if (!messageIds.length) return new Set();
 
   const result = await query(
     `SELECT message_id FROM processed_gmail_messages
@@ -24,8 +44,7 @@ export const filterUnprocessedGmailIds = async (userId, messageIds) => {
     [userId, messageIds]
   );
 
-  const seen = new Set(result.rows.map(r => r.message_id));
-  return messageIds.filter(id => !seen.has(id));
+  return unseenIds(messageIds, result.rows.map((r) => r.message_id));
 };
 
 export const isGmailMessageProcessed = async (userId, messageId) => {
