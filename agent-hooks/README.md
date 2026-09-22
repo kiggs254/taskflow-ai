@@ -44,7 +44,8 @@ precedence if the hook happens to inherit them, but don't rely on a shell profil
 them — that's the trap that makes SessionEnd silently post nothing while session logs
 pile up under `~/.taskflow/sessions/` and no `~/.taskflow/policy.json` ever appears.
 
-**3. Install the hooks:**
+**3. Install the hooks** (`taskflow-flush.mjs` is a command you run, not a registered
+hook, but it lives alongside them):
 
 ```bash
 mkdir -p ~/.claude/hooks
@@ -81,6 +82,7 @@ chmod +x ~/.claude/hooks/taskflow-*.mjs
 |---|---|---|
 | `taskflow-record.mjs` | every prompt, every Edit/Write | Appends to `~/.taskflow/sessions/<id>.jsonl` |
 | `taskflow-session-end.mjs` | session ends | Checks the folder, posts if it's work, deletes the log |
+| `taskflow-flush.mjs` | you run it | Posts a snapshot mid-session, **keeps** the log |
 
 The prompts describe intent, the file paths show where it landed; the server turns
 the pair into one line like `wp-plugin — fixed the checkout hook and added tests`.
@@ -95,6 +97,34 @@ aren't repos at all, which is the entire point here.
 
 `SessionEnd` can't block and its exit code is ignored, so these can never delay or
 break session exit. They fail silently by design.
+
+## Posting before the session ends
+
+`SessionEnd` is an event, not a timer. It fires on `/clear`, on logout, and on Ctrl-D
+at the prompt — and **never** if you just leave the session open or the terminal is
+killed outright. A session you keep open for three days logs nothing for three days.
+
+To post what a session has done so far, from the project directory:
+
+```bash
+~/.claude/hooks/taskflow-flush.mjs          # the session that's been editing files here
+~/.claude/hooks/taskflow-flush.mjs --list   # every recorded session; -> marks the pick
+```
+
+It picks by **which session has edited a file under this directory**, not by which log
+is newest — with several sessions open at once, newest-wins reliably picks whichever
+window you were last typing in, which is usually the wrong project.
+
+It runs `taskflow-session-end.mjs --keep`. The `--keep` is load-bearing: `agent_sessions`
+upserts on `(user_id, session_id, day)` and **replaces** the row's prompts, summary and
+changed paths. A flush that consumed the log would leave the eventual session-end post
+carrying only the work done *after* the flush — silently overwriting everything before
+it. With the log kept, the final post is cumulative and the row converges on the whole
+session.
+
+Re-flushing is safe and idempotent (same session, same day, same row), but each one
+costs a `smart`-tier AI call to re-summarise. Flush when you finish something, not on a
+loop.
 
 ## Checking it works
 

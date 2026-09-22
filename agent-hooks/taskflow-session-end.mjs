@@ -33,13 +33,11 @@ const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Config resolution: env first (so a shell can still override), then a config file.
 //
-// The env vars live in a shell profile like ~/.zshrc, which ONLY interactive shells
-// source. A SessionEnd hook is spawned non-interactively, so it never saw them -- it
-// bailed at the check below, posted nothing, and (correctly) kept the log, which is
-// why logs piled up with no policy.json. The config file removes that dependency
-// entirely: the hook reads its own credentials regardless of how the shell was
-// started. Write ~/.taskflow/config.json as {"apiUrl":"...","token":"tf_..."}, mode
-// 0600.
+// The env vars live in ~/.zshrc, which ONLY interactive shells source. A SessionEnd
+// hook is spawned non-interactively, so it never saw them -- it bailed at the check
+// below, posted nothing, and (correctly) kept the log, which is why logs piled up with
+// no policy.json. The config file removes that dependency entirely: the hook reads its
+// own credentials regardless of how the shell was started.
 const readConfig = () => {
   try {
     return JSON.parse(fs.readFileSync(path.join(DIR, 'config.json'), 'utf8'));
@@ -50,6 +48,18 @@ const readConfig = () => {
 const cfg = readConfig();
 const API = (process.env.TASKFLOW_API_URL || cfg.apiUrl || '').replace(/\/$/, '');
 const TOKEN = process.env.TASKFLOW_TOKEN || cfg.token;
+
+/**
+ * Keep the session log after a successful post.
+ *
+ * Off for the real SessionEnd, where deleting is right: the session is over and the
+ * log has served its purpose. On for a mid-session flush (taskflow-flush.mjs), where
+ * deleting would be destructive -- agent_sessions upserts on (user, session, day) and
+ * REPLACES prompts/changed_paths/summary, so the next post would overwrite the row
+ * with only the work done after the flush. Everything before it would vanish from the
+ * ledger, and with it from the daily report.
+ */
+const KEEP_LOG = process.argv.includes('--keep') || process.env.TASKFLOW_KEEP_LOG === '1';
 
 const readStdin = () =>
   new Promise((resolve) => {
@@ -224,7 +234,8 @@ const main = async () => {
     handled = true;
   } finally {
     // Discard only what was actually handled. Anything else is kept and retried.
-    if (handled) {
+    // A --keep run posts a snapshot and leaves the log to keep accumulating.
+    if (handled && !KEEP_LOG) {
       try {
         fs.unlinkSync(logFile);
       } catch {
