@@ -229,7 +229,58 @@ export const extractEmailBody = (payload) => {
   return out;
 };
 
+/**
+ * Record that a scan was attempted, and how it went.
+ *
+ * Separate from last_scan_at on purpose. last_scan_at is the CURSOR -- the `after:`
+ * term of the next query -- and it must not move when a scan fails, or every mail that
+ * arrived during the outage is skipped for good. The cost of that correctness is that a
+ * scanner throwing every minute for sixteen hours looks identical to a quiet inbox, and
+ * that is exactly what happened: the UI read "last checked 23:55:02" all the next day
+ * and reported "Nothing waiting."
+ *
+ * Never throws. A failure to write telemetry must not turn a working scan into a failed
+ * one, nor mask the real error behind a database error.
+ */
+const recordScanHealth = async (userId, error) => {
+  try {
+    if (error) {
+      await query(
+        `UPDATE gmail_integrations
+            SET last_attempt_at = CURRENT_TIMESTAMP,
+                last_error = $2,
+                consecutive_failures = consecutive_failures + 1
+          WHERE user_id = $1`,
+        [userId, String(error.message || error).slice(0, 500)]
+      );
+    } else {
+      await query(
+        `UPDATE gmail_integrations
+            SET last_attempt_at = CURRENT_TIMESTAMP,
+                last_error = NULL,
+                consecutive_failures = 0
+          WHERE user_id = $1`,
+        [userId]
+      );
+    }
+  } catch (telemetryError) {
+    // Most likely the migration hasn't been run. Say so once, and carry on scanning.
+    console.error('Gmail: could not record scan health:', telemetryError.message);
+  }
+};
+
 export const scanEmails = async (userId, maxEmails = 50) => {
+  try {
+    const result = await runScan(userId, maxEmails);
+    await recordScanHealth(userId, null);
+    return result;
+  } catch (error) {
+    await recordScanHealth(userId, error);
+    throw error;
+  }
+};
+
+const runScan = async (userId, maxEmails = 50) => {
   try {
     const gmail = await getGmailClient(userId);
 
@@ -254,9 +305,27 @@ export const scanEmails = async (userId, maxEmails = 50) => {
     const lastScanAt = integrationResult.rows[0]?.last_scan_at;
     const instructions = integrationResult.rows[0]?.prompt_instructions || '';
 
-    let queryString = '-in:sent';
+    // The Primary tab, and only the Primary tab.
+    //
+    // This used to be `-in:sent` alone, which is not a mailbox at all -- it matches
+    // every message in the account: Promotions, Social, Updates, Forums, and everything
+    // ever archived. So the triager spent its budget on newsletters and receipts from
+    // years back, and the one thing it was built for -- the mail a human actually has
+    // to answer -- was a rounding error in the volume.
+    //
+    // `in:inbox` excludes archived mail; `category:primary` excludes the other tabs;
+    // `-in:chats` excludes Hangouts/Chat records, which are not email and confuse the
+    // thread fetch. Spam and Trash are already excluded by default (includeSpamTrash
+    // defaults to false).
+    let queryString = 'in:inbox category:primary -in:sent -in:chats';
     if (lastScanAt) {
-      queryString += ` after:${Math.floor(new Date(lastScanAt).getTime() / 1000)}`;
+      // Gmail's after: is second-granular and compares against the message's internal
+      // date, so a 60s overlap costs nothing (the ledger dedups) and covers clock skew
+      // between this host and Google. Without it, a message that lands in the same
+      // second a scan finishes is never seen again -- last_scan_at moves past it and
+      // nothing looks back.
+      const cursor = Math.floor(new Date(lastScanAt).getTime() / 1000) - 60;
+      queryString += ` after:${cursor}`;
     }
 
     const messagesResponse = await gmail.users.messages.list({
@@ -401,20 +470,28 @@ export const getGmailStatus = async (userId) => {
   let result;
   try {
     result = await query(
-      `SELECT email, enabled, last_scan_at, scan_frequency, prompt_instructions, created_at
+      `SELECT email, enabled, last_scan_at, scan_frequency, prompt_instructions, created_at,
+              last_attempt_at, last_error, consecutive_failures
        FROM gmail_integrations WHERE user_id = $1`,
       [userId]
     );
   } catch (error) {
-    // Backwards compatibility: older DBs may not have prompt_instructions yet
+    // Backwards compatibility: an older DB may lack prompt_instructions or the scan
+    // health columns. Degrade to the columns that have always existed rather than 500 --
+    // a status endpoint that fails is how the outage stayed invisible in the first place.
     if (error?.code === '42703') {
       result = await query(
         `SELECT email, enabled, last_scan_at, scan_frequency, created_at
          FROM gmail_integrations WHERE user_id = $1`,
         [userId]
       );
-      // Normalize shape to include prompt_instructions as null
-      result.rows = result.rows.map((row) => ({ ...row, prompt_instructions: null }));
+      result.rows = result.rows.map((row) => ({
+        ...row,
+        prompt_instructions: null,
+        last_attempt_at: null,
+        last_error: null,
+        consecutive_failures: 0,
+      }));
     } else {
       throw error;
     }
@@ -424,14 +501,27 @@ export const getGmailStatus = async (userId) => {
     return { connected: false };
   }
 
+  const row = result.rows[0];
+  const failures = Number(row.consecutive_failures ?? 0);
+
+  // "Stalled" is the distinction the UI could not previously draw: a cursor that has
+  // not moved means either a quiet inbox or a scanner that has been throwing all night,
+  // and those need opposite reactions from the reader.
+  const staleMs = row.last_scan_at ? Date.now() - new Date(row.last_scan_at).getTime() : null;
+  const overdueBy = (row.scan_frequency || 15) * 60_000 * 3; // three missed cycles
+
   return {
     connected: true,
-    email: result.rows[0].email,
-    enabled: result.rows[0].enabled,
-    lastScanAt: result.rows[0].last_scan_at,
-    scanFrequency: result.rows[0].scan_frequency,
-    promptInstructions: result.rows[0].prompt_instructions,
-    createdAt: result.rows[0].created_at,
+    email: row.email,
+    enabled: row.enabled,
+    lastScanAt: row.last_scan_at,
+    scanFrequency: row.scan_frequency,
+    promptInstructions: row.prompt_instructions,
+    createdAt: row.created_at,
+    lastAttemptAt: row.last_attempt_at,
+    lastError: row.last_error,
+    consecutiveFailures: failures,
+    stalled: failures > 0 || (staleMs !== null && staleMs > overdueBy),
   };
 };
 

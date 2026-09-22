@@ -23,6 +23,8 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
   const [doneError, setDoneError] = useState<string | null>(null);
   const [mailbox, setMailbox] = useState<any>(null);
   const [logging, setLogging] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -77,6 +79,34 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
    * and `narrative`, which the server derives from the title. Faking them here would
    * show something subtly different from what the report will actually post.
    */
+  /** Run the real scan on demand, and say plainly what came back. */
+  const checkMailNow = useCallback(async () => {
+    setChecking(true);
+    setCheckResult(null);
+    try {
+      const r = await api.gmail.scanNow(token);
+      if (r?.ok === false) {
+        setCheckResult(
+          r.needsReconnect
+            ? `${r.error} — reconnect Gmail in Settings.`
+            : String(r.error || 'The scan failed.')
+        );
+      } else {
+        const n = r?.proposalsCreated ?? 0;
+        setCheckResult(
+          n > 0
+            ? `Found ${n} email${n === 1 ? '' : 's'} needing a reply.`
+            : `Checked. ${r?.ignored ?? 0} needed no reply, ${r?.skipped ?? 0} already seen.`
+        );
+      }
+      await load();
+    } catch (e: any) {
+      setCheckResult(e?.message || 'The scan failed.');
+    } finally {
+      setChecking(false);
+    }
+  }, [token, load]);
+
   const logWork = useCallback(async (task: Task) => {
     await api.syncTask(token, task);
     await load();
@@ -109,16 +139,44 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
             backend, not in the agent console, so without this line an idle agent looks
             like nothing is happening. */}
         {mailbox && (
-          <p className="text-[11px] text-slate-500 mb-3">
-            {mailbox.connected === false || !mailbox.email
-              ? 'Gmail is not connected — nothing is being read.'
-              : mailbox.enabled === false
-                ? `Scanning is turned off for ${mailbox.email}.`
-                : `Checking ${mailbox.email} every ${mailbox.scanFrequency ?? 15} min` +
-                  (mailbox.lastScanAt
-                    ? ` · last checked ${new Date(mailbox.lastScanAt).toLocaleTimeString()}`
-                    : ' · not run yet')}
-          </p>
+          mailbox.stalled && mailbox.connected !== false && mailbox.enabled !== false ? (
+            /* A stalled scanner used to be indistinguishable from a quiet inbox: the line
+               read "last checked 23:55:02" all the following day, beside "Nothing
+               waiting", and looked calm. It is the opposite of calm. */
+            <div className="mb-3 flex gap-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                <strong>Mail is not being read.</strong>{' '}
+                {mailbox.lastScanAt
+                  ? `The last successful check of ${mailbox.email} was ${new Date(mailbox.lastScanAt).toLocaleString()}.`
+                  : `${mailbox.email} has never been checked successfully.`}
+                {mailbox.consecutiveFailures > 0 &&
+                  ` ${mailbox.consecutiveFailures} attempt${mailbox.consecutiveFailures === 1 ? '' : 's'} have failed since.`}
+                {mailbox.lastError && (
+                  <> Last error: <span className="text-amber-200">{mailbox.lastError}</span></>
+                )}
+                <button
+                  onClick={checkMailNow}
+                  disabled={checking}
+                  className="block mt-2 font-semibold text-amber-200 hover:text-white transition-colors disabled:opacity-50"
+                >
+                  {checking ? 'Checking…' : 'Check now'}
+                </button>
+                {checkResult && <span className="block mt-1 text-amber-200/90">{checkResult}</span>}
+              </span>
+            </div>
+          ) : (
+            <p className="text-[11px] text-slate-500 mb-3">
+              {mailbox.connected === false || !mailbox.email
+                ? 'Gmail is not connected — nothing is being read.'
+                : mailbox.enabled === false
+                  ? `Scanning is turned off for ${mailbox.email}.`
+                  : `Checking the Primary tab of ${mailbox.email} every ${mailbox.scanFrequency ?? 15} min` +
+                    (mailbox.lastScanAt
+                      ? ` · last checked ${new Date(mailbox.lastScanAt).toLocaleTimeString()}`
+                      : ' · not run yet')}
+            </p>
+          )
         )}
 
         {proposals === null ? (
@@ -129,8 +187,13 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
             {proposalError}
           </p>
         ) : proposals.length === 0 ? (
+          /* Only an empty queue the scanner actually produced means "nothing waiting".
+             With a stalled scanner the banner above already says why, and repeating the
+             reassurance here would contradict it. */
           <p className="text-xs text-slate-500">
-            Nothing waiting. Mail that needs no reply is handled silently and never shown.
+            {mailbox?.stalled
+              ? 'Nothing to show — the last scan did not complete, so this list is out of date.'
+              : 'Nothing waiting. Mail that needs no reply is handled silently and never shown.'}
           </p>
         ) : (
           <div className="space-y-3">

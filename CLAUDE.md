@@ -96,6 +96,25 @@ All AI runs server-side in `backend/src/services/aiService.js` via the `openai` 
 
 ### Email → proposals (not tasks)
 
+**The scan is the Primary tab, and a stalled scan says so.** The query is
+`in:inbox category:primary -in:sent -in:chats`. It was `-in:sent` alone, which is not a
+mailbox — it matches every message in the account, Promotions and Social and everything
+ever archived — so the triager spent its budget on newsletters while the mail a human
+has to answer was a rounding error in the volume. The `after:` cursor is
+`last_scan_at - 60s`: the overlap costs nothing (the ledger dedups) and covers clock
+skew, where an exact cursor loses any message landing in the same second a scan ends.
+
+`last_scan_at` is the **cursor** and advances only on success — moving it on failure
+would skip every mail from the outage, permanently. The cost is that a scanner throwing
+every minute for sixteen hours looks exactly like a quiet inbox, and that is precisely
+what happened: the home screen read *"last checked 23:55:02"* all the next day beside
+*"Nothing waiting"*. So `last_attempt_at`, `last_error` and `consecutive_failures` record
+attempts separately, `getGmailStatus` derives `stalled`, and the home screen shows the
+error with a **Check now** button instead of a reassuring timestamp. `scan-now` answers
+`{ok:false, error}` with a 200 rather than a generic 500, because its entire purpose is
+to explain why nothing is happening.
+
+
 `gmailService.scanEmails` triages **one thread at a time** and produces an `email_proposals` row **only when a human must reply**. `emailTriage.triageThread` returns a required `needsReply` boolean plus a classification enum, so "no reply needed" is a first-class answer — the pipeline it replaced had no way to express that, and turned every receipt and cron alert into a task.
 
 Three invariants here, each encoding a bug that shipped:

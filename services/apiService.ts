@@ -198,6 +198,9 @@ export const api = {
       if (!res.ok) throw new Error('Failed to get Gmail status');
       return res.json();
     },
+    // Returns { ok:false, error } rather than throwing on a failed scan: the whole
+    // point of running this by hand is to find out WHY mail is not being read, and
+    // "Failed to scan emails" answers nothing.
     scanNow: async (token: string, maxEmails = 50) => {
       const res = await fetch(`${API_BASE}/gmail/scan-now`, {
         method: 'POST',
@@ -207,8 +210,9 @@ export const api = {
         },
         body: JSON.stringify({ maxEmails }),
       });
-      if (!res.ok) throw new Error('Failed to scan emails');
-      return res.json();
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: body?.error || `Scan failed (${res.status})` };
+      return body;
     },
     updateSettings: async (token: string, settings: { scanFrequency?: number; enabled?: boolean; promptInstructions?: string }) => {
       const res = await fetch(`${API_BASE}/gmail/settings`, {

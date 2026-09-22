@@ -87,33 +87,45 @@ router.get('/status', authenticate, asyncHandler(async (req, res) => {
  */
 router.post('/scan-now', authenticate, asyncHandler(async (req, res) => {
   const { maxEmails = 50 } = req.body;
-  const result = await scanEmails(req.user.id, maxEmails);
-  
-  // Send Telegram notification if tasks were created
-  if (result && (result.draftsCreated > 0 || result.tasksCreated > 0)) {
+
+  let result;
+  try {
+    result = await scanEmails(req.user.id, maxEmails);
+  } catch (error) {
+    // 200 with ok:false, not a 500. This endpoint's whole purpose is to answer "why is
+    // nothing happening", and a generic 500 body is how a broken token looked identical
+    // to a quiet inbox for sixteen hours. The scan health row records it too.
+    console.error(`Gmail scan-now failed for user ${req.user.id}:`, error.message);
+    return res.json({
+      ok: false,
+      error: error.message || 'The scan failed.',
+      // The one failure with a specific remedy, worth naming rather than making the
+      // user infer it from an OAuth error string.
+      needsReconnect: /reconnect|invalid_grant|unauthoriz|token/i.test(String(error.message || '')),
+    });
+  }
+
+  // Only ping when something actually wants the user. Mail needing no reply is the
+  // majority and is deliberately silent -- notifying on it would reproduce the noise
+  // this pipeline replaced.
+  //
+  // This block used to read result.tasksCreated / result.draftsCreated, which scanEmails
+  // stopped returning when email->task creation was removed, so it had been dead ever
+  // since: a manual scan could surface a proposal and never notify.
+  if (result?.proposalsCreated > 0) {
     try {
-      let message = '';
-      const taskTitles = result.tasks?.map(t => `• ${t.title}`).join('\n') || '';
-      const draftTitles = result.drafts?.map(d => `• ${d.title}`).join('\n') || '';
-      
-      if (result.tasksCreated > 0 && result.draftsCreated > 0) {
-        message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}\n\n📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
-      } else if (result.tasksCreated > 0) {
-        message = `✅ ${result.tasksCreated} task${result.tasksCreated > 1 ? 's' : ''} added to your Job list from Gmail:\n${taskTitles}`;
-      } else if (result.draftsCreated > 0) {
-        message = `📝 ${result.draftsCreated} draft task${result.draftsCreated > 1 ? 's' : ''} created from Gmail:\n${draftTitles}`;
-      }
-      
-      if (message) {
-        await sendNotification(req.user.id, message);
-      }
+      const n = result.proposalsCreated;
+      await sendNotification(
+        req.user.id,
+        `📬 ${n} email${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} a reply — a draft is waiting for you in TaskFlow.`
+      );
     } catch (notifError) {
-      console.error(`Error sending Telegram notification for user ${req.user.id}:`, notifError);
-      // Don't fail the scan if notification fails
+      // A notification failure must not make a successful scan look failed.
+      console.error(`Error sending Telegram notification for user ${req.user.id}:`, notifError.message);
     }
   }
-  
-  res.json(result);
+
+  res.json({ ok: true, ...result });
 }));
 
 /**
