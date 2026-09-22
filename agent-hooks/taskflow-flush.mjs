@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 /**
- * TaskFlow — post the current Claude Code session's work WITHOUT ending the session.
+ * TaskFlow — post a Claude Code session's work WITHOUT ending the session.
  *
  * SessionEnd is an event, not a timer: it fires on /clear, logout or Ctrl-D, and never
- * at all if you just leave the session open. So a long day's work sits on disk until
- * you actually close the session. This posts a snapshot now.
+ * at all if you leave the session open. So a long day's work sits on disk until you
+ * actually close the session. This posts a snapshot now.
  *
- * Usage, from the project directory:
- *   taskflow-flush.mjs              # the session that has been editing files here
- *   taskflow-flush.mjs <sessionId>  # an explicit session
- *   taskflow-flush.mjs --list       # what is on disk, and which would be picked
+ * Usage:
+ *   taskflow-flush.mjs              # the most recent session inside a work folder
+ *   taskflow-flush.mjs <sessionId>  # an explicit session (must be in a work folder)
+ *   taskflow-flush.mjs --list       # work sessions on disk; -> marks the pick
+ *
+ * SCOPE: only sessions inside the work folders configured in Settings -> Claude Code
+ * are ever considered. Sessions anywhere else are not listed, not posted, and not
+ * touched -- the same allowlist the SessionEnd hook enforces, applied here so the
+ * command can be run from anywhere without picking up an unrelated project.
  *
  * Runs the SessionEnd hook with --keep, so the log survives and keeps accumulating.
  * agent_sessions upserts on (user, session, day) and REPLACES the row's prompts and
@@ -20,10 +25,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
-const SESSIONS = path.join(os.homedir(), '.taskflow', 'sessions');
-const HOOK = path.join(os.homedir(), '.claude', 'hooks', 'taskflow-session-end.mjs');
+const HOME = os.homedir();
+const SESSIONS = path.join(HOME, '.taskflow', 'sessions');
+const POLICY_CACHE = path.join(HOME, '.taskflow', 'policy.json');
+const CONFIG = path.join(HOME, '.taskflow', 'config.json');
+const PROJECTS = path.join(HOME, '.claude', 'projects');
+const HOOK = path.join(HOME, '.claude', 'hooks', 'taskflow-session-end.mjs');
 
 const die = (msg) => {
   console.error(msg);
@@ -35,8 +44,7 @@ const die = (msg) => {
  *
  * realpath, not just resolve: on macOS /tmp and /var are symlinks into /private, so a
  * recorded path under /var and a cwd of /private/var are the same directory that
- * path.resolve reports as unrelated -- and the session picker below silently matched
- * nothing. Falls back to resolve for a path that no longer exists.
+ * path.resolve reports as unrelated. Falls back to resolve for a path that is gone.
  */
 const canonical = (p) => {
   try {
@@ -46,43 +54,66 @@ const canonical = (p) => {
   }
 };
 
-/** Project root for a directory: the repo it belongs to, else the directory itself. */
-const rootOf = (dir) => {
+/**
+ * The work-folder allowlist, from the cache the SessionEnd hook maintains.
+ *
+ * Fetched if absent so a first run isn't a dead end. Never guessed at: with no policy
+ * there is no way to tell work from personal, and the safe answer is to stop.
+ */
+const getPolicy = async () => {
   try {
-    return canonical(
-      execFileSync('git', ['rev-parse', '--show-toplevel'], {
-        cwd: dir,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim()
-    );
+    return JSON.parse(fs.readFileSync(POLICY_CACHE, 'utf8'));
   } catch {
-    return canonical(dir);
+    /* fetch below */
+  }
+  let cfg = {};
+  try {
+    cfg = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
+  } catch {
+    /* env may still supply it */
+  }
+  const api = (process.env.TASKFLOW_API_URL || cfg.apiUrl || '').replace(/\/$/, '');
+  const token = process.env.TASKFLOW_TOKEN || cfg.token;
+  if (!api || !token) {
+    die(`No work-folder policy at ${POLICY_CACHE}, and no credentials in ${CONFIG} to fetch one.`);
+  }
+  try {
+    const res = await fetch(`${api}/agent/policy`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`policy -> ${res.status}`);
+    const policy = await res.json();
+    fs.writeFileSync(POLICY_CACHE, JSON.stringify(policy), { mode: 0o600 });
+    return policy;
+  } catch (e) {
+    die(`Could not read the work-folder policy: ${e.message}`);
   }
 };
 
 /**
- * Where a session's work actually happened, from the files it edited.
- *
- * Not the current directory. The allowlist is matched against this, and flushing a
- * backlog session by id from wherever you happen to be standing would judge it against
- * the wrong project -- posting it under the wrong workspace at best, and silently
- * dropping it as "not a work path" at worst. The session's own files are the only
- * honest answer. Falls back to `fallback` for a session that edited nothing.
+ * Claude Code names each project directory after its path with every non-alphanumeric
+ * character replaced by '-'. Deriving the slug from the allowlist (rather than parsing
+ * it back into a path) sidesteps the ambiguity in the other direction: "Random AI
+ * tasks" and "Random-AI-tasks" produce the same slug and cannot be told apart from it.
  */
-const sessionRoot = (log, fallback) => {
-  if (!log.files.length) return fallback;
-  const roots = new Map();
-  for (const f of log.files) {
-    const r = rootOf(path.dirname(canonical(f)));
-    roots.set(r, (roots.get(r) || 0) + 1);
+const slugFor = (p) => p.replace(/[^a-zA-Z0-9]/g, '-');
+
+/** Longest matching prefix wins, so a sub-folder can override its parent. */
+const matchWorkPath = (dir, workPaths) => {
+  const target = canonical(dir).toLowerCase();
+  let best = null;
+  for (const rule of workPaths) {
+    const root = canonical(rule.path).replace(/\/+$/, '');
+    const lower = root.toLowerCase();
+    if (target !== lower && !target.startsWith(`${lower}${path.sep}`)) continue;
+    if (!best || root.length > best.path.length) best = { ...rule, path: root };
   }
-  // Most-edited root wins: a session that strayed into one file elsewhere still
-  // belongs to the project it spent its time in.
-  return [...roots.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  return best;
 };
 
-const logs = () => {
+/** Every session log, with what it recorded. */
+const readLogs = () => {
   let names;
   try {
     names = fs.readdirSync(SESSIONS).filter((f) => f.endsWith('.jsonl'));
@@ -106,7 +137,6 @@ const logs = () => {
       }
       return {
         sessionId: path.basename(f, '.jsonl'),
-        file,
         mtime: fs.statSync(file).mtimeMs,
         files: [...files],
         prompts,
@@ -116,71 +146,92 @@ const logs = () => {
 };
 
 /**
- * Which session is "this one".
+ * Which work folder a session belongs to, or null if none.
  *
- * Several sessions run at once here, so newest-wins alone picks the wrong project
- * whenever another window is busier. Prefer the newest log that has actually edited a
- * file under this repo -- that is the session working on what you are looking at.
+ * The session's own working directory comes first, via Claude Code's project folder.
+ * Edited files are only a fallback, and a poor primary: a session working in a work
+ * folder often edits nothing inside it -- scratch files land in the session's temp
+ * directory, and that is not on the allowlist, so going by files alone silently
+ * classified real work as personal and posted nothing.
  */
-const pick = (all, root) => {
-  const under = (p) => {
-    const abs = canonical(p);
-    return abs === root || abs.startsWith(`${root}${path.sep}`);
-  };
-  return all.find((l) => l.files.some(under)) ?? null;
+const workFolderOf = (log, workPaths) => {
+  const bySlug = new Map(workPaths.map((r) => [slugFor(canonical(r.path)), r]));
+  for (const [slug, rule] of bySlug) {
+    if (fs.existsSync(path.join(PROJECTS, slug, `${log.sessionId}.jsonl`))) {
+      return { ...rule, path: canonical(rule.path), via: 'session directory' };
+    }
+  }
+  for (const f of log.files) {
+    const hit = matchWorkPath(path.dirname(f), workPaths);
+    if (hit) return { ...hit, via: 'edited files' };
+  }
+  return null;
 };
 
 const main = async () => {
   const arg = process.argv[2];
-  const cwdRoot = rootOf(process.cwd());
-  const all = logs();
+  const policy = await getPolicy();
+  const workPaths = policy?.enabled === false ? [] : policy?.workPaths ?? [];
+  if (!workPaths.length) {
+    die('No work folders configured. Add one in TaskFlow -> Settings -> Claude Code.');
+  }
+
+  const all = readLogs();
+  const candidates = [];
+  let skipped = 0;
+  for (const log of all) {
+    const folder = workFolderOf(log, workPaths);
+    if (folder) candidates.push({ ...log, folder });
+    else skipped++;
+  }
+
+  // A session already in the work folder you are standing in wins over a newer one
+  // elsewhere; otherwise the most recent work session.
+  const here = matchWorkPath(process.cwd(), workPaths);
+  const auto =
+    (here && candidates.find((c) => c.folder.path === here.path)) ?? candidates[0] ?? null;
 
   if (arg === '--list') {
-    if (!all.length) return console.log('No session logs in', SESSIONS);
-    const chosen = pick(all, cwdRoot);
-    for (const l of all) {
-      const mark = chosen && l.sessionId === chosen.sessionId ? '->' : '  ';
+    console.log(`Work folders: ${workPaths.map((r) => r.path).join(', ')}`);
+    if (!candidates.length) console.log('No sessions recorded inside them yet.');
+    for (const c of candidates) {
+      const mark = auto && c.sessionId === auto.sessionId ? '->' : '  ';
       console.log(
-        `${mark} ${l.sessionId}  ${new Date(l.mtime).toLocaleTimeString()}  ` +
-          `${l.prompts} prompt(s), ${l.files.length} file(s)`
+        `${mark} ${c.sessionId}  ${new Date(c.mtime).toLocaleString()}  ` +
+          `${c.prompts}p ${c.files.length}f  ${c.folder.path}  (${c.folder.via})`
       );
     }
+    if (skipped) console.log(`\n${skipped} session(s) outside the work folders — ignored.`);
     return;
   }
 
-  if (!all.length) die(`No session logs in ${SESSIONS} — nothing recorded yet.`);
-
-  const chosen = arg ? all.find((l) => l.sessionId === arg) : pick(all, cwdRoot);
-  if (arg && !chosen) die(`No log for session ${arg}. Try --list.`);
-  if (!chosen) {
-    die(
-      `No session has edited a file under ${cwdRoot}.\n` +
-        `Run this from the project you are working in, or name the session explicitly ` +
-        `(taskflow-flush.mjs --list).`
-    );
+  let chosen = auto;
+  if (arg) {
+    chosen = candidates.find((c) => c.sessionId === arg) ?? null;
+    if (!chosen) {
+      const exists = all.some((l) => l.sessionId === arg);
+      die(
+        exists
+          ? `Session ${arg} is not inside a work folder, so it is not logged. Nothing posted.`
+          : `No log for session ${arg}. Try --list.`
+      );
+    }
   }
-
-  const root = sessionRoot(chosen, cwdRoot);
-  if (!chosen.files.length) {
-    console.warn(
-      `${chosen.sessionId} recorded no file edits, so its project is being taken as ` +
-        `${root}. Only Edit/Write are recorded — work done through shell commands ` +
-        `leaves prompts but no paths.`
-    );
-  }
+  if (!chosen) die(`No sessions recorded inside ${workPaths.map((r) => r.path).join(', ')}.`);
 
   console.log(
     `Flushing ${chosen.sessionId} (${chosen.prompts} prompt(s), ${chosen.files.length} file(s)) ` +
-      `as ${root}...`
+      `as ${chosen.folder.path}...`
   );
 
   const child = spawn(process.execPath, [HOOK, '--keep'], {
-    env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+    env: { ...process.env, CLAUDE_PROJECT_DIR: chosen.folder.path },
     stdio: ['pipe', 'inherit', 'inherit'],
   });
-  child.stdin.end(JSON.stringify({ session_id: chosen.sessionId, cwd: root }));
+  child.stdin.end(JSON.stringify({ session_id: chosen.sessionId, cwd: chosen.folder.path }));
 
-  await new Promise((resolve) => child.on('close', resolve));
+  const code = await new Promise((resolve) => child.on('close', resolve));
+  if (code !== 0) die(`The session-end hook exited ${code}.`);
   // The hook is fire-and-forget by design and prints nothing on success, so say
   // something rather than leaving a silent exit looking like a no-op.
   console.log('Posted. It appears in TaskFlow as a completed task for today.');

@@ -104,21 +104,28 @@ break session exit. They fail silently by design.
 at the prompt — and **never** if you just leave the session open or the terminal is
 killed outright. A session you keep open for three days logs nothing for three days.
 
-To post what a session has done so far, from the project directory:
+To post what a session has done so far — from anywhere:
 
 ```bash
-~/.claude/hooks/taskflow-flush.mjs          # the session that's been editing files here
-~/.claude/hooks/taskflow-flush.mjs --list   # every recorded session; -> marks the pick
+~/.claude/hooks/taskflow-flush.mjs          # the most recent session in a work folder
+~/.claude/hooks/taskflow-flush.mjs --list   # work sessions on disk; -> marks the pick
 ```
 
-It picks by **which session has edited a file under this directory**, not by which log
-is newest — with several sessions open at once, newest-wins reliably picks whichever
-window you were last typing in, which is usually the wrong project.
+**Only sessions inside your work folders are ever considered.** Everything else is not
+listed, not posted, and not touched — naming one explicitly is refused. It is the same
+allowlist the SessionEnd hook enforces, applied here so the command can be run from any
+directory without picking up an unrelated project. With one work folder configured,
+`taskflow-flush.mjs` from anywhere means "post my work-folder session".
 
-The project a session is posted under comes from the files that session edited, not
-from where you run the command. That is what makes clearing a backlog work: an old
-session can be flushed by id from anywhere, and it is still matched against its own
-project's allowlist rather than whichever directory you happened to be standing in.
+A session is matched to its work folder by **the directory the session runs in**, read
+from Claude Code's own project folder (`~/.claude/projects/<slugged-path>/`), with
+edited files only as a fallback. Going by edited files alone does not work: a session
+working in a work folder often edits nothing inside it — scratch files land in the
+session's temp directory, which is not on the allowlist — so real work was classified
+as personal and posted nothing.
+
+If several work folders are configured, a session in the folder you are standing in
+wins over a newer one elsewhere; otherwise the most recent work session is used.
 
 It runs `taskflow-session-end.mjs --keep`. The `--keep` is load-bearing: `agent_sessions`
 upserts on `(user_id, session_id, day)` and **replaces** the row's prompts, summary and
