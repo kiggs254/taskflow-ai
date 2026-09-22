@@ -108,8 +108,16 @@ To post what a session has done so far — from anywhere:
 
 ```bash
 ~/.claude/hooks/taskflow-flush.mjs          # the most recent session in a work folder
+~/.claude/hooks/taskflow-flush.mjs --today  # every work session from today
+~/.claude/hooks/taskflow-flush.mjs --all    # every work session on disk
 ~/.claude/hooks/taskflow-flush.mjs --list   # work sessions on disk; -> marks the pick
 ```
+
+One session becomes one task (`agent-{uid}-{session}-{day}`), so a day with three
+sessions posts three entries rather than merging them into one vague line. `--today`
+posts oldest first, so they land in the order the work happened, and one failure
+doesn't abandon the rest. Each costs its own summary call, which is why the batch is
+opt-in rather than what a bare run does.
 
 **Only sessions inside your work folders are ever considered.** Everything else is not
 listed, not posted, and not touched — naming one explicitly is refused. It is the same

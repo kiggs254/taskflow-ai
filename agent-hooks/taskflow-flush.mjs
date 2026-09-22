@@ -8,6 +8,8 @@
  *
  * Usage:
  *   taskflow-flush.mjs              # the most recent session inside a work folder
+ *   taskflow-flush.mjs --today      # every work session from today
+ *   taskflow-flush.mjs --all        # every work session on disk
  *   taskflow-flush.mjs <sessionId>  # an explicit session (must be in a work folder)
  *   taskflow-flush.mjs --list       # work sessions on disk; -> marks the pick
  *
@@ -168,6 +170,23 @@ const workFolderOf = (log, workPaths) => {
   return null;
 };
 
+/** Post one session through the SessionEnd hook, keeping its log. */
+const flush = async (chosen) => {
+  console.log(
+    `Flushing ${chosen.sessionId} (${chosen.prompts} prompt(s), ${chosen.files.length} file(s)) ` +
+      `as ${chosen.folder.path}...`
+  );
+  const child = spawn(process.execPath, [HOOK, '--keep'], {
+    env: { ...process.env, CLAUDE_PROJECT_DIR: chosen.folder.path },
+    stdio: ['pipe', 'inherit', 'inherit'],
+  });
+  child.stdin.end(JSON.stringify({ session_id: chosen.sessionId, cwd: chosen.folder.path }));
+  const code = await new Promise((resolve) => child.on('close', resolve));
+  if (code !== 0) throw new Error(`The session-end hook exited ${code}.`);
+};
+
+const isToday = (ms) => new Date(ms).toDateString() === new Date().toDateString();
+
 const main = async () => {
   const arg = process.argv[2];
   const policy = await getPolicy();
@@ -205,6 +224,34 @@ const main = async () => {
     return;
   }
 
+  // Batch modes. One session becomes one task (the id is agent-{uid}-{session}-{day}),
+  // so several sessions in a day stay several entries rather than being merged into one
+  // vague line -- and each costs its own summary call, which is why this is opt-in
+  // rather than what a bare run does.
+  if (arg === '--today' || arg === '--all') {
+    const batch = arg === '--today' ? candidates.filter((c) => isToday(c.mtime)) : candidates;
+    if (!batch.length) {
+      console.log(arg === '--today' ? 'No work sessions recorded today.' : 'No work sessions recorded.');
+      return;
+    }
+    let posted = 0;
+    const failures = [];
+    // Sequential, oldest first: they land in the order the work happened, and a burst
+    // of parallel summary calls is exactly what got rate-limited before.
+    for (const c of [...batch].reverse()) {
+      try {
+        await flush(c);
+        posted++;
+      } catch (e) {
+        // One bad session must not abandon the rest -- its log is kept either way.
+        failures.push(`${c.sessionId}: ${e.message}`);
+      }
+    }
+    console.log(`\nPosted ${posted} of ${batch.length} session(s).`);
+    if (failures.length) console.error(`Failed:\n  ${failures.join('\n  ')}`);
+    return;
+  }
+
   let chosen = auto;
   if (arg) {
     chosen = candidates.find((c) => c.sessionId === arg) ?? null;
@@ -219,19 +266,7 @@ const main = async () => {
   }
   if (!chosen) die(`No sessions recorded inside ${workPaths.map((r) => r.path).join(', ')}.`);
 
-  console.log(
-    `Flushing ${chosen.sessionId} (${chosen.prompts} prompt(s), ${chosen.files.length} file(s)) ` +
-      `as ${chosen.folder.path}...`
-  );
-
-  const child = spawn(process.execPath, [HOOK, '--keep'], {
-    env: { ...process.env, CLAUDE_PROJECT_DIR: chosen.folder.path },
-    stdio: ['pipe', 'inherit', 'inherit'],
-  });
-  child.stdin.end(JSON.stringify({ session_id: chosen.sessionId, cwd: chosen.folder.path }));
-
-  const code = await new Promise((resolve) => child.on('close', resolve));
-  if (code !== 0) die(`The session-end hook exited ${code}.`);
+  await flush(chosen);
   // The hook is fire-and-forget by design and prints nothing on success, so say
   // something rather than leaving a silent exit looking like a no-op.
   console.log('Posted. It appears in TaskFlow as a completed task for today.');
