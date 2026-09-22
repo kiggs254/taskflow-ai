@@ -174,13 +174,20 @@ const main = async () => {
     // Couldn't establish the policy (backend down, no cache). Keep the log and try
     // again next time -- deleting it here would silently destroy the session on a
     // transient error, which is exactly how a real session was lost to a stale cache.
-    if (!policy) return;
+    if (!policy) {
+      if (KEEP_LOG) console.log(JSON.stringify({ logged: false, reason: 'policy_unavailable' }));
+      return;
+    }
 
     // THE PRIVACY GATE. Everything below this line only runs for work folders.
     const rule = policy.enabled === false ? null : matchWorkPath(projectDir, policy.workPaths || []);
     // A confident "not work": nothing should leave the machine, and the log shouldn't
     // linger either.
-    if (!rule) { handled = true; return; }
+    if (!rule) {
+      handled = true;
+      if (KEEP_LOG) console.log(JSON.stringify({ logged: false, reason: 'not_a_work_path_local' }));
+      return;
+    }
 
     let prompts = [];
     let changedPaths = [];
@@ -198,7 +205,11 @@ const main = async () => {
     }
 
     changedPaths = [...new Set(changedPaths)];
-    if (!prompts.length && !changedPaths.length) { handled = true; return; } // nothing happened
+    if (!prompts.length && !changedPaths.length) {
+      handled = true;
+      if (KEEP_LOG) console.log(JSON.stringify({ logged: false, reason: 'nothing_recorded' }));
+      return;
+    }
 
     // Real timestamps from the recorded entries, not "now" — the task's completedAt
     // should reflect when the work happened, matching how commit tasks use commit
@@ -213,7 +224,7 @@ const main = async () => {
       ? git(projectDir, ['log', '--since=midnight', '--format=%H']).split('\n').filter(Boolean)
       : [];
 
-    await api('/agent/log-work', {
+    const result = await api('/agent/log-work', {
       method: 'POST',
       body: JSON.stringify({
         sessionId,
@@ -232,6 +243,12 @@ const main = async () => {
     // Reached only if the POST resolved. A throw above leaves handled false, so the log
     // survives for the next session end to retry.
     handled = true;
+
+    // A manual run is someone asking a question, so answer it. The server always
+    // returns 200 -- "not a work path", "covered by github" and "logging disabled"
+    // are outcomes, not errors -- so a caller that only sees the exit code cannot
+    // tell a logged session from a silently discarded one.
+    if (KEEP_LOG) console.log(JSON.stringify(result));
   } finally {
     // Discard only what was actually handled. Anything else is kept and retried.
     // A --keep run posts a snapshot and leaves the log to keep accumulating.
@@ -256,4 +273,15 @@ const main = async () => {
   }
 };
 
-main().catch(() => {}).finally(() => process.exit(0));
+/**
+ * SessionEnd must never fail a session, so the automatic path swallows everything and
+ * exits 0. A manual run (--keep) is the opposite: silence there is how three sessions
+ * reported "posted" while the server had rejected every one of them.
+ */
+main()
+  .catch((error) => {
+    if (!KEEP_LOG) return;
+    console.error(String(error?.message || error));
+    process.exitCode = 1;
+  })
+  .finally(() => process.exit(KEEP_LOG ? (process.exitCode ?? 0) : 0));

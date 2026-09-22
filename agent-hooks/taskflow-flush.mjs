@@ -170,7 +170,43 @@ const workFolderOf = (log, workPaths) => {
   return null;
 };
 
-/** Post one session through the SessionEnd hook, keeping its log. */
+/**
+ * What the server did with a session, in words.
+ *
+ * Every one of these is a 200 -- they are outcomes, not errors -- which is exactly
+ * why they have to be surfaced. Reporting "posted" for all of them is how three
+ * sessions were reported as logged while nothing reached the app.
+ */
+const explain = (outcome) => {
+  if (!outcome) return 'no answer from the hook — it posted nothing';
+  if (outcome.logged) {
+    return `logged as "${outcome.summary ?? 'untitled'}"` +
+      (outcome.taskId ? ` (${outcome.taskId})` : '');
+  }
+  switch (outcome.reason) {
+    case 'agent_logging_disabled':
+      return 'REJECTED — Claude Code logging is switched off in TaskFlow → Settings';
+    case 'not_a_work_path':
+      return 'REJECTED — the server does not consider this folder a work folder';
+    case 'not_a_work_path_local':
+      return 'skipped — this folder is not on the local allowlist';
+    case 'covered_by_github':
+      return `skipped — the GitHub scanner already logs ${outcome.repo}`;
+    case 'nothing_recorded':
+      return 'skipped — the session recorded no prompts and no file edits';
+    case 'policy_unavailable':
+      return 'could not reach TaskFlow to check the work-folder policy';
+    default:
+      return `not logged (${outcome.reason ?? 'no reason given'})`;
+  }
+};
+
+/**
+ * Post one session through the SessionEnd hook, keeping its log.
+ *
+ * Returns the server's outcome. The exit code alone is not enough: the hook answers
+ * 200 for "not a work path" and "logging disabled" just as it does for success.
+ */
 const flush = async (chosen) => {
   console.log(
     `Flushing ${chosen.sessionId} (${chosen.prompts} prompt(s), ${chosen.files.length} file(s)) ` +
@@ -178,11 +214,22 @@ const flush = async (chosen) => {
   );
   const child = spawn(process.execPath, [HOOK, '--keep'], {
     env: { ...process.env, CLAUDE_PROJECT_DIR: chosen.folder.path },
-    stdio: ['pipe', 'inherit', 'inherit'],
+    stdio: ['pipe', 'pipe', 'inherit'],
   });
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
   child.stdin.end(JSON.stringify({ session_id: chosen.sessionId, cwd: chosen.folder.path }));
   const code = await new Promise((resolve) => child.on('close', resolve));
-  if (code !== 0) throw new Error(`The session-end hook exited ${code}.`);
+  if (code !== 0) throw new Error(`the session-end hook exited ${code}`);
+
+  let outcome = null;
+  try {
+    outcome = JSON.parse(out.trim().split('\n').filter(Boolean).pop());
+  } catch {
+    /* no parseable answer; explain() reports that */
+  }
+  console.log(`  ${explain(outcome)}`);
+  return outcome;
 };
 
 const isToday = (ms) => new Date(ms).toDateString() === new Date().toDateString();
@@ -234,21 +281,28 @@ const main = async () => {
       console.log(arg === '--today' ? 'No work sessions recorded today.' : 'No work sessions recorded.');
       return;
     }
-    let posted = 0;
-    const failures = [];
+    let logged = 0;
+    const problems = [];
     // Sequential, oldest first: they land in the order the work happened, and a burst
     // of parallel summary calls is exactly what got rate-limited before.
     for (const c of [...batch].reverse()) {
       try {
-        await flush(c);
-        posted++;
+        const outcome = await flush(c);
+        // Counts what the SERVER logged, not what this script managed to send. The
+        // two are not the same, and conflating them is what made a run that recorded
+        // nothing report complete success.
+        if (outcome?.logged) logged++;
+        else problems.push(`${c.sessionId}: ${explain(outcome)}`);
       } catch (e) {
         // One bad session must not abandon the rest -- its log is kept either way.
-        failures.push(`${c.sessionId}: ${e.message}`);
+        problems.push(`${c.sessionId}: ${e.message}`);
       }
     }
-    console.log(`\nPosted ${posted} of ${batch.length} session(s).`);
-    if (failures.length) console.error(`Failed:\n  ${failures.join('\n  ')}`);
+    console.log(`\nLogged ${logged} of ${batch.length} session(s).`);
+    if (problems.length) {
+      console.error(`\nNot logged:\n  ${problems.join('\n  ')}`);
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -266,10 +320,13 @@ const main = async () => {
   }
   if (!chosen) die(`No sessions recorded inside ${workPaths.map((r) => r.path).join(', ')}.`);
 
-  await flush(chosen);
-  // The hook is fire-and-forget by design and prints nothing on success, so say
-  // something rather than leaving a silent exit looking like a no-op.
-  console.log('Posted. It appears in TaskFlow as a completed task for today.');
+  const outcome = await flush(chosen);
+  if (outcome?.logged) {
+    console.log('\nIt appears in TaskFlow as a completed task for today.');
+  } else {
+    console.error('\nNothing was logged. The log is kept, so this can be retried.');
+    process.exitCode = 1;
+  }
 };
 
 main().catch((e) => die(e.message));

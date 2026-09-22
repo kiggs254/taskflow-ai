@@ -158,7 +158,10 @@ curl -s -X POST "$TASKFLOW_API_URL/agent/log-work" \
   -d '{"sessionId":"manual-test","projectDir":"'"$PWD"'","changedPaths":["'"$PWD"'/x.php"],"prompts":["testing taskflow"],"startedAt":'"$(date +%s000)"',"endedAt":'"$(date +%s000)"'}'
 ```
 
-Responses are always 200 — these are outcomes, not errors:
+Responses are always 200 — these are outcomes, not errors, and that is precisely why the
+flush prints the server's answer rather than its own exit code. `SessionEnd` ignores exit
+codes, so the hook swallows everything and exits 0 whatever happens; a caller that trusts
+that reports "posted" for a session the server refused outright:
 
 | `reason` | Meaning |
 |---|---|
