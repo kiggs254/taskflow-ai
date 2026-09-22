@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Inbox, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Inbox, Loader2, Plus, RefreshCw } from 'lucide-react';
 import { api } from '../services/apiService';
-import { EmailProposal } from '../types';
+import { EmailProposal, Task } from '../types';
+import { LogWorkModal } from './LogWorkModal';
 import { ProposalCard } from './ProposalCard';
 
 /**
@@ -21,6 +22,7 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
   const [proposalError, setProposalError] = useState<string | null>(null);
   const [doneError, setDoneError] = useState<string | null>(null);
   const [mailbox, setMailbox] = useState<any>(null);
+  const [logging, setLogging] = useState(false);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -67,6 +69,18 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
   };
 
   const doneItems = useMemo(() => done?.items ?? [], [done]);
+
+  /**
+   * Record work the scanners can't see.
+   *
+   * Reloads rather than pushing the task into local state: the panel renders `project`
+   * and `narrative`, which the server derives from the title. Faking them here would
+   * show something subtly different from what the report will actually post.
+   */
+  const logWork = useCallback(async (task: Task) => {
+    await api.syncTask(token, task);
+    await load();
+  }, [token, load]);
 
   return (
     <div className="max-w-2xl mx-auto space-y-8 pb-24">
@@ -155,7 +169,19 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
             ))}
           </div>
         )}
+
+        {/* Always offered, including when the list is empty -- a quiet day is exactly
+            when work done off-screen is the only thing there is to report. */}
+        <button
+          onClick={() => setLogging(true)}
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-white transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Log work done elsewhere
+        </button>
       </section>
+
+      <LogWorkModal isOpen={logging} onClose={() => setLogging(false)} onSave={logWork} />
     </div>
   );
 };

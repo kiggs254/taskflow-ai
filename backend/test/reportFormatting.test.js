@@ -145,3 +145,36 @@ test('a narrative with underscores is not wrapped in Slack italics markup', asyn
   assert.ok(body.includes('migrate_all.sql'), 'the filename survives intact');
   assert.ok(!/\n_/.test(body), 'the narrative line must not open with italics markup');
 });
+
+/**
+ * Manually logged work (LogWorkModal).
+ *
+ * The modal stores `${project} — ${outcome}` because that is the shape the report
+ * reads back: splitProjectTitle cuts on " — ", and narrateItem's no-subtasks path
+ * returns the outcome unchanged. That means what the user types is exactly what the
+ * channel reads -- no AI call, nothing invented. If this separator ever drifts, the
+ * project name silently becomes part of the sentence.
+ */
+test('a manually logged title splits into the project and the line beneath it', async () => {
+  // Lazily imported for the same reason as buildDailySummaryMessage above: reportService
+  // pulls in the AI/db chain at module load.
+  const { splitProjectTitle } = await import('../src/services/reportService.js');
+  const title = 'Hotpoint — Restored the staging database and reran the failed imports.';
+  const { project, outcome } = splitProjectTitle(title);
+  assert.equal(project, 'Hotpoint');
+  assert.equal(outcome, 'Restored the staging database and reran the failed imports.');
+});
+
+test('a manual entry with no project keeps its whole sentence', async () => {
+  const { splitProjectTitle } = await import('../src/services/reportService.js');
+  const { project, outcome } = splitProjectTitle('Walked the client through the new checkout flow.');
+  assert.equal(project, 'Walked the client through the new checkout flow.');
+  assert.equal(outcome, '', 'no separator means nothing to split, not a truncated line');
+});
+
+test('an em dash inside the outcome does not re-split the title', async () => {
+  const { splitProjectTitle } = await import('../src/services/reportService.js');
+  const { project, outcome } = splitProjectTitle('Enkor — Fixed the import — twice.');
+  assert.equal(project, 'Enkor', 'only the FIRST separator divides project from outcome');
+  assert.equal(outcome, 'Fixed the import — twice.');
+});
