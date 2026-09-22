@@ -175,31 +175,154 @@ const SUMMARY_SCHEMA = {
   schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['project', 'summary', 'items'],
+    // Key order is generation order, so `deliverable` and `site` are DECIDED before the
+    // heading is written rather than rationalised after it. Asking for the heading first
+    // is what produced "WhatsApp button on product pages" for a session that shipped a
+    // plugin to a named client.
+    required: ['deliverable', 'site', 'project', 'summary', 'items'],
     properties: {
+      deliverable: {
+        type: 'string',
+        description:
+          'The artifact type: WHAT was handed over, as a 1-3 word lowercase noun phrase. ' +
+          'E.g. "WooCommerce plugin", "theme template", "search configuration", ' +
+          '"deploy script", "API integration", "bug fix", "investigation". Name the thing, ' +
+          'not the activity around it. If the session only diagnosed or reviewed something ' +
+          'and produced no artifact, say "investigation" -- that is an honest answer, and ' +
+          'inventing a built artifact is not.',
+      },
+      site: {
+        type: 'string',
+        description:
+          'The site or system this work was FOR, copied EXACTLY from the "Sites mentioned" ' +
+          'list in the user message. That list is the only permitted source. Use "" when it ' +
+          'is empty, when the work was internal tooling with no client system, or when ' +
+          'several hosts are listed and you cannot tell which the work was for. Never type ' +
+          'a hostname that is not on that list, never derive one from the folder name, and ' +
+          'never a placeholder like "client site".',
+      },
       project: {
         type: 'string',
         description:
-          'A short 2-5 word name for WHAT was worked on -- a feature or project handle, ' +
-          'inferred from the work itself, e.g. "WooCommerce webhook auto-reenabler" or ' +
-          '"Mogo category filtering". Title case, no trailing punctuation. This is the ' +
-          'headline; do NOT use the folder name.',
+          'The standup heading: WHAT was built and WHOSE system it is on. With a `site`, ' +
+          'write "<deliverable-led handle> for <site>" -- e.g. "WhatsApp enquiry plugin for ' +
+          'silverstone.co.ke", "Fuzzy search configuration for perfumeuae.com". With no ' +
+          'site, give the handle alone -- e.g. "WooCommerce webhook auto-reenabler". Lead ' +
+          'with the deliverable, not the feature it touches: "WhatsApp enquiry plugin", not ' +
+          '"WhatsApp button on product pages". 3-8 words, sentence case, hostname left ' +
+          'lowercase exactly as given, no trailing punctuation. Never the folder name, and ' +
+          'it must NOT contain " — " (space, em dash, space).',
       },
       summary: {
         type: 'string',
         description:
-          'One past-tense line, max 70 chars, naming the outcome. Describe what the ' +
-          'work achieved, not how many files moved.',
+          'One past-tense line, max 70 chars, naming the OUTCOME -- what now works, or is ' +
+          'now known, that was not before. The heading already carries the deliverable and ' +
+          'the site, so do not repeat either here; spend the line on the result. Never a ' +
+          'file count, never how many things moved.',
       },
       items: {
         type: 'array',
         items: { type: 'string' },
         description:
-          'The distinct things done, 1-6 of them, each a short past-tense phrase. ' +
-          'These are read as standup bullets, so make each one stand alone.',
+          'The distinct things done, 1-6 of them, each a short past-tense phrase that ' +
+          'stands alone as a standup bullet. These are the sub-deliverables and the ' +
+          'findings -- the parts built, the constraints applied, the things checked or ' +
+          'ruled out -- not a restatement of `summary` in other words. A diagnostic step ' +
+          'is a real item ("Confirmed the installed plugin does no fuzzy matching"). Never ' +
+          'a file count, never "various changes", never the folder name.',
       },
     },
   },
+};
+
+/**
+ * Hostnames the user actually mentioned, in the order they first appear.
+ *
+ * Extracted deterministically rather than left to the model: the site is usually one
+ * URL buried inside a 500-char prompt (the recorder truncates each one), next to a
+ * paste of PHP, and asking a summariser to notice it there is exactly the kind of
+ * thing that works until it doesn't. Both real sessions that prompted this named
+ * their site -- perfumeuae.com and silverstone.co.ke -- and both summaries omitted it,
+ * which for someone running twenty client systems is the one fact that makes the entry
+ * legible.
+ *
+ * Bare domains count ("check perfumeuae.com"), because that is how people write. The
+ * TLD must be alphabetic and 2+ chars so version numbers and filenames don't match:
+ * "wp-config.php", "v2.3.1" and "index.js" are not sites.
+ */
+export const sitesInPrompts = (prompts = []) => {
+  // Anything that looks like host.tld, optionally preceded by a scheme and www.
+  const HOST = /\b(?:https?:\/\/)?(?:www\.)?((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})\b/gi;
+  // File extensions that would otherwise read as a TLD.
+  const NOT_A_TLD = new Set([
+    'php', 'js', 'jsx', 'ts', 'tsx', 'json', 'css', 'scss', 'html', 'htm', 'xml', 'yml',
+    'yaml', 'md', 'txt', 'log', 'sql', 'sh', 'py', 'rb', 'go', 'lock', 'env', 'zip',
+    'png', 'jpg', 'jpeg', 'svg', 'gif', 'pdf', 'csv', 'map', 'min', 'test', 'spec',
+  ]);
+
+  const seen = new Map(); // lowercased host -> first-seen spelling
+  for (const prompt of prompts) {
+    for (const m of String(prompt ?? '').matchAll(HOST)) {
+      const host = m[1];
+      const tld = host.slice(host.lastIndexOf('.') + 1).toLowerCase();
+      if (NOT_A_TLD.has(tld)) continue;
+      // Lowercased so "Silverstone.co.ke" and "silverstone.co.ke" are one site.
+      const key = host.toLowerCase();
+      if (!seen.has(key)) seen.set(key, key);
+    }
+  }
+  // Cap it: a prompt that pastes a page of links should not flood the context.
+  return [...seen.values()].slice(0, 5);
+};
+
+/**
+ * Build the standup heading, refusing any client name the model wasn't given.
+ *
+ * The model is asked for `site`, but asked is not the same as verified, and this
+ * heading is the most load-bearing string in the report: it tells a manager whose
+ * system was worked on. A hallucinated client there is worse than no client at all,
+ * so a hostname that isn't in the grounded list is stripped out rather than trusted --
+ * from the `site` field and from the heading text, which the model writes freely.
+ *
+ * Also guarantees the heading contains no " — ": reportService.splitProjectTitle cuts
+ * the stored title on the FIRST one, so a heading containing the separator would swallow
+ * the summary and leave the narrative empty.
+ *
+ * Exported for testing -- this is the invention guard, and it should never be a
+ * question whether it holds.
+ */
+export const composeProjectLabel = (rawProject, rawSite, groundedSites = [], fallback = 'work') => {
+  const grounded = new Map(groundedSites.map((h) => [String(h).toLowerCase(), String(h)]));
+
+  const claimed = String(rawSite ?? '').trim().toLowerCase().replace(/^www\./, '').replace(/\/+$/, '');
+  const site = grounded.has(claimed) ? grounded.get(claimed) : '';
+
+  let project = String(rawProject ?? '').trim();
+  // The separator would split the title in the wrong place.
+  project = project.replace(/\s*—\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+
+  // Any hostname the model wrote into the heading that it was never given.
+  for (const host of sitesInPrompts([project])) {
+    if (grounded.has(host.toLowerCase())) continue;
+    project = project
+      .replace(new RegExp(`\\s*\\bfor\\s+${host.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}\\b`, 'ig'), '')
+      .replace(new RegExp(`\\b${host.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}\\b`, 'ig'), '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  if (!project) project = fallback;
+
+  // Cap the handle, not the site: truncating "…plugin for silverstone.co…" loses the
+  // one part of the heading that identifies the client.
+  if (site && !project.toLowerCase().includes(site.toLowerCase())) {
+    project = `${truncateAtWord(project, 48)} for ${site}`;
+  } else {
+    project = truncateAtWord(project, 70);
+  }
+
+  return project;
 };
 
 // Fallback project label from the folder, only used when the AI is unavailable.
@@ -207,8 +330,11 @@ const SUMMARY_SCHEMA = {
 // show a raw slug.
 const labelFromSlug = (slug) => String(slug || 'work').replace(/[-_]+/g, ' ').trim() || 'work';
 
-const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
+const summariseSession = async (userId, projectSlug, prompts, changedPaths, commands = []) => {
   const fileCount = changedPaths.length;
+  // Whose system this was for. Grounded, so the model is told the answer rather than
+  // asked to find it.
+  const sites = sitesInPrompts(prompts);
   // The label the title leads with. Prefer what the AI infers from the work; fall back
   // to the de-slugged folder name, never the raw slug.
   const folderLabel = labelFromSlug(projectSlug);
@@ -221,7 +347,7 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
     items: [],
   };
 
-  if (!prompts.length && !fileCount) return fallback;
+  if (!prompts.length && !fileCount && !commands.length) return fallback;
 
   try {
     const { content } = await callAI({
@@ -235,18 +361,37 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
         {
           role: 'system',
           content:
-            'You turn one coding session into a standup entry: a short project name, a ' +
-            'headline, and the distinct things that were done.\n\n' +
+            'You turn one coding session into a standup entry for a solo developer who ' +
+            'builds and maintains systems for MANY different clients. The reader knows those ' +
+            'clients by their sites, not by folder names, and the first question they ask of ' +
+            'any entry is "what got built, and whose system is it on?"\n\n' +
+            'Answer that in the heading. Lead with the DELIVERABLE and name the client ' +
+            'system: "WhatsApp enquiry plugin for silverstone.co.ke", not "WhatsApp button ' +
+            'on product pages". The narrative underneath is where what-changed goes; the ' +
+            'heading is where what-and-for-whom goes.\n\n' +
             'The requests are the source of truth for WHAT was wanted and WHY — lead with ' +
-            'that outcome, in the requester\'s terms. The file paths only corroborate where ' +
-            'it landed; they are not the story.\n\n' +
-            'Name the `project` for what was actually built (e.g. "WooCommerce webhook ' +
-            'auto-reenabler"), inferred from the work — NOT the containing folder, which is ' +
-            'often a catch-all and means nothing.\n\n' +
+            'that outcome, in the requester\'s terms. File paths only corroborate where it ' +
+            'landed; they are not the story, and a session with NO files at all is normal ' +
+            'and is still real work — shell commands, server configuration, code pasted into ' +
+            'a live site. Never treat an empty file list as an empty session; the commands ' +
+            'are often the only record of what was actually built.\n\n' +
+            'GROUNDING — THE SITE. The user message carries a "Sites mentioned" list, ' +
+            'extracted verbatim from the requests before you saw them. That list is the ONLY ' +
+            'permitted source for `site`: copy one entry exactly, or leave it empty. If the ' +
+            'list is empty, `site` is "" and the heading is the deliverable alone — a ' +
+            'correct, complete answer, not a gap to fill. If several hosts are listed and ' +
+            'the requests do not make clear which the work was for, leave it empty rather ' +
+            'than picking. Never invent a client, never write "client site", never derive ' +
+            'one from the folder name. An unnamed system stays unnamed: this feeds a report ' +
+            'a manager checks against real records, and a wrong client name is worse than a ' +
+            'missing one.\n\n' +
+            'Fill `deliverable` first — the thing handed over. Then `site`. Then build ' +
+            '`project` from the two.\n\n' +
             'A request like "the client needs submissions saved in the admin so they can be ' +
-            'viewed and exported" should read as "admin view and export for form submissions" ' +
-            '— with the storage, the view and the export as separate items. Never "updated 4 ' +
-            'files", never "various changes", never a file count.\n\n' +
+            'viewed and exported", on a session whose sites list holds acme.co.ke, should ' +
+            'read as "Form submissions admin for acme.co.ke" — with the storage, the view ' +
+            'and the export as three separate items. Never "updated 4 files", never ' +
+            '"various changes", never a file count, never the containing folder.\n\n' +
             'Write for someone who did not see the session. If the requests are too vague to ' +
             'tell, describe the files plainly rather than inventing work. Return json.',
         },
@@ -256,11 +401,28 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
             // The folder is a weak hint only, and explicitly labelled as such so the model
             // doesn't echo it back as the project name -- that's the whole bug being fixed.
             `Folder (a hint only, may be a catch-all — do not use as the name): ${projectSlug}\n\n` +
+            // Extracted with a regex rather than left to the model to spot: the site is
+            // usually one URL buried in a 500-char prompt beside a paste of code. Stated
+            // first because it is the single most identifying fact in the entry.
+            `Sites mentioned (extracted from the requests; the ONLY hostnames you may use ` +
+            `for \`site\`):\n${
+              sites.length
+                ? sites.map((h) => `- ${h}`).join('\n')
+                : '(none found — leave `site` empty and give the deliverable alone)'
+            }\n\n` +
             `What was requested (most important):\n${
               prompts.slice(0, 12).map((p) => `- ${p}`).join('\n') || '(none captured)'
             }\n\n` +
             `Files touched (supporting evidence only):\n${
               changedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n') || '(none)'
+            }\n\n` +
+            // Often the ONLY record of what was actually built: a plugin written with a
+            // heredoc, a plugin activated, a deploy. Credentials are stripped on the
+            // machine before these are sent, so [redacted] here is expected and means
+            // nothing was leaked -- read around it rather than describing it.
+            `Commands run (evidence of what was actually built — secrets already ` +
+            `stripped, ignore any "[redacted]"):\n${
+              commands.slice(0, 40).map((c) => `- ${c}`).join('\n') || '(none)'
             }`,
         },
       ],
@@ -288,12 +450,10 @@ const summariseSession = async (userId, projectSlug, prompts, changedPaths) => {
           .slice(0, 6)
       : [];
 
-    // The project label comes from the work, not the folder. Fall back to the
+    // The project label comes from the work, not the folder -- and any client name in
+    // it is checked against what was actually in the requests. Falls back to the
     // de-slugged folder only if the model didn't provide one.
-    const project =
-      typeof parsed?.project === 'string' && parsed.project.trim()
-        ? truncateAtWord(parsed.project.trim(), 60)
-        : folderLabel;
+    const project = composeProjectLabel(parsed?.project, parsed?.site, sites, folderLabel);
 
     // truncateAtWord, not slice: a hard cut produced "…added showroom s", which reads
     // as a bug rather than an abbreviation.
@@ -483,6 +643,7 @@ export const logWork = async (userId, payload) => {
     commitShas = [],
     changedPaths = [],
     prompts = [],
+    commands = [],
     startedAt,
     endedAt,
     timezone,
@@ -528,7 +689,13 @@ export const logWork = async (userId, payload) => {
   const started = Number(startedAt) || ended;
   const projectSlug = slugify(root);
 
-  const { summary, items } = await summariseSession(userId, projectSlug, prompts, uncoveredPaths);
+  const { summary, items } = await summariseSession(
+    userId,
+    projectSlug,
+    prompts,
+    uncoveredPaths,
+    commands
+  );
 
   const day = localDateString(tz, ended);
 
@@ -543,13 +710,14 @@ export const logWork = async (userId, payload) => {
   await query(
     `INSERT INTO agent_sessions (
        user_id, session_id, day, project_slug, project_path, workspace, summary,
-       items, prompts, changed_paths, started_at, ended_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       items, prompts, changed_paths, started_at, ended_at, commands
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      ON CONFLICT (user_id, session_id, day) DO UPDATE SET
        summary = EXCLUDED.summary,
        items = EXCLUDED.items,
        prompts = EXCLUDED.prompts,
        changed_paths = EXCLUDED.changed_paths,
+       commands = EXCLUDED.commands,
        ended_at = EXCLUDED.ended_at`,
     [
       userId,
@@ -564,6 +732,7 @@ export const logWork = async (userId, payload) => {
       JSON.stringify(uncoveredPaths.slice(0, 200)),
       started,
       ended,
+      JSON.stringify(commands.slice(0, 200)),
     ]
   );
 

@@ -53,7 +53,8 @@ cp agent-hooks/taskflow-*.mjs ~/.claude/hooks/
 chmod +x ~/.claude/hooks/taskflow-*.mjs
 ```
 
-**4. Register them** in `~/.claude/settings.json`:
+**4. Register them** in `~/.claude/settings.json` (note the `Bash` in the matcher — see
+"What is recorded" below):
 
 ```json
 {
@@ -63,7 +64,7 @@ chmod +x ~/.claude/hooks/taskflow-*.mjs
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|Write|Bash",
         "hooks": [{ "type": "command", "command": "~/.claude/hooks/taskflow-record.mjs" }]
       }
     ],
@@ -80,7 +81,7 @@ chmod +x ~/.claude/hooks/taskflow-*.mjs
 
 | Hook | When | What |
 |---|---|---|
-| `taskflow-record.mjs` | every prompt, every Edit/Write | Appends to `~/.taskflow/sessions/<id>.jsonl` |
+| `taskflow-record.mjs` | every prompt, every Edit/Write, every Bash command | Appends to `~/.taskflow/sessions/<id>.jsonl` |
 | `taskflow-session-end.mjs` | session ends | Checks the folder, posts if it's work, deletes the log |
 | `taskflow-flush.mjs` | you run it | Posts a snapshot mid-session, **keeps** the log |
 
@@ -169,10 +170,36 @@ that reports "posted" for a session the server refused outright:
 | `covered_by_github` | You committed to a tracked repo; GitHub logs it instead. |
 | `agent_logging_disabled` | Toggled off in Settings. |
 
+## What is recorded, and what is stripped
+
+Three kinds of entry: the prompts you type, the paths of files opened with Edit/Write,
+and the shell commands that ran.
+
+Shell commands are included because **most work never touches Edit/Write** — a plugin
+written with a heredoc, a WP-CLI call, a deploy. Two real sessions here each shipped a
+plugin and recorded *zero* files, so their summaries could only describe what was asked
+for, never what was built.
+
+Every command passes through `redact()` in `taskflow-record.mjs` **before it is written
+to disk**, so a credential is never persisted locally either, let alone sent. It strips
+`KEY=`/`--password`/`-p<value>` style assignments and flags, `Authorization:` headers,
+credentials inside URLs (`postgres://user:pass@host`), known key prefixes (`sk-`, `ghp_`,
+`AKIA…`, `cfat_`, `tf_`, JWTs), PEM blocks, and any bare 32-char-plus high-entropy blob.
+Writing to a `.env` file records only that it happened.
+
+It is deliberately over-eager: a redacted flag costs a slightly vaguer summary, a missed
+key is a leaked credential. It cannot be complete — a secret in a shape it does not
+anticipate will pass through — which is why the work-folder allowlist still gates
+everything. Commands from folders you have not listed are never recorded at all.
+
+`backend/test/redactCommand.test.js` runs against this file's own text, so an installed
+copy that drifts from the tested one is caught.
+
 ## Privacy
 
 - The folder check runs locally against a cached policy (`~/.taskflow/policy.json`,
   refreshed hourly). Non-work sessions make **no request at all**.
 - Prompts for work sessions go to your own TaskFlow backend and nowhere else.
 - The local log is deleted at session end either way.
+- Shell commands are redacted before they touch the disk — see "What is recorded" above.
 - The token is scoped to `/api/agent` only, stored hashed, and revocable.

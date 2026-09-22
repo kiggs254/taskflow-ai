@@ -307,19 +307,22 @@ const narrateItem = async (userId, item, { refresh = false } = {}) => {
           role: 'system',
           content:
             'You write one short daily-standup paragraph for a single project. Given ' +
-            'the commits made in one work session, tell the story of what was ' +
+            'the things done in one work session — commits, or the steps of a Claude Code ' +
+            'session — tell the story of what was ' +
             'accomplished and why it matters, in one or two plain past-tense sentences ' +
-            'a teammate who does not read code can follow. Group related commits into ' +
-            'the same thread of work. Do not list the commits, do not keep prefixes ' +
+            'a teammate who does not read code can follow. Group related work into ' +
+            'the same thread. Do not list the individual entries, do not keep prefixes ' +
             'like feat()/fix()/chore(), no bullet points, no markdown, no file names. ' +
             'Write in impersonal past tense: lead each clause with the verb and no ' +
             'subject pronoun — "Added the CSV export…", "Fixed the crash…". Never use ' +
             '"we" or "I" (a repeated "I …, I …" reads badly), and never a passive ' +
-            '"was done". Keep it short. Return json.',
+            '"was done". The project line above may name the client site the work was ' +
+            'for; do not repeat that hostname in the narrative — the heading already says ' +
+            'whose system this is. Keep it short. Return json.',
         },
         {
           role: 'user',
-          content: `Project: ${project}\n\nCommits in this session:\n${lines
+          content: `Project: ${project}\n\nWhat was done in this session:\n${lines
             .map((l) => `- ${l}`)
             .join('\n')}`,
         },

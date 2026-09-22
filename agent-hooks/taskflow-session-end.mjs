@@ -191,6 +191,7 @@ const main = async () => {
 
     let prompts = [];
     let changedPaths = [];
+    let commands = [];
     const times = [];
     try {
       const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean);
@@ -199,13 +200,16 @@ const main = async () => {
         if (Number.isFinite(e.at)) times.push(e.at);
         if (e.t === 'prompt') prompts.push(e.v);
         else if (e.t === 'file') changedPaths.push(e.v);
+        // Already redacted by taskflow-record.mjs, before it ever touched the disk.
+        else if (e.t === 'cmd') commands.push(e.v);
       }
     } catch {
       /* no log: a session that changed nothing */
     }
 
     changedPaths = [...new Set(changedPaths)];
-    if (!prompts.length && !changedPaths.length) {
+    commands = [...new Set(commands)];
+    if (!prompts.length && !changedPaths.length && !commands.length) {
       handled = true;
       if (KEEP_LOG) console.log(JSON.stringify({ logged: false, reason: 'nothing_recorded' }));
       return;
@@ -234,6 +238,7 @@ const main = async () => {
         commitShas,
         changedPaths,
         prompts,
+        commands,
         startedAt,
         endedAt,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
