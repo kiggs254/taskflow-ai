@@ -46,18 +46,40 @@ const canonical = (p) => {
   }
 };
 
-/** Project root, so the work-path allowlist is matched against the repo, not a subdir. */
-const projectRoot = () => {
+/** Project root for a directory: the repo it belongs to, else the directory itself. */
+const rootOf = (dir) => {
   try {
     return canonical(
       execFileSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: dir,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
       }).trim()
     );
   } catch {
-    return canonical(process.cwd());
+    return canonical(dir);
   }
+};
+
+/**
+ * Where a session's work actually happened, from the files it edited.
+ *
+ * Not the current directory. The allowlist is matched against this, and flushing a
+ * backlog session by id from wherever you happen to be standing would judge it against
+ * the wrong project -- posting it under the wrong workspace at best, and silently
+ * dropping it as "not a work path" at worst. The session's own files are the only
+ * honest answer. Falls back to `fallback` for a session that edited nothing.
+ */
+const sessionRoot = (log, fallback) => {
+  if (!log.files.length) return fallback;
+  const roots = new Map();
+  for (const f of log.files) {
+    const r = rootOf(path.dirname(canonical(f)));
+    roots.set(r, (roots.get(r) || 0) + 1);
+  }
+  // Most-edited root wins: a session that strayed into one file elsewhere still
+  // belongs to the project it spent its time in.
+  return [...roots.entries()].sort((a, b) => b[1] - a[1])[0][0];
 };
 
 const logs = () => {
@@ -110,12 +132,12 @@ const pick = (all, root) => {
 
 const main = async () => {
   const arg = process.argv[2];
-  const root = projectRoot();
+  const cwdRoot = rootOf(process.cwd());
   const all = logs();
 
   if (arg === '--list') {
     if (!all.length) return console.log('No session logs in', SESSIONS);
-    const chosen = pick(all, root);
+    const chosen = pick(all, cwdRoot);
     for (const l of all) {
       const mark = chosen && l.sessionId === chosen.sessionId ? '->' : '  ';
       console.log(
@@ -128,19 +150,28 @@ const main = async () => {
 
   if (!all.length) die(`No session logs in ${SESSIONS} — nothing recorded yet.`);
 
-  const chosen = arg ? all.find((l) => l.sessionId === arg) : pick(all, root);
+  const chosen = arg ? all.find((l) => l.sessionId === arg) : pick(all, cwdRoot);
   if (arg && !chosen) die(`No log for session ${arg}. Try --list.`);
   if (!chosen) {
     die(
-      `No session has edited a file under ${root}.\n` +
+      `No session has edited a file under ${cwdRoot}.\n` +
         `Run this from the project you are working in, or name the session explicitly ` +
         `(taskflow-flush.mjs --list).`
     );
   }
 
+  const root = sessionRoot(chosen, cwdRoot);
+  if (!chosen.files.length) {
+    console.warn(
+      `${chosen.sessionId} recorded no file edits, so its project is being taken as ` +
+        `${root}. Only Edit/Write are recorded — work done through shell commands ` +
+        `leaves prompts but no paths.`
+    );
+  }
+
   console.log(
     `Flushing ${chosen.sessionId} (${chosen.prompts} prompt(s), ${chosen.files.length} file(s)) ` +
-      `from ${root}...`
+      `as ${root}...`
   );
 
   const child = spawn(process.execPath, [HOOK, '--keep'], {

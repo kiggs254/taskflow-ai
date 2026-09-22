@@ -115,6 +115,11 @@ It picks by **which session has edited a file under this directory**, not by whi
 is newest — with several sessions open at once, newest-wins reliably picks whichever
 window you were last typing in, which is usually the wrong project.
 
+The project a session is posted under comes from the files that session edited, not
+from where you run the command. That is what makes clearing a backlog work: an old
+session can be flushed by id from anywhere, and it is still matched against its own
+project's allowlist rather than whichever directory you happened to be standing in.
+
 It runs `taskflow-session-end.mjs --keep`. The `--keep` is load-bearing: `agent_sessions`
 upserts on `(user_id, session_id, day)` and **replaces** the row's prompts, summary and
 changed paths. A flush that consumed the log would leave the eventual session-end post
