@@ -183,6 +183,26 @@ export const rewriteReply = async (
   { subject, from, summary, currentDraft, notes, instructions, userName }
 ) => {
   const hasNotes = Boolean(notes && notes.trim());
+  const hasDraft = Boolean(currentDraft && currentDraft.trim());
+
+  // A tone ("Firmer") or an instruction is a directive about WORDING. With neither notes
+  // nor a draft there is nothing to reword -- and because the schema requires a complete
+  // reply body, the model would invent an entire message to a client out of a one-line
+  // summary, then drop it into the editor under copy promising it kept what the user
+  // wrote. Refusing is the only honest answer. The callers guard this too; this is the
+  // backstop that makes the state unreachable rather than merely unlikely.
+  if (!hasNotes && !hasDraft) {
+    console.warn('Reply rewrite refused: no notes and no draft to work from.');
+    return null;
+  }
+
+  // When the user has replaced the draft, their text arrives as the notes and the thing
+  // they rejected is the stored draft -- never the same string. Showing their own words
+  // back to the model labelled "the user was not happy with this", directly above
+  // "follow these exactly", is standing licence to change the content rather than the
+  // wording: the one failure this whole feature is built to prevent.
+  const rejectedDraft =
+    hasDraft && (!hasNotes || currentDraft.trim() !== notes.trim()) ? currentDraft.trim() : '';
 
   try {
     const { content } = await callAI({
@@ -218,14 +238,15 @@ export const rewriteReply = async (
             `The email being replied to:\nSubject: ${subject || '(none)'}\n` +
             `From: ${from || '(unknown)'}\n` +
             `What it is about: ${summary || '(not summarised)'}\n\n` +
-            (currentDraft?.trim()
-              ? `The current draft (the user was not happy with this):\n${currentDraft.trim()}\n\n`
+            (rejectedDraft
+              ? `The current draft (the user was not happy with this):\n${rejectedDraft}\n\n`
               : '') +
             (hasNotes
               ? `What the user actually wants to say — these are their instructions for ` +
                 `content, follow them exactly:\n${notes.trim()}\n\n`
               : `The user gave no new content. Rewrite the draft above to read better ` +
-                `without changing what it commits to.\n\n`) +
+                `without changing what it commits to. Do not add anything it does not ` +
+                `already say.\n\n`) +
             (instructions?.trim() ? `How they want it written: ${instructions.trim()}\n\n` : '') +
             `Sign off as: ${userName || '(no name given — omit the name)'}`,
         },

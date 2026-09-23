@@ -79,12 +79,20 @@ router.post('/:id/rewrite', asyncHandler(async (req, res) => {
 
   const notes = typeof req.body?.notes === 'string' ? req.body.notes : '';
   const instructions = typeof req.body?.instructions === 'string' ? req.body.instructions : '';
-  // The editor's live text, which may differ from the stored draft.
-  const currentDraft =
-    typeof req.body?.currentDraft === 'string' ? req.body.currentDraft : proposal.draftReply;
+  // The editor's live text when it sent one, including a deliberately emptied editor --
+  // `??` rather than a truthiness check, so an empty string is respected as "the editor
+  // is empty" instead of silently resurrecting the stored draft the user just cleared.
+  const sent = typeof req.body?.currentDraft === 'string' ? req.body.currentDraft : null;
+  const currentDraft = sent !== null ? sent : proposal.draftReply || '';
 
-  if (!notes.trim() && !instructions.trim() && !currentDraft?.trim()) {
-    return res.status(400).json({ error: 'Nothing to rewrite — add a note or some text first.' });
+  // Instructions alone are NOT enough. A tone chip always supplies one, so including it
+  // in this guard let an empty editor through: the model then had only the subject and a
+  // one-line summary, and the schema demands a complete reply, so it invented a whole
+  // message to a client -- which then enabled Send.
+  if (!notes.trim() && !currentDraft.trim()) {
+    return res.status(400).json({
+      error: 'Nothing to rewrite — write a note or some text first. A tone on its own has nothing to work from.',
+    });
   }
 
   const userResult = await query('SELECT username FROM users WHERE id = $1', [req.user.id]);

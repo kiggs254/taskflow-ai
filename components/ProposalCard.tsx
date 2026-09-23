@@ -62,8 +62,12 @@ export const ProposalCard: React.FC<Props> = ({ proposal, token, onSend, onDismi
   const rewrite = async (instruction?: string) => {
     const edited = draft.trim() !== original.trim();
     const steer = instruction ?? instructions;
-    if (!draft.trim() && !steer.trim()) {
-      setRewriteError('Write a note first, or say how to change it.');
+    // A tone is a directive about WORDING, not content. This used to allow a rewrite
+    // when EITHER the editor or the instruction had text -- and a tone chip always
+    // supplies an instruction, so an empty editor sailed through and the model invented
+    // a whole reply to a client from the one-line summary, which then enabled Send.
+    if (!draft.trim()) {
+      setRewriteError('Write something first — a rough note is enough. A tone on its own has nothing to work from.');
       return;
     }
 
@@ -72,7 +76,12 @@ export const ProposalCard: React.FC<Props> = ({ proposal, token, onSend, onDismi
     try {
       const r = await api.proposals.rewrite(token, proposal.id, {
         notes: edited ? draft : '',
-        currentDraft: draft,
+        // Only sent when the editor still holds the AI's draft. Once the user has
+        // replaced it, their text IS the notes, and the draft they rejected is the
+        // stored one -- sending their own words back as "the current draft (the user was
+        // not happy with this)" directly above "follow these exactly" told the model to
+        // change the very content it was supposed to preserve.
+        ...(edited ? {} : { currentDraft: draft }),
         instructions: steer,
       });
       if (r?.ok === false || !r?.draft) {
