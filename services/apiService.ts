@@ -410,6 +410,25 @@ export const api = {
       if (!res.ok) throw new Error('Failed to save the draft');
       return res.json();
     },
+    /**
+     * Rewrite the reply from the user's own notes. Returns { ok:false, error } rather
+     * than throwing, because their text is still in the editor either way — a failed
+     * rewrite is a declined request, not a lost draft.
+     */
+    rewrite: async (
+      token: string,
+      id: number,
+      body: { notes?: string; instructions?: string; currentDraft?: string }
+    ) => {
+      const res = await fetch(`${API_BASE}/proposals/${id}/rewrite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data?.error || `Rewrite failed (${res.status})` };
+      return data;
+    },
     /** The only call that sends mail. Always user-initiated. */
     send: async (token: string, id: number, draftReply?: string) => {
       const res = await fetch(`${API_BASE}/proposals/${id}/send`, {

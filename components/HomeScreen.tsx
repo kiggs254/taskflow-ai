@@ -198,7 +198,7 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
         ) : (
           <div className="space-y-3">
             {proposals.map((p) => (
-              <ProposalCard key={p.id} proposal={p} onSend={send} onDismiss={dismiss} />
+              <ProposalCard key={p.id} proposal={p} token={token} onSend={send} onDismiss={dismiss} />
             ))}
           </div>
         )}

@@ -9,6 +9,8 @@ import {
   countPending,
 } from '../services/proposalService.js';
 import { sendThreadReply } from '../services/gmailService.js';
+import { rewriteReply } from '../services/emailTriage.js';
+import { query } from '../config/database.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -57,6 +59,53 @@ router.post('/:id/send', asyncHandler(async (req, res) => {
   await updateDraft(req.user.id, id, body);
   await setProposalStatus(req.user.id, id, 'sent');
   res.json({ sent: true, id });
+}));
+
+/**
+ * POST /api/proposals/:id/rewrite
+ * Body: { notes?, instructions?, currentDraft? } -> { draft }
+ *
+ * Turn the user's own rough notes into the reply, with the thread as context. Writes
+ * nothing: the result goes back to the editor for them to accept, edit again, or throw
+ * away. Persisting it would overwrite a draft they may prefer, and there is no undo on
+ * a server-side overwrite.
+ *
+ * Thread context comes from the stored proposal rather than the request body -- it is
+ * what makes the reply answer the actual question instead of being generically polite.
+ */
+router.post('/:id/rewrite', asyncHandler(async (req, res) => {
+  const proposal = await getProposal(req.user.id, Number(req.params.id));
+  if (!proposal) return res.status(404).json({ error: 'Proposal not found' });
+
+  const notes = typeof req.body?.notes === 'string' ? req.body.notes : '';
+  const instructions = typeof req.body?.instructions === 'string' ? req.body.instructions : '';
+  // The editor's live text, which may differ from the stored draft.
+  const currentDraft =
+    typeof req.body?.currentDraft === 'string' ? req.body.currentDraft : proposal.draftReply;
+
+  if (!notes.trim() && !instructions.trim() && !currentDraft?.trim()) {
+    return res.status(400).json({ error: 'Nothing to rewrite — add a note or some text first.' });
+  }
+
+  const userResult = await query('SELECT username FROM users WHERE id = $1', [req.user.id]);
+
+  const draft = await rewriteReply(req.user.id, {
+    subject: proposal.subject,
+    from: proposal.from,
+    summary: proposal.summary,
+    currentDraft,
+    notes,
+    instructions,
+    userName: userResult.rows[0]?.username || '',
+  });
+
+  // 200 with ok:false, not a 500: the user's own text is still in the editor and has not
+  // been touched, so this is a declined request rather than a broken one.
+  if (!draft) {
+    return res.json({ ok: false, error: 'The AI could not rewrite that. Your text is unchanged.' });
+  }
+
+  res.json({ ok: true, draft });
 }));
 
 router.post('/:id/dismiss', asyncHandler(async (req, res) => {

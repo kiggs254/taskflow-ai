@@ -133,6 +133,8 @@ Three invariants here, each encoding a bug that shipped:
 - **A triage failure returns `null` and leaves the message unledgered**, so the next scan retries. Treating an outage as "no reply needed" would silently swallow real client mail.
 - **A meeting time is only ever the model's explicit ISO value.** The old code decided "is an event" via unanchored `includes()` over the whole body (`'event'` matches *prevent*) and then set the due date to the email's own `Date` header — which is why every task showed "Meeting Time: \<when the mail arrived\>".
 
+**Rewriting is not sending, and the notes are the content.** `POST /api/proposals/:id/rewrite` turns the user's own rough text into the reply and returns it to the editor — it writes nothing and touches no mail path, because persisting would overwrite a draft they may prefer and there is no undo on a server-side overwrite. The editor decides what its text *means*: changed from the stored draft → their **content** (`notes`), and the model supplies wording only; unchanged → a polish. That distinction is what stops a "rewrite" putting words in their mouth, and the prompt is explicit that commitments, refusals, dates and prices survive verbatim. Thread context comes from the stored proposal, not the request body — a reply written blind is generically polite and answers nothing. The editor keeps a history stack so an AI rewrite is never a one-way door over text the user typed.
+
 `sendThreadReply` is the **only** function that sends mail, and it is reachable only from `POST /api/proposals/:id/send` — an explicit user action. Nothing in the scanner can reach it.
 
 ### Other integrations → tasks

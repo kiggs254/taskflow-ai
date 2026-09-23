@@ -143,3 +143,99 @@ export const triageThread = async (userId, { subject, from, participants, thread
     return null;
   }
 };
+
+const REWRITE_SCHEMA = {
+  name: 'email_reply',
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['reply'],
+    properties: {
+      reply: {
+        type: 'string',
+        description:
+          'The complete reply body, ready to send: greeting, body, sign-off. Plain text ' +
+          'with blank lines between paragraphs. No subject line, no "Re:", no quoted ' +
+          'history, no markdown, no placeholders like [your name] or [date].',
+      },
+    },
+  },
+};
+
+/**
+ * Rewrite a reply from the user's own rough notes.
+ *
+ * Distinct from triage's draft, which answers a thread the user has not read yet. This
+ * one exists for when they HAVE read it and disagree with the draft: they type what they
+ * actually want to say -- often three words and a decision -- and this turns it into the
+ * mail. Their notes are the content; the model supplies only the wording.
+ *
+ * The thread is passed in because a reply written blind is generically polite and
+ * answers nothing. It is the difference between "Thanks for reaching out, we'll be in
+ * touch" and an actual answer to what was asked.
+ *
+ * Returns null on failure rather than a fallback string: the caller still has the user's
+ * own text, and quietly handing it back unchanged would look like a rewrite that decided
+ * nothing needed changing.
+ */
+export const rewriteReply = async (
+  userId,
+  { subject, from, summary, currentDraft, notes, instructions, userName }
+) => {
+  const hasNotes = Boolean(notes && notes.trim());
+
+  try {
+    const { content } = await callAI({
+      taskKind: 'email_reply_rewrite',
+      // Interactive: someone is watching a spinner, so latency matters more than the
+      // last few points of quality.
+      tier: 'fast',
+      userId,
+      temperature: 0.4,
+      maxTokens: 900,
+      schema: REWRITE_SCHEMA,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write the body of a business email reply on behalf of a freelance ' +
+            'developer, in their voice: direct, warm, unfussy, no corporate padding.\n\n' +
+            'THE NOTES ARE THE CONTENT. When the user gives you rough notes, they have ' +
+            'already decided what to say — your job is wording, not opinion. Keep every ' +
+            'commitment, refusal, date, price and caveat exactly as given. Never soften a ' +
+            '"no" into a "maybe", never add a promise they did not make, and never invent ' +
+            'a date, a number or a next step they did not mention.\n\n' +
+            'If something they need is genuinely missing, ask for it in one short ' +
+            'sentence rather than inventing it.\n\n' +
+            'No markdown. No subject line. No quoted history. No square-bracket ' +
+            'placeholders — if you cannot name something, write around it. End with a ' +
+            'plain sign-off using the sender name given, or no name at all if none was. ' +
+            'Return json.',
+        },
+        {
+          role: 'user',
+          content:
+            `The email being replied to:\nSubject: ${subject || '(none)'}\n` +
+            `From: ${from || '(unknown)'}\n` +
+            `What it is about: ${summary || '(not summarised)'}\n\n` +
+            (currentDraft?.trim()
+              ? `The current draft (the user was not happy with this):\n${currentDraft.trim()}\n\n`
+              : '') +
+            (hasNotes
+              ? `What the user actually wants to say — these are their instructions for ` +
+                `content, follow them exactly:\n${notes.trim()}\n\n`
+              : `The user gave no new content. Rewrite the draft above to read better ` +
+                `without changing what it commits to.\n\n`) +
+            (instructions?.trim() ? `How they want it written: ${instructions.trim()}\n\n` : '') +
+            `Sign off as: ${userName || '(no name given — omit the name)'}`,
+        },
+      ],
+    });
+
+    const reply = JSON.parse(content)?.reply;
+    return typeof reply === 'string' && reply.trim() ? reply.trim() : null;
+  } catch (error) {
+    console.error('Reply rewrite failed:', error.message);
+    return null;
+  }
+};
