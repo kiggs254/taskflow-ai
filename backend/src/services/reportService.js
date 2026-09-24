@@ -119,6 +119,7 @@ export const getCompletedToday = async (
   const result = await query(
     `SELECT t.id, t.title, t.workspace, t.energy, t.status, t.tags, t.subtasks,
             t.completed_at AS "completedAt", t.estimated_time AS "estimatedTime",
+            t.report_title AS "reportTitle", t.report_narrative AS "reportNarrative",
             (pc.task_id IS NOT NULL) AS "fromCommits",
             (ag.task_id IS NOT NULL) AS "fromAgent"
      FROM tasks t
@@ -365,6 +366,47 @@ const NARRATIVE_CONCURRENCY = 2;
  * preview shows exactly what will be sent. A failure on one item never rejects the
  * batch -- narrateItem swallows its own errors and falls back.
  */
+/**
+ * Correct what the report says about one completed item.
+ *
+ * Writes only the override columns, never the task itself: the title is rebuilt by
+ * syncTask on every scan, so an edit written there would survive until the next one.
+ * An empty string clears the override and restores the derived wording.
+ *
+ * Scoped by user_id -- task ids are guessable (`agent-{uid}-{session}-{day}`), so the
+ * id alone must never be sufficient to write to a row.
+ */
+export const setReportOverride = async (userId, taskId, { project, narrative } = {}) => {
+  const clean = (v) => {
+    if (typeof v !== 'string') return undefined; // absent: leave this column as it is
+    const t = v.trim();
+    return t === '' ? null : t; // empty: clear the override
+  };
+
+  const title = clean(project);
+  const body = clean(narrative);
+  if (title === undefined && body === undefined) return null;
+
+  const sets = [];
+  const params = [userId, taskId];
+  if (title !== undefined) {
+    params.push(title);
+    sets.push(`report_title = $${params.length}`);
+  }
+  if (body !== undefined) {
+    params.push(body);
+    sets.push(`report_narrative = $${params.length}`);
+  }
+
+  const result = await query(
+    `UPDATE tasks SET ${sets.join(', ')}
+      WHERE user_id = $1 AND id = $2
+      RETURNING id, title, report_title AS "reportTitle", report_narrative AS "reportNarrative"`,
+    params
+  );
+  return result.rows[0] ?? null;
+};
+
 export const attachNarratives = async (report, userId, { refresh = false } = {}) => {
   const items = report.items || [];
   let next = 0;
@@ -375,8 +417,18 @@ export const attachNarratives = async (report, userId, { refresh = false } = {})
     while (next < items.length) {
       const item = items[next++];
       const { project } = splitProjectTitle(item.title);
-      item.project = project;
-      item.narrative = await narrateItem(userId, item, { refresh });
+
+      // A hand-written correction wins over anything derived, INCLUDING under refresh.
+      // End Day Reset passes refresh:true to re-write stale narratives, and if that beat
+      // an edit then fixing a wrong heading would last until the next wrap-up and no
+      // longer. An override also skips the AI call entirely -- there is nothing left to
+      // ask, and paying to generate text that is then discarded is pure waste.
+      const titleOverride = item.reportTitle?.trim();
+      const narrativeOverride = item.reportNarrative?.trim();
+
+      item.project = titleOverride || project;
+      item.narrative = narrativeOverride || (await narrateItem(userId, item, { refresh }));
+      item.edited = Boolean(titleOverride || narrativeOverride);
     }
   };
 

@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Inbox, Loader2, Plus, RefreshCw } from 'lu
 import { api } from '../services/apiService';
 import { EmailProposal, Task } from '../types';
 import { LogWorkModal } from './LogWorkModal';
+import { DoneItemCard } from './DoneItemCard';
 import { ProposalCard } from './ProposalCard';
 
 /**
@@ -223,12 +224,7 @@ export const HomeScreen: React.FC<{ token: string }> = ({ token }) => {
         ) : (
           <div className="space-y-3">
             {doneItems.map((item: any) => (
-              <div key={item.id} className="bg-surface border border-slate-700 rounded-xl p-4">
-                <p className="text-sm font-semibold text-slate-100">{item.project || item.title}</p>
-                {item.narrative && (
-                  <p className="text-sm text-slate-400 mt-1 leading-relaxed">{item.narrative}</p>
-                )}
-              </div>
+              <DoneItemCard key={item.id} item={item} token={token} onSaved={load} />
             ))}
           </div>
         )}

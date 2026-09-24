@@ -8,6 +8,7 @@ import {
   getReportSettings,
   updateReportSettings,
   claimReportDay,
+  setReportOverride,
 } from '../services/reportService.js';
 import { DEFAULT_TIMEZONE, localDateString } from '../utils/time.js';
 import { sendReportForUser } from '../jobs/dailyReport.js';
@@ -54,6 +55,29 @@ router.get('/completed-today', asyncHandler(async (req, res) => {
     reportTime: nextSend.reportTime,
   };
   res.json(report);
+}));
+
+/**
+ * PUT /api/reports/items/:taskId
+ * Body: { project?, narrative? } — an empty string clears that override.
+ *
+ * Corrects what the daily report says about one completed item. Deliberately writes the
+ * override columns rather than the task: a GitHub or agent task is rebuilt by syncTask on
+ * every scan, so an edit to its title would last until the next one. The same override is
+ * read by the panel, the Settings preview and the 16:30 send, so what is corrected here is
+ * what actually goes out.
+ */
+router.put('/items/:taskId', asyncHandler(async (req, res) => {
+  const { project, narrative } = req.body ?? {};
+  if (typeof project !== 'string' && typeof narrative !== 'string') {
+    return res.status(400).json({ error: 'project or narrative is required' });
+  }
+
+  const updated = await setReportOverride(req.user.id, req.params.taskId, { project, narrative });
+  // Also covers a task belonging to someone else: the UPDATE is scoped by user_id, so a
+  // guessable id matches no row and reads as not found rather than writing anything.
+  if (!updated) return res.status(404).json({ error: 'Task not found' });
+  res.json(updated);
 }));
 
 router.get('/settings', asyncHandler(async (req, res) => {

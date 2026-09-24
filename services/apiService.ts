@@ -343,6 +343,27 @@ export const api = {
 
   // Daily report
   reports: {
+    /**
+     * Correct the heading or paragraph the daily report uses for one completed item.
+     * The override is read by the panel, the preview AND the 16:30 send, so this changes
+     * what actually goes out — not just what is on screen. '' clears it.
+     */
+    editItem: async (
+      token: string,
+      taskId: string,
+      body: { project?: string; narrative?: string }
+    ) => {
+      const res = await fetch(`${API_BASE}/reports/items/${encodeURIComponent(taskId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || 'Could not save the edit');
+      }
+      return res.json();
+    },
     settings: async (token: string) => {
       const res = await fetch(`${API_BASE}/reports/settings`, {
         headers: { 'Authorization': `Bearer ${token}` },

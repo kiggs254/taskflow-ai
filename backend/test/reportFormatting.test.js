@@ -178,3 +178,62 @@ test('an em dash inside the outcome does not re-split the title', async () => {
   assert.equal(project, 'Enkor', 'only the FIRST separator divides project from outcome');
   assert.equal(outcome, 'Fixed the import — twice.');
 });
+
+/**
+ * Hand-written corrections to the report.
+ *
+ * Both halves of a report line are generated — the heading from the task title, the
+ * paragraph by AI — and both are regenerated: a GitHub or agent task is rebuilt by
+ * syncTask on every scan, and End Day Reset passes refresh:true to rewrite narratives.
+ * So an edit is stored in override columns nothing regenerates, and attachNarratives
+ * must prefer them over anything it would otherwise derive, INCLUDING under refresh.
+ *
+ * These pass no database and no API key, which is itself the assertion: an item carrying
+ * overrides must be resolved without reaching the AI at all. A regression that ignored
+ * the override would try to call a provider and fail here.
+ */
+
+test('an override replaces the generated heading and paragraph', async () => {
+  const { attachNarratives } = await import('../src/services/reportService.js');
+  const report = {
+    items: [
+      {
+        id: 'agent-1-x-2026-09-24',
+        title: 'Aramex order automation plugin for blh3jaemh.output — Built a plugin',
+        reportTitle: 'Aramex order automation plugin for hotpoint.co.ke',
+        reportNarrative: 'Stopped orders sticking on hold after packing slips.',
+        subtasks: [],
+      },
+    ],
+  };
+  await attachNarratives(report, 1);
+  const [item] = report.items;
+  assert.equal(item.project, 'Aramex order automation plugin for hotpoint.co.ke');
+  assert.equal(item.narrative, 'Stopped orders sticking on hold after packing slips.');
+  assert.equal(item.edited, true, 'the panel marks a corrected line so it is not silently different');
+});
+
+test('an override still wins under refresh', async () => {
+  // End Day Reset passes refresh:true to rewrite stale narratives. If that beat an edit,
+  // a correction would last only until the next wrap-up.
+  const { attachNarratives } = await import('../src/services/reportService.js');
+  const report = {
+    items: [{ id: 'x', title: 'Repo — did things', reportTitle: 'Hotpoint', reportNarrative: 'Mine.', subtasks: [] }],
+  };
+  await attachNarratives(report, 1, { refresh: true });
+  assert.equal(report.items[0].project, 'Hotpoint');
+  assert.equal(report.items[0].narrative, 'Mine.');
+});
+
+test('a blank override is not an override', async () => {
+  // Clearing writes NULL, but whitespace must not count as a correction either -- it
+  // would blank the report line rather than restore the generated one.
+  const { attachNarratives } = await import('../src/services/reportService.js');
+  const report = {
+    items: [{ id: 'x', title: 'Hotpoint — shipped the plugin', reportTitle: '   ', reportNarrative: '  ', subtasks: [] }],
+  };
+  await attachNarratives(report, 1);
+  assert.equal(report.items[0].project, 'Hotpoint', 'falls back to the derived heading');
+  assert.equal(report.items[0].narrative, 'shipped the plugin', 'falls back to the derived outcome');
+  assert.equal(report.items[0].edited, false);
+});
