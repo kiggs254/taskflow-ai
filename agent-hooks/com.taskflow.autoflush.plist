@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Post finished Claude Code sessions to TaskFlow without waiting for SessionEnd.
+
+  SessionEnd is the intended trigger, but it only fires on /clear, exit or Ctrl-D. A
+  session simply left open never ends, and in a GUI that is most of them — sessions sat
+  unposted for days.
+
+  Every 15 minutes this posts work sessions that have been QUIET for 10 minutes and have
+  CHANGED since they were last posted. An unchanged session costs nothing: no request, no
+  AI call. Re-posting is safe because agent_sessions upserts on (user, session, day), so
+  a later flush updates the same task rather than adding another.
+
+  Install:
+    cp agent-hooks/com.taskflow.autoflush.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.taskflow.autoflush.plist
+  Remove:
+    launchctl unload ~/Library/LaunchAgents/com.taskflow.autoflush.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.taskflow.autoflush</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Absolute path: a LaunchAgent gets a minimal PATH and will not find node on
+             its own. Adjust if `which node` says otherwise. -->
+        <string>/usr/local/bin/node</string>
+        <string>REPLACE_HOME/.claude/hooks/taskflow-flush.mjs</string>
+        <string>--auto</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>900</integer>
+
+    <!-- Not at load: loading happens at login, when nothing has been worked on yet. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>REPLACE_HOME/.taskflow/autoflush.log</string>
+    <key>StandardErrorPath</key>
+    <string>REPLACE_HOME/.taskflow/autoflush.log</string>
+</dict>
+</plist>

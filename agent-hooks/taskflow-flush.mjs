@@ -8,6 +8,7 @@
  *
  * Usage:
  *   taskflow-flush.mjs              # the most recent session inside a work folder
+ *   taskflow-flush.mjs --auto       # unattended: quiet sessions that have changed
  *   taskflow-flush.mjs --today      # every work session from today
  *   taskflow-flush.mjs --all        # every work session on disk
  *   taskflow-flush.mjs <sessionId>  # an explicit session (must be in a work folder)
@@ -32,6 +33,7 @@ import { spawn } from 'node:child_process';
 const HOME = os.homedir();
 const SESSIONS = path.join(HOME, '.taskflow', 'sessions');
 const POLICY_CACHE = path.join(HOME, '.taskflow', 'policy.json');
+const FLUSH_STATE = path.join(HOME, '.taskflow', 'flushed.json');
 const CONFIG = path.join(HOME, '.taskflow', 'config.json');
 const PROJECTS = path.join(HOME, '.claude', 'projects');
 const HOOK = path.join(HOME, '.claude', 'hooks', 'taskflow-session-end.mjs');
@@ -234,6 +236,34 @@ const flush = async (chosen) => {
 
 const isToday = (ms) => new Date(ms).toDateString() === new Date().toDateString();
 
+// --auto only: a session must have been quiet this long before it is posted. Summarising
+// mid-conversation would bill for a half-finished story and then bill again when it
+// continues.
+const IDLE_MS = 10 * 60 * 1000;
+
+/**
+ * What --auto has already posted: sessionId -> the log mtime at the time it was posted.
+ *
+ * Without it every run re-summarises every session it can see, which is one smart-tier
+ * AI call each, forever. With it a run costs nothing at all unless a session has actually
+ * changed since it was last posted.
+ */
+const readFlushState = () => {
+  try {
+    return JSON.parse(fs.readFileSync(FLUSH_STATE, 'utf8'));
+  } catch {
+    return {};
+  }
+};
+
+const writeFlushState = (state) => {
+  try {
+    fs.writeFileSync(FLUSH_STATE, JSON.stringify(state), { mode: 0o600 });
+  } catch (e) {
+    console.error(`Could not record flush state: ${e.message}`);
+  }
+};
+
 const main = async () => {
   const arg = process.argv[2];
   const policy = await getPolicy();
@@ -268,6 +298,56 @@ const main = async () => {
       );
     }
     if (skipped) console.log(`\n${skipped} session(s) outside the work folders — ignored.`);
+    return;
+  }
+
+  /**
+   * Unattended mode, for a timer.
+   *
+   * SessionEnd is the intended trigger, but it only fires on /clear, exit or Ctrl-D --
+   * never for a session simply left open, which in a GUI is most of them. Sessions sat
+   * unposted for days as a result.
+   *
+   * Two filters keep this cheap and correct: a session must have been QUIET for a while
+   * (so a conversation still in progress is not summarised mid-story) and its log must
+   * have CHANGED since it was last posted (so a repeating timer re-bills nothing). Both
+   * are safe to re-run: agent_sessions upserts on (user, session, day), so a later flush
+   * of the same session updates its task in place rather than adding another.
+   *
+   * Silent when there is nothing to do -- it runs every quarter of an hour and its output
+   * goes to a log nobody reads.
+   */
+  if (arg === '--auto') {
+    const state = readFlushState();
+    const now = Date.now();
+    const due = candidates.filter(
+      (c) => now - c.mtime >= IDLE_MS && state[c.sessionId] !== c.mtime
+    );
+    if (!due.length) return;
+
+    let logged = 0;
+    for (const c of [...due].reverse()) {
+      try {
+        const outcome = await flush(c);
+        // Recorded only on a real success, so a failed post is retried next tick rather
+        // than marked done and forgotten.
+        if (outcome?.logged) {
+          state[c.sessionId] = c.mtime;
+          logged++;
+        } else {
+          console.error(`${c.sessionId}: ${explain(outcome)}`);
+        }
+      } catch (e) {
+        console.error(`${c.sessionId}: ${e.message}`);
+      }
+    }
+
+    // Drop entries for logs that no longer exist, so this file cannot grow without bound.
+    const alive = new Set(all.map((c) => c.sessionId));
+    for (const id of Object.keys(state)) if (!alive.has(id)) delete state[id];
+    writeFlushState(state);
+
+    console.log(`Auto-flush: logged ${logged} of ${due.length} session(s).`);
     return;
   }
 

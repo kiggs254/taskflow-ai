@@ -110,6 +110,7 @@ To post what a session has done so far — from anywhere:
 ```bash
 ~/.claude/hooks/taskflow-flush.mjs          # the most recent session in a work folder
 ~/.claude/hooks/taskflow-flush.mjs --today  # every work session from today
+~/.claude/hooks/taskflow-flush.mjs --auto   # quiet, changed sessions only (for a timer)
 ~/.claude/hooks/taskflow-flush.mjs --all    # every work session on disk
 ~/.claude/hooks/taskflow-flush.mjs --list   # work sessions on disk; -> marks the pick
 ```
@@ -119,6 +120,27 @@ sessions posts three entries rather than merging them into one vague line. `--to
 posts oldest first, so they land in the order the work happened, and one failure
 doesn't abandon the rest. Each costs its own summary call, which is why the batch is
 opt-in rather than what a bare run does.
+
+### Making it automatic
+
+`SessionEnd` only fires on `/clear`, exit or Ctrl-D. A session left open never ends — and
+in a GUI that is most of them, so sessions sit unposted for days. The timer closes that
+gap:
+
+```bash
+sed "s#REPLACE_HOME#$HOME#g" agent-hooks/com.taskflow.autoflush.plist > ~/Library/LaunchAgents/com.taskflow.autoflush.plist
+launchctl load ~/Library/LaunchAgents/com.taskflow.autoflush.plist
+```
+
+Every 15 minutes it posts work sessions that have been **quiet for 10 minutes** and have
+**changed since they were last posted**. An unchanged session costs nothing — no request,
+no AI call — because `~/.taskflow/flushed.json` records the log mtime at each successful
+post. A failed post is deliberately not recorded, so it retries. Re-posting is safe:
+`agent_sessions` upserts on `(user, session, day)`, so a later flush updates the same
+task rather than creating another.
+
+Check on it with `tail ~/.taskflow/autoflush.log`, or run `taskflow-flush.mjs --auto` by
+hand to see what it would do.
 
 **Only sessions inside your work folders are ever considered.** Everything else is not
 listed, not posted, and not touched — naming one explicitly is refused. It is the same
