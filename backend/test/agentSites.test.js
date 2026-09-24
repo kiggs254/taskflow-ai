@@ -153,3 +153,54 @@ test('a long handle is truncated but the client name survives', async () => {
   );
   assert.ok(out.endsWith('for silverstone.co.ke'), `client name must survive truncation: ${out}`);
 });
+
+/**
+ * A denylist of file extensions is unbounded, so the TLD is allowlisted too.
+ *
+ * "blh3jaemh.output" — a scratch file — was published as a client's website in a real
+ * report heading. The next one would have been .bak, .orig or .patch. Two-letter TLDs
+ * pass generically (every ccTLD), recognised gTLDs pass by name, and anything else is
+ * not a site. That fails in the safe direction: a missing client name, never a wrong one.
+ */
+test('a scratch filename is not a client website', () => {
+  assert.deepEqual(
+    sitesInPrompts(['see /tmp/scratch/blh3jaemh.output for the task result']),
+    [],
+    'the exact string that shipped as a client name'
+  );
+});
+
+test('other invented extensions are rejected too, without being listed', () => {
+  for (const name of ['config.bak', 'patch.orig', 'dump.sqlite3', 'notes.markdown', 'thing.backup']) {
+    assert.deepEqual(sitesInPrompts([`open ${name}`]), [], name);
+  }
+});
+
+test('two-letter extensions are still rejected despite looking like ccTLDs', () => {
+  // .js and .go are two letters, so the ccTLD rule would wave them through if the
+  // extension denylist did not run first.
+  assert.deepEqual(sitesInPrompts(['edit index.js and main.go and run build.sh']), []);
+});
+
+test('real client domains still come through', () => {
+  assert.deepEqual(
+    sitesInPrompts(['perfumeuae.com, silverstone.co.ke, cargen.com and e-biz.co.ke']),
+    ['perfumeuae.com', 'silverstone.co.ke', 'cargen.com', 'e-biz.co.ke']
+  );
+});
+
+test('modern gTLDs a client might actually use are kept', () => {
+  assert.deepEqual(
+    sitesInPrompts(['hosted at shopflow.app and the docs at taskflow.dev']),
+    ['shopflow.app', 'taskflow.dev']
+  );
+});
+
+test('scrubbing is lenient where extraction is strict', () => {
+  // Extraction must not promote a scratch file to a client name...
+  assert.deepEqual(sitesInPrompts(['see blh3jaemh.output']), []);
+  // ...but the heading scrubber must catch anything host-shaped, because a false
+  // positive only removes an odd-looking token while a false negative publishes a
+  // client name the model invented.
+  assert.deepEqual(sitesInPrompts(['Checkout fix for notmysite.example'], { strict: false }), ['notmysite.example']);
+});

@@ -251,14 +251,28 @@ const SUMMARY_SCHEMA = {
  * TLD must be alphabetic and 2+ chars so version numbers and filenames don't match:
  * "wp-config.php", "v2.3.1" and "index.js" are not sites.
  */
-export const sitesInPrompts = (prompts = []) => {
+export const sitesInPrompts = (prompts = [], { strict = true } = {}) => {
   // Anything that looks like host.tld, optionally preceded by a scheme and www.
   const HOST = /\b(?:https?:\/\/)?(?:www\.)?((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})\b/gi;
-  // File extensions that would otherwise read as a TLD.
+  // File extensions that would otherwise read as a TLD. Several are two letters, so this
+  // has to be checked BEFORE the ccTLD rule below or "index.js" becomes a Japanese site.
   const NOT_A_TLD = new Set([
     'php', 'js', 'jsx', 'ts', 'tsx', 'json', 'css', 'scss', 'html', 'htm', 'xml', 'yml',
     'yaml', 'md', 'txt', 'log', 'sql', 'sh', 'py', 'rb', 'go', 'lock', 'env', 'zip',
     'png', 'jpg', 'jpeg', 'svg', 'gif', 'pdf', 'csv', 'map', 'min', 'test', 'spec',
+  ]);
+
+  // ...and an ALLOWLIST, because a denylist of extensions is unbounded. A scratch file
+  // named "blh3jaemh.output" was published as a client's website; the next one would have
+  // been .bak or .orig or .patch. Two-letter TLDs are accepted generically (that is every
+  // ccTLD, .ke and .uk included) and the common gTLDs are named. Anything else is not a
+  // site, which fails in the safe direction: a missing client name, never a wrong one.
+  const GTLD = new Set([
+    'com', 'net', 'org', 'edu', 'gov', 'mil', 'int', 'info', 'biz', 'name', 'pro',
+    'app', 'dev', 'io', 'ai', 'co', 'xyz', 'online', 'site', 'shop', 'store', 'tech',
+    'cloud', 'digital', 'agency', 'studio', 'design', 'media', 'systems', 'solutions',
+    'services', 'consulting', 'ltd', 'llc', 'inc', 'group', 'africa', 'blog', 'news',
+    'live', 'life', 'world', 'today', 'network', 'email', 'link', 'page', 'space',
   ]);
 
   const seen = new Map(); // lowercased host -> first-seen spelling
@@ -267,6 +281,14 @@ export const sitesInPrompts = (prompts = []) => {
       const host = m[1];
       const tld = host.slice(host.lastIndexOf('.') + 1).toLowerCase();
       if (NOT_A_TLD.has(tld)) continue;
+      // A ccTLD is exactly two letters; anything longer must be a gTLD we recognise.
+      //
+      // Only when deciding what IS a site. The two callers want opposite strictness:
+      // extracting from prompts must not promote a scratch file to a client name, while
+      // scrubbing a hostname the model invented out of a heading must catch anything
+      // host-shaped -- a false positive there only removes a token that looked like a
+      // domain, and a false negative leaves a fabricated client in the report.
+      if (strict && tld.length !== 2 && !GTLD.has(tld)) continue;
       // Lowercased so "Silverstone.co.ke" and "silverstone.co.ke" are one site.
       const key = host.toLowerCase();
       if (!seen.has(key)) seen.set(key, key);
@@ -302,8 +324,9 @@ export const composeProjectLabel = (rawProject, rawSite, groundedSites = [], fal
   // The separator would split the title in the wrong place.
   project = project.replace(/\s*—\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
 
-  // Any hostname the model wrote into the heading that it was never given.
-  for (const host of sitesInPrompts([project])) {
+  // Any hostname the model wrote into the heading that it was never given. Lenient on
+  // purpose: this is scrubbing, not extraction.
+  for (const host of sitesInPrompts([project], { strict: false })) {
     if (grounded.has(host.toLowerCase())) continue;
     project = project
       .replace(new RegExp(`\\s*\\bfor\\s+${host.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}\\b`, 'ig'), '')
