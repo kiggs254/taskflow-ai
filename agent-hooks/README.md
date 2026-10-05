@@ -128,9 +128,18 @@ in a GUI that is most of them, so sessions sit unposted for days. The timer clos
 gap:
 
 ```bash
-sed "s#REPLACE_HOME#$HOME#g" agent-hooks/com.taskflow.autoflush.plist > ~/Library/LaunchAgents/com.taskflow.autoflush.plist
+sed -e "s#REPLACE_HOME#$HOME#g" -e "s#REPLACE_NODE#$(which node)#" \
+  agent-hooks/com.taskflow.autoflush.plist > ~/Library/LaunchAgents/com.taskflow.autoflush.plist
 launchctl load ~/Library/LaunchAgents/com.taskflow.autoflush.plist
+launchctl start com.taskflow.autoflush                          # run it once now
+launchctl list com.taskflow.autoflush | grep LastExitStatus     # must be 0
 ```
+
+**Check that exit status.** A LaunchAgent gets a minimal `PATH` and cannot find `node` on
+its own, so the plist holds an absolute path — and a wrong one fails *silently*: the job
+loads, the timer fires, nothing runs, and the log stays empty, which is indistinguishable
+from "nothing was due". `$(which node)` is why the `sed` has two expressions. (The path
+really was `~/.local/bin/node` here, not `/usr/local/bin/node`.)
 
 Every 15 minutes it posts work sessions that have been **quiet for 10 minutes** and have
 **changed since they were last posted**. An unchanged session costs nothing — no request,

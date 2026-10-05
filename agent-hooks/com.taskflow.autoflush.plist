@@ -11,9 +11,12 @@
   AI call. Re-posting is safe because agent_sessions upserts on (user, session, day), so
   a later flush updates the same task rather than adding another.
 
-  Install:
-    cp agent-hooks/com.taskflow.autoflush.plist ~/Library/LaunchAgents/
+  Install (the sed is not optional -- see REPLACE_NODE below):
+    sed -e "s#REPLACE_HOME#$HOME#g" -e "s#REPLACE_NODE#$(which node)#" \
+      agent-hooks/com.taskflow.autoflush.plist > ~/Library/LaunchAgents/com.taskflow.autoflush.plist
     launchctl load ~/Library/LaunchAgents/com.taskflow.autoflush.plist
+    launchctl start com.taskflow.autoflush   # prove it runs
+    launchctl list com.taskflow.autoflush | grep LastExitStatus   # must be 0
   Remove:
     launchctl unload ~/Library/LaunchAgents/com.taskflow.autoflush.plist
 -->
@@ -24,9 +27,12 @@
 
     <key>ProgramArguments</key>
     <array>
-        <!-- Absolute path: a LaunchAgent gets a minimal PATH and will not find node on
-             its own. Adjust if `which node` says otherwise. -->
-        <string>/usr/local/bin/node</string>
+        <!-- Absolute path, filled in by the sed above from `which node`. A LaunchAgent
+             gets a minimal PATH and will not find node on its own, and a wrong path here
+             fails SILENTLY: the job is loaded, the timer fires, nothing ever runs and the
+             log stays empty -- indistinguishable from "nothing was due". Do not guess it.
+             It was /usr/local/bin/node here and the real one was ~/.local/bin/node. -->
+        <string>REPLACE_NODE</string>
         <string>REPLACE_HOME/.claude/hooks/taskflow-flush.mjs</string>
         <string>--auto</string>
     </array>
